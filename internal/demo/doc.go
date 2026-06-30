@@ -4,9 +4,10 @@
 // Removal recipe:
 //  1. rm -rf internal/demo/
 //  2. rm .github/workflows/demo-reset.yml
-//  3. revert the two lines tagged "// DEMO MODE" (the Guard wrap in
-//     internal/server/server.go and the SeedIfEnabled call in
-//     cmd/server/app/app.go).
+//  3. revert the lines tagged "// DEMO MODE" (the Guard wrap in
+//     internal/server/server.go, the SeedDemo command in
+//     cmd/server/app/commands.go, and the -seed-demo flag, its
+//     tooManyModes entry, and its switch case in cmd/server/main.go).
 //
 // grep -r "DEMO MODE" finds every touchpoint. The demo *deployment* (the
 // deploy-demo job, the demo GitHub environment, deployments/app/

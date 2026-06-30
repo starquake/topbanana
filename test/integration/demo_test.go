@@ -1,15 +1,17 @@
 package integration_test
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/session"
 )
 
 // TestDemo_EnterClearsHostGates is the full-stack seam test for demo mode: with
-// DEMO_MODE_ENABLED=true the server seeds a verified Host at boot, POST
+// DEMO_MODE_ENABLED=true the -seed-demo command seeds a verified Host, POST
 // /demo/enter logs the visitor into that Host, and the resulting session
 // satisfies the RequireGameHost + RequireVerifiedEmail gates on /admin/quizzes.
 // TestDemo_EnterClearsHostGates cannot use t.Parallel because it mutates the
@@ -23,6 +25,25 @@ func TestDemo_EnterClearsHostGates(t *testing.T) {
 
 	ctx, srv := startServer(t, nil)
 	baseURL := srv.BaseURL
+
+	// Seed the demo baseline explicitly (the server no longer seeds at boot).
+	// APP_ENV=development lets config.Parse mint an ephemeral session key so the
+	// seed command needs no SESSION_KEY; demo mode is on via the t.Setenv above.
+	mediaDir := t.TempDir()
+	if err := app.SeedDemo(ctx, func(key string) string {
+		switch key {
+		case "APP_ENV":
+			return "development"
+		case "DB_URI":
+			return srv.DBURI
+		case "MEDIA_DIR":
+			return mediaDir
+		default:
+			return ""
+		}
+	}, io.Discard); err != nil {
+		t.Fatalf("SeedDemo: %v", err)
+	}
 
 	client := authClient(t)
 
