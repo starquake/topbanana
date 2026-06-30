@@ -44,7 +44,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "deployments/demo/docker-compose.staging.yml"
+          source: "deployments/app/docker-compose.staging.yml"
           target: "~/topbanana-staging"
           strip_components: 2
 
@@ -226,7 +226,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "deployments/demo/docker-compose.production.yml"
+          source: "deployments/app/docker-compose.production.yml"
           target: "~/topbanana-production"
           strip_components: 2
 
