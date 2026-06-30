@@ -8,6 +8,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/livesession"
@@ -65,6 +66,7 @@ func New(
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores, gameService, realtime, cfg, mail)
 	var handler http.Handler = mux
+	handler = demo.Guard(handler, demo.Deps{Cfg: cfg, Players: stores.Players, Logger: logger}) // DEMO MODE
 	// securityHeaders is the innermost wrapper so the security headers land on
 	// w.Header() before any handler writes the response, including the 500
 	// recoverPanic emits on a handler panic (the headers survive the unwind).

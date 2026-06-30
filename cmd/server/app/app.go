@@ -18,6 +18,7 @@ import (
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
@@ -171,6 +172,14 @@ func Run(
 	version.SetEnv(cfg.AppEnvironment)
 
 	stores := store.New(conn, logger)
+
+	if err = demo.SeedIfEnabled(signalCtx, cfg, stores, // DEMO MODE
+		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
+		logger,
+	); err != nil {
+		return fmt.Errorf("demo seed: %w", err)
+	}
+
 	startSweeps(signalCtx, cfg, logger, stores)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
 	// Own the runner's context so shutdown waits for its goroutine to exit
