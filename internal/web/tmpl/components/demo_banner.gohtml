@@ -4,7 +4,7 @@
 {{define "demo_banner"}}
 {{if demoMode}}
 <div class="w-full bg-accent text-bg text-xs py-1.5 px-4 flex items-center justify-center gap-4 flex-wrap">
-    <span>Top Banana demo - everything resets daily.</span>
+    <span>This is the Top Banana! demo - everything resets daily.</span>
     <form method="POST" action="/demo/enter" class="m-0 p-0 inline-flex">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <button type="submit" class="font-semibold underline underline-offset-2 hover:no-underline cursor-pointer">Enter as host</button>
