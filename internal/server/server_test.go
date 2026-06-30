@@ -35,7 +35,7 @@ func TestNewServer(t *testing.T) {
 	}
 }
 
-func newDemoTestServer(t *testing.T) http.Handler {
+func newDemoTestServer(t *testing.T, cfg *config.Config) http.Handler {
 	t.Helper()
 
 	return New(
@@ -46,15 +46,20 @@ func newDemoTestServer(t *testing.T) http.Handler {
 			SessionService: &livesession.Service{},
 			SessionHub:     livesession.NewHub(),
 		},
-		&config.Config{},
+		cfg,
 		Mail{Tester: mailer.NewTester(mailer.NewNoop())},
 	)
 }
 
 func TestServer_DemoModeRoutes(t *testing.T) {
+	t.Parallel()
+
+	// The server reads demo mode from the passed config (post-Parse state), so
+	// the subtests build the config directly: demo on derives ProfileEnabled
+	// off; demo off leaves it on.
 	t.Run("enabled: /profile route not registered", func(t *testing.T) {
-		t.Setenv("DEMO_MODE_ENABLED", "true")
-		h := newDemoTestServer(t)
+		t.Parallel()
+		h := newDemoTestServer(t, &config.Config{DemoMode: true})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/profile", nil)
 		rec := httptest.NewRecorder()
@@ -65,8 +70,8 @@ func TestServer_DemoModeRoutes(t *testing.T) {
 	})
 
 	t.Run("disabled: /demo is a normal 404", func(t *testing.T) {
-		t.Setenv("DEMO_MODE_ENABLED", "false")
-		h := newDemoTestServer(t)
+		t.Parallel()
+		h := newDemoTestServer(t, &config.Config{ProfileEnabled: true})
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/demo", nil)
 		rec := httptest.NewRecorder()

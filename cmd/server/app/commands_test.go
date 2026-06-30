@@ -322,33 +322,45 @@ func TestPromoteAdmin_BlankEmail_ReturnsError(t *testing.T) {
 }
 
 // TestSeedDemo_DisabledMode_ReturnsError pins the guard: SeedDemo refuses to
-// seed when DEMO_MODE_ENABLED is off, so it can never populate a non-demo DB.
-// The guard runs before any DB or archive access, so neither is needed.
-// Cannot use t.Parallel because it mutates the process environment via
-// t.Setenv; demo.Enabled() reads os.Getenv directly.
-//
-//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+// seed when demo mode is off, so it can never populate a non-demo DB. The guard
+// runs before any DB or archive access, so neither is needed. APP_ENV=development
+// lets config.Parse succeed without a SESSION_KEY; the flag is read through the
+// getenv argument, so no process-environment mutation is needed.
 func TestSeedDemo_DisabledMode_ReturnsError(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "")
+	t.Parallel()
 
+	getenv := func(key string) string {
+		if key == "APP_ENV" {
+			return "development"
+		}
+
+		return ""
+	}
 	var stderr bytes.Buffer
-	err := SeedDemo(t.Context(), func(string) string { return "" }, &stderr)
+	err := SeedDemo(t.Context(), getenv, &stderr)
 	if got, want := err, ErrSeedDemoDisabled; !errors.Is(got, want) {
 		t.Errorf("SeedDemo err = %v, want %v", got, want)
 	}
 }
 
 // TestSeedDemo_ArchiveNotSet_ReturnsError pins that SeedDemo rejects a missing
-// DEMO_SEED_ARCHIVE before opening the database. Cannot use t.Parallel because
-// it mutates the process environment via t.Setenv; demo.Enabled() reads
-// os.Getenv directly.
-//
-//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+// DEMO_SEED_ARCHIVE before opening the database. Both flags are read through the
+// getenv argument, so no process-environment mutation is needed.
 func TestSeedDemo_ArchiveNotSet_ReturnsError(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "true")
+	t.Parallel()
 
+	getenv := func(key string) string {
+		switch key {
+		case "APP_ENV":
+			return "development"
+		case "DEMO_MODE_ENABLED":
+			return "true"
+		}
+
+		return ""
+	}
 	var stderr bytes.Buffer
-	err := SeedDemo(t.Context(), func(string) string { return "" }, &stderr)
+	err := SeedDemo(t.Context(), getenv, &stderr)
 	if got, want := err, ErrSeedDemoArchiveNotSet; !errors.Is(got, want) {
 		t.Errorf("SeedDemo err = %v, want %v", got, want)
 	}

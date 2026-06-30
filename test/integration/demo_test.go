@@ -14,26 +14,24 @@ import (
 // DEMO_MODE_ENABLED=true the -seed-demo command seeds a verified Host, POST
 // /demo/enter logs the visitor into that Host, and the resulting session
 // satisfies the RequireGameHost + RequireVerifiedEmail gates on /admin/quizzes.
-// TestDemo_EnterClearsHostGates cannot use t.Parallel because it mutates the
-// process environment via t.Setenv; demo.Enabled() reads os.Getenv directly.
-//
-//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
 func TestDemo_EnterClearsHostGates(t *testing.T) {
-	// demo.Enabled() reads os.Getenv directly, not the server getenv callback,
-	// so we set the real OS env variable via t.Setenv (restored on test cleanup).
-	t.Setenv("DEMO_MODE_ENABLED", "true")
+	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	// Demo mode is read from config, so the server picks it up from extraEnv
+	// (startServer's getenv) rather than the process environment.
+	ctx, srv := startServer(t, map[string]string{"DEMO_MODE_ENABLED": "true"})
 	baseURL := srv.BaseURL
 
 	// Seed the demo baseline explicitly (the server no longer seeds at boot).
 	// APP_ENV=development lets config.Parse mint an ephemeral session key so the
-	// seed command needs no SESSION_KEY; demo mode is on via the t.Setenv above.
+	// seed command needs no SESSION_KEY; DEMO_MODE_ENABLED turns demo mode on.
 	mediaDir := t.TempDir()
 	if err := app.SeedDemo(ctx, func(key string) string {
 		switch key {
 		case "APP_ENV":
 			return "development"
+		case "DEMO_MODE_ENABLED":
+			return "true"
 		case "DB_URI":
 			return srv.DBURI
 		case "MEDIA_DIR":
@@ -95,14 +93,11 @@ func TestDemo_RoutesAbsentWhenDisabled(t *testing.T) {
 
 // TestDemo_HomeAffordancePresentWhenEnabled asserts that when
 // DEMO_MODE_ENABLED=true the demo block (containing the /demo/enter form
-// action and the "resets daily" notice) is rendered on GET /. Cannot use
-// t.Parallel because it mutates the process environment via t.Setenv.
-//
-//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+// action and the "resets daily" notice) is rendered on GET /.
 func TestDemo_HomeAffordancePresentWhenEnabled(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "true")
+	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	ctx, srv := startServer(t, map[string]string{"DEMO_MODE_ENABLED": "true"})
 
 	body := getBody(ctx, t, srv.BaseURL+"/")
 	if got, want := strings.Contains(body, `action="/demo/enter"`), true; got != want {
@@ -127,14 +122,12 @@ func TestDemo_HomeAffordanceAbsentWhenDisabled(t *testing.T) {
 }
 
 // TestDemo_ProfileLockedInDemoMode asserts that GET /profile returns 404 when
-// demo mode is on because addProfileRoutes is not called and the route is never
-// registered. Cannot use t.Parallel because it mutates the process environment
-// via t.Setenv.
-//
-//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+// demo mode is on because cfg.ProfileEnabled is forced false, so
+// addProfileRoutes is not called and the route is never registered.
 func TestDemo_ProfileLockedInDemoMode(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "true")
-	ctx, srv := startServer(t, nil)
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"DEMO_MODE_ENABLED": "true"})
 	snap := doGet(ctx, t, authClient(t), srv.BaseURL+"/profile")
 	if got, want := snap.StatusCode, http.StatusNotFound; got != want {
 		t.Errorf("GET /profile (demo mode) status = %d, want %d", got, want)

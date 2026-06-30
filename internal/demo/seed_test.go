@@ -37,13 +37,14 @@ func demoArchive(t *testing.T) []byte {
 }
 
 func TestSeedIfEnabled(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "true")
+	t.Parallel()
 
 	logger := slog.New(slog.DiscardHandler)
 	stores := store.New(dbtest.Open(t), logger)
 	mediaSvc := media.NewService(stores.Media, t.TempDir(),
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger)
 	cfg := demoTestConfig()
+	cfg.DemoMode = true
 	archive := demoArchive(t)
 
 	if err := demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger, archive); err != nil {
@@ -111,7 +112,7 @@ func TestSeedIfEnabled(t *testing.T) {
 }
 
 func TestSeedIfEnabled_NoopWhenDisabled(t *testing.T) {
-	t.Setenv("DEMO_MODE_ENABLED", "false")
+	t.Parallel()
 
 	logger := slog.New(slog.DiscardHandler)
 	stores := store.New(dbtest.Open(t), logger)

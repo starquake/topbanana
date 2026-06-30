@@ -64,7 +64,7 @@ func addRoutes(
 	gameDeps := adminGameDeps{gameService: gameService, runningGames: realtime.SessionService}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
-	if demo.Enabled() { // DEMO MODE
+	if cfg.DemoMode { // DEMO MODE
 		mux.Handle("POST /demo/enter", demo.HandleEnter(sessions, stores.Players, logger))
 	}
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
@@ -77,7 +77,7 @@ func addRoutes(
 		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
 		cfg,
 	)
-	if !demo.Enabled() { // DEMO MODE
+	if cfg.ProfileEnabled { // DEMO MODE
 		addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	}
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
@@ -136,10 +136,14 @@ func addClientAndPublicRoutes(
 	// CSRF middleware.
 	viewerFunc := homeViewerFunc(stores.Players, sessions)
 	csrfTokenFunc := home.CSRFTokenFunc(csrfMgr.Token)
-	mux.Handle("GET /{$}", home.Handle(logger, stores.Home, viewerFunc, csrfTokenFunc))
+	// DEMO MODE: cfg.DemoMode drives the home pages' demo affordance.
+	mux.Handle("GET /{$}", home.Handle(logger, stores.Home, viewerFunc, csrfTokenFunc, cfg.DemoMode))
 	// Public quizzes list (#284). Lists every visible quiz so players
 	// can find ones outside the home page's top-six popular slice.
-	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))
+	mux.Handle(
+		"GET /quizzes",
+		home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc, cfg.DemoMode),
+	)
 }
 
 // addEmailFlowRoutes registers the verify-email and forgot-password

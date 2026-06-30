@@ -117,8 +117,9 @@ var errPromoteEmailRequired = errors.New("email is required")
 // matches the supplied email.
 var errPromoteEmailNotFound = errors.New("email not found")
 
-// errSeedDemoDisabled is returned by SeedDemo when DEMO_MODE_ENABLED is not
-// set; defined at package scope so callers can match it via [errors.Is].
+// errSeedDemoDisabled is returned by SeedDemo when demo mode (Config.DemoMode,
+// from DEMO_MODE_ENABLED) is off; defined at package scope so callers can match
+// it via [errors.Is].
 var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
 
 // errSeedDemoArchiveNotSet is returned by SeedDemo when DEMO_SEED_ARCHIVE is
@@ -183,15 +184,19 @@ func PromoteAdmin(
 }
 
 // SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz)
-// against the configured database. It exits early with an error if demo mode
-// is not enabled so it cannot accidentally seed a non-demo DB.
+// against the configured database. It exits early with an error when demo mode
+// is off (Config.DemoMode) so it cannot accidentally seed a non-demo DB.
 // The quiz archive is read from the path given by DEMO_SEED_ARCHIVE; it is
 // not embedded in the binary so the ~3 MB file stays out of the production
 // image and is supplied by the demo deployment's bind mount instead.
 func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error { // DEMO MODE
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	if !demo.Enabled() {
+	cfg, err := config.Parse(getenv)
+	if err != nil {
+		return fmt.Errorf("seed-demo: parse config: %w", err)
+	}
+	if !cfg.DemoMode {
 		return fmt.Errorf("seed-demo: %w", errSeedDemoDisabled)
 	}
 
@@ -203,11 +208,6 @@ func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	raw, err := os.ReadFile(archivePath) //nolint:gosec // operator-provided path from a trusted env var
 	if err != nil {
 		return fmt.Errorf("seed-demo: read archive: %w", err)
-	}
-
-	cfg, err := config.Parse(getenv)
-	if err != nil {
-		return fmt.Errorf("seed-demo: parse config: %w", err)
 	}
 
 	conn, err := setupDB(ctx, cfg.DatabaseConfig(), logger)

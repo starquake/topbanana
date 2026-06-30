@@ -40,16 +40,16 @@ var demoPlayerNames = []string{
 
 // SeedIfEnabled ensures the demo baseline (the shared demo Host and the demo
 // quiz) exists when demo mode is on. It is idempotent - a present host or quiz
-// is left as-is - so it is safe to call on every boot, which is how a
-// freshly-reset demo DB gets its content back. A no-op when demo mode is off.
-// archive is the raw bytes of the demo quiz zip; it is read from the path
-// given by DEMO_SEED_ARCHIVE in the caller and not embedded in the binary.
+// is left as-is - so re-running it against a freshly-reset demo DB restores the
+// content. A no-op when cfg.DemoMode is off. archive is the raw bytes of the
+// demo quiz zip; it is read from the path given by DEMO_SEED_ARCHIVE in the
+// caller and not embedded in the binary.
 func SeedIfEnabled(
 	ctx context.Context, cfg *config.Config,
 	stores *store.Stores, mediaSvc *media.Service, logger *slog.Logger,
 	archive []byte,
 ) error {
-	if !Enabled() {
+	if !cfg.DemoMode {
 		return nil
 	}
 
