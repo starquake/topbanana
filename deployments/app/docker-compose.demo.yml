@@ -27,9 +27,11 @@ services:
       # The /admin/email diagnostics page renders "disabled (no-op)".
       # Volume layout: DB and media both live on the named volume
       # topbanana_demo_data (same pattern as production). The daily reset
-      # workflow (demo-reset.yml) wipes this volume with:
-      #   docker compose -f docker-compose.demo.yml down -v
-      #   docker compose -f docker-compose.demo.yml up -d
+      # workflow (demo-reset.yml) wipes this volume with (the deploy step
+      # renames this file to docker-compose.yml on the host, so the reset
+      # uses the default compose filename, no -f):
+      #   docker compose down -v
+      #   docker compose up -d
     volumes:
       - topbanana_demo_data:/home/nonroot/data
     networks:

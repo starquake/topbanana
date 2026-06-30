@@ -21,9 +21,10 @@ jobs:
           script: |
             set -euo pipefail
             cd ~/topbanana-demo
-            # Volume layout (confirmed in docker-compose.demo.yml): DB and media
-            # live on the named volume topbanana_demo_data. Wiping with -v removes
-            # the volume; the next up recreates it and the app re-seeds via
-            # SeedIfEnabled on first boot.
-            docker compose -f docker-compose.demo.yml down -v
-            docker compose -f docker-compose.demo.yml up -d
+            # DB and media live on the named volume topbanana_demo_data. Wiping
+            # with -v removes the volume; the next up recreates it and the app
+            # re-seeds via SeedIfEnabled on first boot. The deploy step renames
+            # the compose file to docker-compose.yml on the host, so use the
+            # default filename (no -f).
+            docker compose down -v
+            docker compose up -d
