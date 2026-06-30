@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,16 +38,16 @@ var demoPlayerNames = []string{
 	"Aria Amelia", "Maestro Milo", "Cadenza Kate", "Nocturne Ned",
 }
 
-//go:embed baseline/demo-quiz.zip
-var baselineArchive []byte
-
 // SeedIfEnabled ensures the demo baseline (the shared demo Host and the demo
 // quiz) exists when demo mode is on. It is idempotent - a present host or quiz
 // is left as-is - so it is safe to call on every boot, which is how a
 // freshly-reset demo DB gets its content back. A no-op when demo mode is off.
+// archive is the raw bytes of the demo quiz zip; it is read from the path
+// given by DEMO_SEED_ARCHIVE in the caller and not embedded in the binary.
 func SeedIfEnabled(
 	ctx context.Context, cfg *config.Config,
 	stores *store.Stores, mediaSvc *media.Service, logger *slog.Logger,
+	archive []byte,
 ) error {
 	if !Enabled() {
 		return nil
@@ -58,7 +57,7 @@ func SeedIfEnabled(
 	if err != nil {
 		return fmt.Errorf("ensure demo host: %w", err)
 	}
-	qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger)
+	qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger, archive)
 	if err != nil {
 		return fmt.Errorf("ensure demo quiz: %w", err)
 	}
@@ -100,15 +99,17 @@ func ensureDemoHost(ctx context.Context, players auth.PlayerStore, adminPlayers 
 	return host.ID, nil
 }
 
-// ensureDemoQuiz restores the embedded baseline quiz attributed to the demo Host
-// through the same HTTP-free import path the admin upload uses. A slug collision
-// (the quiz already exists) is the idempotent no-op and returns (nil, nil).
-// A newly created quiz is returned with its questions populated (IDs set).
+// ensureDemoQuiz restores the baseline quiz (from archive) attributed to the
+// demo Host through the same HTTP-free import path the admin upload uses. A
+// slug collision (the quiz already exists) is the idempotent no-op and returns
+// (nil, nil). A newly created quiz is returned with its questions populated
+// (IDs set).
 func ensureDemoQuiz(
 	ctx context.Context, cfg *config.Config,
 	quizzes quiz.Store, mediaSvc *media.Service, hostID int64, logger *slog.Logger,
+	archive []byte,
 ) (*quiz.Quiz, error) {
-	zr, err := zip.NewReader(bytes.NewReader(baselineArchive), int64(len(baselineArchive)))
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("open baseline archive: %w", err)
 	}

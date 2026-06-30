@@ -2,6 +2,7 @@ package demo_test
 
 import (
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/auth"
@@ -22,6 +23,19 @@ func demoTestConfig() *config.Config {
 	}
 }
 
+// demoArchive reads the real demo quiz archive from dev/fixtures/ and returns
+// the bytes. The path resolves from internal/demo/ to the repo root.
+func demoArchive(t *testing.T) []byte {
+	t.Helper()
+
+	raw, err := os.ReadFile("../../dev/fixtures/demo-quiz.zip")
+	if err != nil {
+		t.Fatalf("read demo archive: %v", err)
+	}
+
+	return raw
+}
+
 func TestSeedIfEnabled(t *testing.T) {
 	t.Setenv("DEMO_MODE_ENABLED", "true")
 
@@ -30,8 +44,9 @@ func TestSeedIfEnabled(t *testing.T) {
 	mediaSvc := media.NewService(stores.Media, t.TempDir(),
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger)
 	cfg := demoTestConfig()
+	archive := demoArchive(t)
 
-	if err := demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger); err != nil {
+	if err := demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger, archive); err != nil {
 		t.Fatalf("SeedIfEnabled() err = %v, want nil", err)
 	}
 
@@ -72,7 +87,7 @@ func TestSeedIfEnabled(t *testing.T) {
 
 	// Idempotent: a second call neither errors, duplicates the quiz, nor
 	// increases the play count (the quiz already exists so plays are skipped).
-	err = demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger)
+	err = demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger, archive)
 	if err != nil {
 		t.Fatalf("second SeedIfEnabled() err = %v, want nil", err)
 	}
@@ -103,7 +118,7 @@ func TestSeedIfEnabled_NoopWhenDisabled(t *testing.T) {
 	mediaSvc := media.NewService(stores.Media, t.TempDir(),
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger)
 
-	if err := demo.SeedIfEnabled(t.Context(), demoTestConfig(), stores, mediaSvc, logger); err != nil {
+	if err := demo.SeedIfEnabled(t.Context(), demoTestConfig(), stores, mediaSvc, logger, nil); err != nil {
 		t.Fatalf("SeedIfEnabled() err = %v, want nil", err)
 	}
 	if _, err := stores.Players.GetPlayerByDisplayName(t.Context(), "Demo Host"); err == nil {

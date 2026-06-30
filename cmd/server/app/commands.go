@@ -121,6 +121,10 @@ var errPromoteEmailNotFound = errors.New("email not found")
 // set; defined at package scope so callers can match it via [errors.Is].
 var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
 
+// errSeedDemoArchiveNotSet is returned by SeedDemo when DEMO_SEED_ARCHIVE is
+// empty; defined at package scope so callers can match it via [errors.Is].
+var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE is not set")
+
 // PromoteAdmin looks up a player by email and sets them to the top tier
 // (role = 'admin') (#538). This is a break-glass recovery tool: the first
 // Admin normally comes from the first credentialled registration, so this
@@ -181,11 +185,24 @@ func PromoteAdmin(
 // SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz)
 // against the configured database. It exits early with an error if demo mode
 // is not enabled so it cannot accidentally seed a non-demo DB.
+// The quiz archive is read from the path given by DEMO_SEED_ARCHIVE; it is
+// not embedded in the binary so the ~3 MB file stays out of the production
+// image and is supplied by the demo deployment's bind mount instead.
 func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error { // DEMO MODE
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	if !demo.Enabled() {
 		return fmt.Errorf("seed-demo: %w", errSeedDemoDisabled)
+	}
+
+	archivePath := getenv("DEMO_SEED_ARCHIVE")
+	if archivePath == "" {
+		return fmt.Errorf("seed-demo: %w", errSeedDemoArchiveNotSet)
+	}
+
+	raw, err := os.ReadFile(archivePath) //nolint:gosec // operator-provided path from a trusted env var
+	if err != nil {
+		return fmt.Errorf("seed-demo: read archive: %w", err)
 	}
 
 	cfg, err := config.Parse(getenv)
@@ -206,7 +223,7 @@ func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	stores := store.New(conn, logger)
 	mediaSvc := media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger)
 
-	if err := demo.SeedIfEnabled(ctx, cfg, stores, mediaSvc, logger); err != nil {
+	if err := demo.SeedIfEnabled(ctx, cfg, stores, mediaSvc, logger, raw); err != nil {
 		return fmt.Errorf("seed-demo: %w", err)
 	}
 

@@ -20,6 +20,8 @@ services:
       - REGISTRATION_ENABLED=false
       - ADMIN_EMAILS=${ADMIN_EMAILS:-}
       - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # Archive for -seed-demo; the file is copied here by the deploy workflow.
+      - DEMO_SEED_ARCHIVE=/seed/demo-quiz.zip
       # No GOOGLE_* vars: Google sign-in is not wired on the demo instance.
       # The login page renders without the Google button; the demo uses
       # password auth on the pre-seeded accounts.
@@ -34,6 +36,8 @@ services:
       #   docker compose up -d
     volumes:
       - topbanana_demo_data:/home/nonroot/data
+      # Read-only seed archive; copied to the host dir by the deploy workflow.
+      - ./demo-quiz.zip:/seed/demo-quiz.zip:ro
     networks:
       - web
     restart: unless-stopped

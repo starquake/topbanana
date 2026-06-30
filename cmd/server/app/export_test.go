@@ -24,6 +24,8 @@ var (
 	ErrPromoteEmailNotFound = errPromoteEmailNotFound
 	// ErrSeedDemoDisabled re-exports errSeedDemoDisabled for tests.
 	ErrSeedDemoDisabled = errSeedDemoDisabled
+	// ErrSeedDemoArchiveNotSet re-exports errSeedDemoArchiveNotSet for tests.
+	ErrSeedDemoArchiveNotSet = errSeedDemoArchiveNotSet
 	// ErrEmptyMediaDir re-exports errEmptyMediaDir for tests.
 	ErrEmptyMediaDir = errEmptyMediaDir
 )

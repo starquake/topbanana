@@ -26,6 +26,8 @@ jobs:
             # populates the demo baseline before the server starts. The deploy
             # step renames the compose file to docker-compose.yml on the host,
             # so use the default filename (no -f).
+            # The demo-quiz.zip archive is supplied via the bind mount written
+            # by the last deploy-demo run (DEMO_SEED_ARCHIVE in the compose env).
             docker compose down -v
             docker compose run --rm topbanana-demo -seed-demo
             docker compose up -d

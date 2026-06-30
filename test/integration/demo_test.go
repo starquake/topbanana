@@ -38,6 +38,8 @@ func TestDemo_EnterClearsHostGates(t *testing.T) {
 			return srv.DBURI
 		case "MEDIA_DIR":
 			return mediaDir
+		case "DEMO_SEED_ARCHIVE":
+			return "../../dev/fixtures/demo-quiz.zip"
 		default:
 			return ""
 		}
