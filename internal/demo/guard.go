@@ -57,19 +57,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// isBlocked reports whether path matches a blocked prefix exactly or as a
-// segment boundary (so /profile and /profile/password match, /profiles does not).
-// Blocked prefix: account self-service (/profile/*).
-// Outbound email is not blocked here - the demo deployment runs with SMTP
-// unconfigured, so the app already uses a no-op mailer.
+// isBlocked reports whether path is the account self-service surface (/profile),
+// matched exactly or at a segment boundary (so /profile and /profile/password
+// match, /profiles does not). It is the only path demo mode blocks: outbound
+// email is already off (the demo deployment runs with SMTP unconfigured, so the
+// app uses a no-op mailer) and registration / Google sign-in are off via config.
 func isBlocked(path string) bool {
-	for _, p := range []string{"/profile"} {
-		if path == p || strings.HasPrefix(path, p+"/") {
-			return true
-		}
-	}
-
-	return false
+	return path == "/profile" || strings.HasPrefix(path, "/profile/")
 }
 
 // enter logs the visitor into the shared demo Host by establishing a session
