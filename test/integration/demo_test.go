@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/session"
@@ -66,5 +67,38 @@ func TestDemo_RoutesAbsentWhenDisabled(t *testing.T) {
 	snap := doGet(ctx, t, authClient(t), baseURL+"/demo")
 	if got, want := snap.StatusCode, http.StatusNotFound; got != want {
 		t.Errorf("GET /demo (disabled) status = %d, want %d", got, want)
+	}
+}
+
+// TestDemo_BannerPresentOnHomePageWhenEnabled asserts that when
+// DEMO_MODE_ENABLED=true the demo strip (containing the /demo/enter form
+// action and the "resets daily" notice) is rendered on GET /. Cannot use
+// t.Parallel because it mutates the process environment via t.Setenv.
+//
+//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+func TestDemo_BannerPresentOnHomePageWhenEnabled(t *testing.T) {
+	t.Setenv("DEMO_MODE_ENABLED", "true")
+
+	ctx, srv := startServer(t, nil)
+
+	body := getBody(ctx, t, srv.BaseURL+"/")
+	if got, want := strings.Contains(body, `action="/demo/enter"`), true; got != want {
+		t.Errorf("demo banner /demo/enter present in GET / = %v, want %v", got, want)
+	}
+	if got, want := strings.Contains(body, "resets daily"), true; got != want {
+		t.Errorf("demo banner 'resets daily' present in GET / = %v, want %v", got, want)
+	}
+}
+
+// TestDemo_BannerAbsentOnHomePageWhenDisabled asserts that when
+// DEMO_MODE_ENABLED is unset the demo strip does NOT appear on GET /.
+func TestDemo_BannerAbsentOnHomePageWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	body := getBody(ctx, t, srv.BaseURL+"/")
+	if got, want := strings.Contains(body, `action="/demo/enter"`), false; got != want {
+		t.Errorf("demo banner /demo/enter present in GET / = %v, want %v", got, want)
 	}
 }

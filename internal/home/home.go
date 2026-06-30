@@ -12,6 +12,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
@@ -304,6 +306,12 @@ func parseTemplate(page string) *template.Template {
 		// reltime.Humanize re-reads the clock on each call, so binding it once
 		// at parse time is safe (#927).
 		"humanizeTime": reltime.Humanize,
+		// DEMO MODE: read env directly to avoid importing internal/demo (cycle).
+		"demoMode": func() bool {
+			on, _ := strconv.ParseBool(os.Getenv("DEMO_MODE_ENABLED"))
+
+			return on
+		},
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

@@ -1,0 +1,14 @@
+{{/* DEMO MODE: full-width top strip shown only when DEMO_MODE_ENABLED=true.
+     The "Enter as host" form POSTs to /demo/enter, which logs the visitor
+     into the shared demo Host account. Re-entering is idempotent. */}}
+{{define "demo_banner"}}
+{{if demoMode}}
+<div class="w-full bg-accent text-bg text-xs py-1.5 px-4 flex items-center justify-center gap-4 flex-wrap">
+    <span>Top Banana demo - everything resets daily.</span>
+    <form method="POST" action="/demo/enter" class="m-0 p-0 inline-flex">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        <button type="submit" class="font-semibold underline underline-offset-2 hover:no-underline cursor-pointer">Enter as host</button>
+    </form>
+</div>
+{{end}}
+{{end}}
