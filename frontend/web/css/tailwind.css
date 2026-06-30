@@ -28,6 +28,7 @@
 @source "../../../internal/web/tmpl/auth";
 @source "../../../internal/web/tmpl/home";
 @source "../../../internal/web/tmpl/host";
+@source "../../../internal/demo/templates";
 /* Only the built app bundles (dist/), not vendor/ or htmx.min.js: scanning
  * minified third-party JS leaks phantom utilities that shift app.css on every
  * vendored-lib bump (a sortablejs/animejs bump otherwise fails tailwind-check). */
