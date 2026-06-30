@@ -54,7 +54,24 @@ func TestSeedIfEnabled(t *testing.T) {
 		t.Errorf("quiz count = %d, want %d", got, want)
 	}
 
-	// Idempotent: a second call neither errors nor duplicates.
+	// The demo quiz must appear in the Popular list with at least one play.
+	popular, err := stores.Home.ListPopularQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListPopularQuizzes() err = %v, want nil", err)
+	}
+	if got, want := len(popular), 1; got != want {
+		t.Fatalf("popular quiz count = %d, want %d", got, want)
+	}
+	if got, want := popular[0].Title, quizzes[0].Title; got != want {
+		t.Errorf("popular[0].Title = %q, want %q", got, want)
+	}
+	if got := popular[0].PlayCount; got <= 0 {
+		t.Errorf("popular[0].PlayCount = %d, want > 0", got)
+	}
+	firstPlayCount := popular[0].PlayCount
+
+	// Idempotent: a second call neither errors, duplicates the quiz, nor
+	// increases the play count (the quiz already exists so plays are skipped).
 	err = demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger)
 	if err != nil {
 		t.Fatalf("second SeedIfEnabled() err = %v, want nil", err)
@@ -65,6 +82,16 @@ func TestSeedIfEnabled(t *testing.T) {
 	}
 	if got, want := len(quizzes), 1; got != want {
 		t.Errorf("quiz count after re-seed = %d, want %d (idempotent)", got, want)
+	}
+	popular, err = stores.Home.ListPopularQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListPopularQuizzes() after re-seed err = %v, want nil", err)
+	}
+	if got, want := len(popular), 1; got != want {
+		t.Fatalf("popular quiz count after re-seed = %d, want %d", got, want)
+	}
+	if got, want := popular[0].PlayCount, firstPlayCount; got != want {
+		t.Errorf("popular[0].PlayCount after re-seed = %d, want %d (idempotent)", got, want)
 	}
 }
 

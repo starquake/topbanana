@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
@@ -20,6 +22,22 @@ import (
 // demoHostName is the display name of the shared demo Host that owns the demo
 // quiz and that /demo/enter logs visitors into. It is the stable lookup key.
 const demoHostName = "Demo Host"
+
+// demoAnswerWindowSeconds is the per-question window stamped onto synthesised
+// game_questions rows. The seeder does not run a real game clock, so the value
+// only needs to be long enough that a later reader treats the question as
+// normally finished.
+const demoAnswerWindowSeconds = 10
+
+// demoPlayerNames is a small pool of imaginative display names for the
+// anonymous players seeded alongside the demo quiz. Composer / music themed to
+// match the "Composers of Classical Music" demo quiz.
+//
+//nolint:gochecknoglobals // dictionary table; values never mutate.
+var demoPlayerNames = []string{
+	"Allegro Alicia", "Fortissimo Frank", "Tempo Tilda", "Crescendo Carlo",
+	"Aria Amelia", "Maestro Milo", "Cadenza Kate", "Nocturne Ned",
+}
 
 //go:embed baseline/demo-quiz.zip
 var baselineArchive []byte
@@ -40,8 +58,14 @@ func SeedIfEnabled(
 	if err != nil {
 		return fmt.Errorf("ensure demo host: %w", err)
 	}
-	if err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger); err != nil {
+	qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger)
+	if err != nil {
 		return fmt.Errorf("ensure demo quiz: %w", err)
+	}
+	if qz != nil {
+		if err := seedDemoPlays(ctx, stores, qz, logger); err != nil {
+			return fmt.Errorf("seed demo plays: %w", err)
+		}
 	}
 
 	return nil
@@ -78,24 +102,86 @@ func ensureDemoHost(ctx context.Context, players auth.PlayerStore, adminPlayers 
 
 // ensureDemoQuiz restores the embedded baseline quiz attributed to the demo Host
 // through the same HTTP-free import path the admin upload uses. A slug collision
-// (the quiz already exists) is the idempotent no-op.
+// (the quiz already exists) is the idempotent no-op and returns (nil, nil).
+// A newly created quiz is returned with its questions populated (IDs set).
 func ensureDemoQuiz(
 	ctx context.Context, cfg *config.Config,
 	quizzes quiz.Store, mediaSvc *media.Service, hostID int64, logger *slog.Logger,
-) error {
+) (*quiz.Quiz, error) {
 	zr, err := zip.NewReader(bytes.NewReader(baselineArchive), int64(len(baselineArchive)))
 	if err != nil {
-		return fmt.Errorf("open baseline archive: %w", err)
+		return nil, fmt.Errorf("open baseline archive: %w", err)
 	}
 	limits := admin.NewArchiveImportLimits(
 		cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes,
 	)
-	if _, err := admin.ImportQuizArchive(ctx, logger, quizzes, mediaSvc, zr, hostID, limits); err != nil {
+	qz, err := admin.ImportQuizArchive(ctx, logger, quizzes, mediaSvc, zr, hostID, limits)
+	if err != nil {
 		if errors.Is(err, quiz.ErrSlugTaken) {
-			return nil
+			return nil, nil //nolint:nilnil // nil quiz + nil error signals "already present", the idempotent no-op.
 		}
 
-		return fmt.Errorf("import quiz archive: %w", err)
+		return nil, fmt.Errorf("import quiz archive: %w", err)
+	}
+
+	return qz, nil
+}
+
+// seedDemoPlays creates a handful of anonymous players and records a finished
+// game for each against qz, so the demo quiz appears in the home Popular list.
+// Play-seeding is intentionally tied to quiz creation (qz non-nil only when
+// newly created) so idempotent boots that find the quiz already present skip
+// this step and leave existing play counts untouched.
+func seedDemoPlays(ctx context.Context, stores *store.Stores, qz *quiz.Quiz, logger *slog.Logger) error {
+	for _, name := range demoPlayerNames {
+		p, err := stores.Players.CreateAnonymousPlayer(ctx, name)
+		if err != nil {
+			if errors.Is(err, auth.ErrDisplayNameTaken) {
+				logger.Info("demo player already exists (skipping)", slog.String("name", name))
+
+				continue
+			}
+
+			return fmt.Errorf("create anonymous player %q: %w", name, err)
+		}
+		if err := finishDemoGame(ctx, stores.Games, p.ID, qz); err != nil {
+			logger.Warn("finish demo game",
+				slog.String("player", name),
+				slog.String("quiz", qz.Title),
+				slog.Any("err", err),
+			)
+		}
+	}
+
+	return nil
+}
+
+// finishDemoGame creates a game + participant + one game_question per quiz
+// question so the row counts as finished by the popular-quiz SQL (#891).
+// Answers are not written -- the home Popular list ranks by play_count,
+// not answers submitted.
+func finishDemoGame(ctx context.Context, games game.Store, playerID int64, qz *quiz.Quiz) error {
+	g := &game.Game{QuizID: qz.ID}
+	if err := games.CreateGame(ctx, g); err != nil {
+		return fmt.Errorf("create game: %w", err)
+	}
+	if err := games.CreateParticipant(ctx, &game.Participant{
+		GameID: g.ID, PlayerID: playerID, QuizID: qz.ID,
+	}); err != nil {
+		return fmt.Errorf("create participant: %w", err)
+	}
+	now := time.Now()
+	for i, qs := range qz.Questions {
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: qs.ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(demoAnswerWindowSeconds * time.Second),
+		}
+		completesGame := i == len(qz.Questions)-1
+		if err := games.CreateQuestion(ctx, gq, completesGame); err != nil {
+			return fmt.Errorf("create question: %w", err)
+		}
 	}
 
 	return nil
