@@ -1,0 +1,29 @@
+name: Demo reset
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    if: vars.DEMO_DEPLOY_ENABLED == 'true'
+    environment:
+      name: demo
+    steps:
+      - name: Wipe demo data and restart
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ~/topbanana-demo
+            # Volume layout (confirmed in docker-compose.demo.yml): DB and media
+            # live on the named volume topbanana_demo_data. Wiping with -v removes
+            # the volume; the next up recreates it and the app re-seeds via
+            # SeedIfEnabled on first boot.
+            docker compose -f docker-compose.demo.yml down -v
+            docker compose -f docker-compose.demo.yml up -d
