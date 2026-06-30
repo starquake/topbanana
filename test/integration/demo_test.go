@@ -125,3 +125,30 @@ func TestDemo_HomeAffordanceAbsentWhenDisabled(t *testing.T) {
 		t.Errorf("demo home affordance /demo/enter present in GET / = %v, want %v", got, want)
 	}
 }
+
+// TestDemo_ProfileLockedInDemoMode asserts that GET /profile returns 404 when
+// demo mode is on because addProfileRoutes is not called and the route is never
+// registered. Cannot use t.Parallel because it mutates the process environment
+// via t.Setenv.
+//
+//nolint:paralleltest // t.Setenv + t.Parallel are incompatible.
+func TestDemo_ProfileLockedInDemoMode(t *testing.T) {
+	t.Setenv("DEMO_MODE_ENABLED", "true")
+	ctx, srv := startServer(t, nil)
+	snap := doGet(ctx, t, authClient(t), srv.BaseURL+"/profile")
+	if got, want := snap.StatusCode, http.StatusNotFound; got != want {
+		t.Errorf("GET /profile (demo mode) status = %d, want %d", got, want)
+	}
+}
+
+// TestDemo_ProfileAccessibleWhenDisabled asserts that GET /profile does not
+// return 404 when demo mode is off (the route is registered and an
+// unauthenticated request is redirected to /login, not 404'd).
+func TestDemo_ProfileAccessibleWhenDisabled(t *testing.T) {
+	t.Parallel()
+	ctx, srv := startServer(t, nil)
+	snap := doGet(ctx, t, authClient(t), srv.BaseURL+"/profile")
+	if got := snap.StatusCode; got == http.StatusNotFound {
+		t.Errorf("GET /profile (demo disabled) status = %d, want != 404", got)
+	}
+}

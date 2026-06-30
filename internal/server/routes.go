@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
@@ -63,6 +64,9 @@ func addRoutes(
 	gameDeps := adminGameDeps{gameService: gameService, runningGames: realtime.SessionService}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	if demo.Enabled() { // DEMO MODE
+		mux.Handle("POST /demo/enter", demo.HandleEnter(sessions, stores.Players, logger))
+	}
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
 	addMediaRoutes(
 		mux,
@@ -73,7 +77,9 @@ func addRoutes(
 		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
 		cfg,
 	)
-	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	if !demo.Enabled() { // DEMO MODE
+		addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	}
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService, cfg.BaseURL)
 	addClientAndPublicRoutes(mux, logger, stores, sessions, csrfMgr, cfg)

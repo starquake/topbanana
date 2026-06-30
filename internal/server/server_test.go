@@ -51,8 +51,8 @@ func newDemoTestServer(t *testing.T) http.Handler {
 	)
 }
 
-func TestServer_DemoModeGuards(t *testing.T) {
-	t.Run("enabled: /profile is blocked", func(t *testing.T) {
+func TestServer_DemoModeRoutes(t *testing.T) {
+	t.Run("enabled: /profile route not registered", func(t *testing.T) {
 		t.Setenv("DEMO_MODE_ENABLED", "true")
 		h := newDemoTestServer(t)
 
