@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Top Banana - Demo</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="min-h-dvh bg-bg text-text flex items-center justify-center p-6">
+  <main class="max-w-[480px] w-full text-center space-y-6">
+    <p class="text-sm text-accent">Demo - everything here resets daily.</p>
+    <h1 class="font-display text-2xl">Try Top Banana</h1>
+    <p class="text-text/80">Enter the demo as a host to build and run a quiz, or just play the sample quiz.</p>
+    <form method="POST" action="/demo/enter">
+      <button type="submit" class="btn-primary w-full">Enter demo as host</button>
+    </form>
+    <a class="inline-block underline" href="/client/">Just play</a>
+  </main>
+</body>
+</html>
