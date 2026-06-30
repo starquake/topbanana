@@ -31,7 +31,7 @@ func TestGuard_ServesEntryPage(t *testing.T) {
 func TestGuard_EnterLogsInDemoHost(t *testing.T) {
 	t.Setenv("DEMO_MODE_ENABLED", "true")
 
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.DiscardHandler)
 	stores := store.New(dbtest.Open(t), logger)
 	// Seed the host (reuses SeedIfEnabled's host path via a full seed).
 	cfg := demoTestConfig()

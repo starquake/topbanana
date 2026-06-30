@@ -62,10 +62,6 @@ func ensureDemoHost(ctx context.Context, players auth.PlayerStore, adminPlayers 
 
 	if errors.Is(err, auth.ErrPlayerNotFound) {
 		host, err = players.CreateAnonymousPlayer(ctx, demoHostName)
-		if errors.Is(err, auth.ErrDisplayNameTaken) {
-			// A concurrent boot won the race; look up the winner.
-			host, err = players.GetPlayerByDisplayName(ctx, demoHostName)
-		}
 		if err != nil {
 			return 0, fmt.Errorf("create anonymous player: %w", err)
 		}
