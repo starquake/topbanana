@@ -1,0 +1,49 @@
+services:
+  topbanana-demo:
+    # Pinned to an immutable digest, not a tag: deploy.yml resolves the
+    # release tag to its digest, verifies the cosign signature, and writes
+    # IMAGE_DIGEST into .env. The guard fails the boot loudly if it is unset.
+    image: ${IMAGE_NAME}@${IMAGE_DIGEST:?IMAGE_DIGEST must be set in .env or environment}
+    container_name: topbanana-demo
+    environment:
+      - APP_ENV=production
+      - DEMO_MODE_ENABLED=true
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Uploaded media must live on the persistent volume: the
+      # distroless image's app filesystem is ephemeral. Shares the data volume.
+      - MEDIA_DIR=/home/nonroot/data/media
+      - BASE_URL=https://demo.topbanana.app
+      # Registration is disabled on the demo instance; visitors use the
+      # pre-seeded demo accounts only.
+      - REGISTRATION_ENABLED=false
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # No GOOGLE_* vars: Google sign-in is not wired on the demo instance.
+      # The login page renders without the Google button; the demo uses
+      # password auth on the pre-seeded accounts.
+      # No SMTP_* vars: the mailer is no-op on the demo instance.
+      # The /admin/email diagnostics page renders "disabled (no-op)".
+      # Volume layout: DB and media both live on the named volume
+      # topbanana_demo_data (same pattern as production). The daily reset
+      # workflow (demo-reset.yml) wipes this volume with:
+      #   docker compose -f docker-compose.demo.yml down -v
+      #   docker compose -f docker-compose.demo.yml up -d
+    volumes:
+      - topbanana_demo_data:/home/nonroot/data
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/home/nonroot/server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  topbanana_demo_data:
+networks:
+  web:
+    external: true
