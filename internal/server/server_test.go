@@ -52,19 +52,12 @@ func newDemoTestServer(t *testing.T) http.Handler {
 }
 
 func TestServer_DemoModeGuards(t *testing.T) {
-	t.Run("enabled: /demo serves and /profile is blocked", func(t *testing.T) {
+	t.Run("enabled: /profile is blocked", func(t *testing.T) {
 		t.Setenv("DEMO_MODE_ENABLED", "true")
 		h := newDemoTestServer(t)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/demo", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/profile", nil)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if got, want := rec.Code, http.StatusOK; got != want {
-			t.Errorf("GET /demo code = %d, want %d", got, want)
-		}
-
-		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/profile", nil)
-		rec = httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("GET /profile code = %d, want %d", got, want)

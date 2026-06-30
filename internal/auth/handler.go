@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -1006,12 +1005,6 @@ func parseTemplate(page string) *template.Template {
 		// Placeholder so the shared components glob parses; this surface
 		// does not render quiz_card, which is the only user (#889).
 		"humanizeTime": func(time.Time) string { return "" },
-		// DEMO MODE: read env directly to avoid importing internal/demo (cycle).
-		"demoMode": func() bool {
-			on, _ := strconv.ParseBool(os.Getenv("DEMO_MODE_ENABLED"))
-
-			return on
-		},
 	}
 
 	return render.Parse(tmpl.FS, funcs, page, "components/*.gohtml", "auth/layouts/*.gohtml")

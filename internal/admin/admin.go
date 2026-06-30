@@ -8,7 +8,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -342,12 +341,6 @@ func parseTemplate(path string) *template.Template {
 		"versionLabel":      version.Label,
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
-		// DEMO MODE: read env directly to avoid importing internal/demo (cycle).
-		"demoMode": func() bool {
-			on, _ := strconv.ParseBool(os.Getenv("DEMO_MODE_ENABLED"))
-
-			return on
-		},
 	}
 	// Partials are parsed alongside layouts so any page (or any HTMX-fragment
 	// handler) can {{template "name" .}} a shared block without re-listing it.

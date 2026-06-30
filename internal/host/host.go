@@ -12,8 +12,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/starquake/topbanana/internal/absurl"
@@ -190,15 +188,9 @@ func parseTemplate(path string) *template.Template {
 		"envTitleTag":  envtag.Get,
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": reltime.Humanize,
-		// DEMO MODE: read env directly to avoid importing internal/demo (cycle).
-		"demoMode": func() bool {
-			on, _ := strconv.ParseBool(os.Getenv("DEMO_MODE_ENABLED"))
-
-			return on
-		},
 	}
 
-	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml", "components/demo_banner.gohtml")
+	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
 }
 
 // parsePickerTemplate parses the host layouts plus the shared quiz-card,
@@ -213,16 +205,9 @@ func parsePickerTemplate(path string) *template.Template {
 		"envTitleTag":  envtag.Get,
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": reltime.Humanize,
-		// DEMO MODE: read env directly to avoid importing internal/demo (cycle).
-		"demoMode": func() bool {
-			on, _ := strconv.ParseBool(os.Getenv("DEMO_MODE_ENABLED"))
-
-			return on
-		},
 	}
 
 	return render.Parse(tmpl.FS, funcs, path,
 		"host/layouts/*.gohtml", "components/quiz_card.gohtml",
-		"components/modal_manager.gohtml", "components/restart_modal.gohtml",
-		"components/demo_banner.gohtml")
+		"components/modal_manager.gohtml", "components/restart_modal.gohtml")
 }
