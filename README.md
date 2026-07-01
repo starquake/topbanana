@@ -12,13 +12,15 @@ If contributions come in later, I'll start from [Ghostty's AI_POLICY.md](https:/
 
 ## Demo
 
+Try it live at **[demo.topbanana.app](https://demo.topbanana.app/)**. One click signs you in to a shared host account — no sign-up — so you can build and host a quiz. Everything resets daily.
+
 ### Game
-![Image](https://github.com/user-attachments/assets/ebf9de5c-47b6-410f-b8b8-7d29200fa193)
+
+https://github.com/user-attachments/assets/cb8c8f0b-d2e3-40e7-9753-fa029fd1b20a
 
 ### Admin interface
-![Image](https://github.com/user-attachments/assets/77d8a814-df67-449b-a7af-15814fc21333)
 
-A link to a live demo will be provided soon.
+![Admin interface](https://github.com/user-attachments/assets/6746a9b3-68db-46c5-8161-5b3d59fd7664)
 
 ## Features
 - **Quiz authoring**: Create and edit quizzes from the admin UI — title, description, and multi-option questions.
