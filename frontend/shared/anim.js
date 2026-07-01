@@ -35,3 +35,23 @@ export function runAnim(targets, params) {
         params.onComplete();
     }
 }
+
+// enterCard fades+rises a card Alpine mounts (x-if) in its resting state. It
+// sets the hidden from-state on el.style SYNCHRONOUSLY so no frame paints the
+// card visible before the tween (#1154); onComplete clears it, so runAnim's
+// reduced-motion / missing-anime skip path still lands fully visible. Call from
+// x-init (synchronous), not a deferred $nextTick/rAF, or the flash returns.
+export function enterCard(el, { rise = 12, duration = 380, ease = 'outQuad' } = {}) {
+    el.style.opacity = '0';
+    el.style.transform = `translateY(${rise}px)`;
+    runAnim(el, {
+        opacity: [0, 1],
+        translateY: [rise, 0],
+        duration,
+        ease,
+        onComplete: () => {
+            el.style.opacity = '';
+            el.style.transform = '';
+        },
+    });
+}

@@ -177,3 +177,122 @@ test('the previous round question does not flash when entering the next round', 
   await expect(page.getByRole('button', { name: 'R2-correct' })).toBeVisible();
   await expect(page.getByTestId('round-intro-card')).toBeHidden();
 });
+
+// #1154 - the round intro/recap cards used to paint one frame at their resting
+// opacity 1 before anime.js hid them at 0 and faded in - a flash. The fix writes
+// the from-state synchronously from x-init (enterCard), which Alpine runs in the
+// mount flush before first paint.
+//
+// This probe records each card's FIRST inline opacity WRITE and whether it landed
+// before the card's first paint: post-fix enterCard writes 0 in the mount
+// microtask (prePaint true); pre-fix the reset sat in a rAF after the paint
+// (prePaint false). Recording the write, not a sampled frame value, avoids
+// catching the cleared end-state when anime finishes the entrance under load.
+interface FlashRecord {
+  value: number;
+  prePaint: boolean;
+}
+
+// installFlashProbe watches, from before the SPA boots, card mounts (childList)
+// and inline style writes (attributes) document-wide. Attaching this early (not
+// from a per-card mount callback) can't miss the first write to a race.
+async function installFlashProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const testIds = ['round-intro-card', 'round-recap-card'];
+    const probe: Record<string, { value: number; prePaint: boolean }> = {};
+    const painted: Record<string, boolean> = {};
+    (window as unknown as { __flashProbe: typeof probe }).__flashProbe = probe;
+
+    const idOf = (el: unknown): string | null => {
+      if (!(el instanceof HTMLElement)) return null;
+      const id = el.getAttribute('data-testid');
+      return id && testIds.includes(id) ? id : null;
+    };
+    const onMount = (el: unknown) => {
+      const id = idOf(el);
+      if (!id || id in painted) return; // first mount per card only
+      painted[id] = false;
+      requestAnimationFrame(() => { painted[id] = true; }); // this card's first paint
+    };
+    const onStyle = (el: unknown) => {
+      const id = idOf(el);
+      if (!id || id in probe) return; // first opacity write per card only
+      const opacity = (el as HTMLElement).style.opacity;
+      if (opacity === '') return; // ignore the onComplete clear / non-opacity writes
+      probe[id] = { value: parseFloat(opacity), prePaint: painted[id] === false };
+    };
+    const scan = (node: Node) => {
+      if (!(node instanceof Element)) return;
+      onMount(node);
+      node.querySelectorAll(testIds.map((i) => `[data-testid="${i}"]`).join(',')).forEach(onMount);
+    };
+    // Observe the document node, not document.documentElement: the init script
+    // runs before <html> is parsed, so documentElement is still null here.
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'childList') record.addedNodes.forEach(scan);
+        else if (record.type === 'attributes') onStyle(record.target);
+      }
+      // Both captured: stop observing (else it fires on anime's per-frame style
+      // writes for the rest of the run).
+      if (testIds.every((id) => id in probe)) observer.disconnect();
+    });
+    observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+  });
+}
+
+// flashRecordFor waits for the probe to record a card's first opacity write.
+async function flashRecordFor(page: Page, testId: string): Promise<FlashRecord> {
+  let record: FlashRecord | undefined;
+  await expect
+    .poll(async () => {
+      record = await page.evaluate(
+        (id) => (window as unknown as { __flashProbe: Record<string, FlashRecord | undefined> }).__flashProbe[id],
+        testId,
+      );
+      return record !== undefined;
+    }, { timeout: 5_000 })
+    .toBe(true);
+  return record as FlashRecord;
+}
+
+test('round intro and recap cards fade in from hidden (no un-animated flash)', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  // Date.now() keeps the title unique per attempt: a retry reuses the worker DB,
+  // so a fixed title would 409.
+  const quizTitle = `E2E Round Card Fade ${browserName} ${Date.now()}`;
+  await importQuiz(page, {
+    title: quizTitle,
+    description: 'E2E round card entrance fade quiz',
+    rounds: twoRoundQuiz(),
+  });
+
+  await installFlashProbe(page);
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await startQuiz(page, quizTitle);
+
+  // Round 1 intro card: from-state written before first paint (not the pre-fix
+  // deferred frame) and to the hidden value, not the resting opacity 1.
+  await expect(page.getByTestId('round-intro-card')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('round-title')).toContainText('Round 1');
+  const intro = await flashRecordFor(page, 'round-intro-card');
+  expect(intro.prePaint, 'round intro card from-state written before first paint').toBe(true);
+  expect(intro.value, 'round intro card first opacity write').toBeLessThan(0.5);
+  // ...then restores full visibility (toBeVisible ignores opacity, so it can't
+  // catch a card stuck at 0).
+  await expect(page.getByTestId('round-intro-card')).toHaveCSS('opacity', '1');
+
+  // Continue past the intro and answer round 1 so the recap card mounts.
+  await page.getByTestId('round-continue').click();
+  await expect(page.getByTestId('question-text')).toHaveText('Round one question?', { timeout: 10_000 });
+  await answerWhenReady(page, 'R1-correct');
+
+  // Round 1 recap card: same synchronous, pre-paint from-state contract.
+  await expect(page.getByTestId('round-recap-card')).toBeVisible({ timeout: 10_000 });
+  const recap = await flashRecordFor(page, 'round-recap-card');
+  expect(recap.prePaint, 'round recap card from-state written before first paint').toBe(true);
+  expect(recap.value, 'round recap card first opacity write').toBeLessThan(0.5);
+  await expect(page.getByTestId('round-recap-card')).toHaveCSS('opacity', '1');
+});
