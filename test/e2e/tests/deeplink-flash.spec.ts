@@ -1,5 +1,11 @@
 import { test, expect, Route, Page } from './fixtures';
-import { seedQuiz, playThroughQuiz, installPlaythroughClock } from './helpers';
+import {
+  seedQuiz,
+  playThroughQuiz,
+  installPlaythroughClock,
+  installAppearanceFlashProbe,
+  flashProbeSeen,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed the quiz as the shared admin (via the JSON importer), then clear the
@@ -36,30 +42,11 @@ test('deep-link to an already-completed quiz never flashes the quiz header', asy
   const playUrl = new URL(page.url()).pathname;
   expect(playUrl).toMatch(/^\/play\/[^/]+-\d+$/);
 
-  // Install a MutationObserver BEFORE any page script runs (addInitScript
-  // re-applies on every navigation in this context) so it observes the SPA
-  // boot from the very first frame. It records whether the deep-link header
-  // ever entered the DOM — the deterministic signal the header would have
-  // flashed under the bug. The flag lives on window so the assertion below
-  // can read it after the page has settled.
-  await page.addInitScript(() => {
-    const w = window as unknown as { __deepLinkHeaderSeen?: boolean };
-    w.__deepLinkHeaderSeen = false;
-    const check = (root: ParentNode) => {
-      if (root.querySelector('[data-testid="deep-link-header"]')) {
-        w.__deepLinkHeaderSeen = true;
-      }
-    };
-    const start = () => {
-      check(document);
-      const observer = new MutationObserver(() => check(document));
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', start);
-    } else {
-      start();
-    }
+  // Record whether the deep-link header ever mounts during boot -> resolve
+  // (beforeBoot: observes from the first frame) - the deterministic flash signal.
+  await installAppearanceFlashProbe(page, {
+    selector: '[data-testid="deep-link-header"]',
+    key: '__deepLinkHeaderSeen',
   });
 
   // Revisit the already-completed quiz via its deep link.
@@ -72,13 +59,9 @@ test('deep-link to an already-completed quiz never flashes the quiz header', asy
   await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
 
-  // The header must never have appeared during the boot -> resolve window.
-  // This is the "never flashed" invariant; the MutationObserver above is the
-  // robust deterministic way to assert it — it catches a header that mounts
-  // then unmounts faster than Playwright's polling could ever sample.
-  const headerEverSeen = await page.evaluate(
-    () => (window as unknown as { __deepLinkHeaderSeen?: boolean }).__deepLinkHeaderSeen ?? false,
-  );
+  // "Never flashed" invariant: the probe catches a header that mounts then
+  // unmounts faster than Playwright could sample.
+  const headerEverSeen = await flashProbeSeen(page, '__deepLinkHeaderSeen');
   expect(headerEverSeen, 'deep-link header flashed in then out on an already-completed revisit').toBe(false);
 });
 
