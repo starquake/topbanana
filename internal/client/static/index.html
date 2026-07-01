@@ -496,12 +496,14 @@
 
                         <!-- 2x2 grid that matches the live answer pad and the
                              host big screen, so the three play surfaces read as
-                             one family. Hidden during the pre-answer beat (#247);
-                             buttons stay disabled during feedback so the
-                             per-option reveal (#233) can show the answer without
-                             resizing. -->
+                             one family. Hidden during the pre-answer beat (#247)
+                             with `invisible` (not x-show) so the pad keeps its
+                             box and the flex-1-centered image above does not
+                             shift when the buttons appear; buttons stay disabled
+                             during feedback so the per-option reveal (#233) can
+                             show the answer without resizing. -->
                         <div class="answer-pad lg:gap-4"
-                             x-show="!revealing">
+                             :class="{ 'invisible': revealing }">
                             <template x-for="(option, idx) in question.options" :key="option.id">
                                 <button :class="optionStateClass(option, idx)"
                                         :disabled="!!feedback"
