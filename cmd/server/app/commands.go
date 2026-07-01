@@ -189,7 +189,7 @@ func PromoteAdmin(
 // The quiz archive is read from the path given by DEMO_SEED_ARCHIVE; it is
 // not embedded in the binary so the ~3 MB file stays out of the production
 // image and is supplied by the demo deployment's bind mount instead.
-func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error { // DEMO MODE
+func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error {
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	cfg, err := config.Parse(getenv)

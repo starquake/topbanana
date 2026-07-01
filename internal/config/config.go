@@ -280,13 +280,13 @@ type Config struct {
 	// the one-click /demo/enter affordance on and, through applyDemoMode,
 	// forces the locked-down posture: no profile pages, no registration, and
 	// no Google sign-in regardless of those vars.
-	DemoMode bool // DEMO MODE
+	DemoMode bool
 
 	// ProfileEnabled gates the /profile routes. Defaults to true; demo mode
 	// forces it false (see applyDemoMode) so the shared demo account's profile
 	// cannot be edited. Not independently env-configurable - demo mode is its
 	// only driver today.
-	ProfileEnabled bool // DEMO MODE
+	ProfileEnabled bool
 
 	// RevealDelay overrides the per-question reveal beat (#247). Zero means
 	// "use the built-in default" (3 s). Parsed from the REVEAL_DELAY env var
@@ -587,7 +587,7 @@ func defaultConfig() Config {
 		DBMaxOpenConns:          DBMaxOpenConnsDefault,
 		DBMaxIdleConns:          DBMaxIdleConnsDefault,
 		DBConnMaxLifetime:       DBConnMaxLifetimeDefault,
-		ProfileEnabled:          true, // DEMO MODE: default on; applyDemoMode forces it off.
+		ProfileEnabled:          true,
 		LoginCooldown:           LoginCooldownDefault,
 		MediaUploadBudget:       MediaUploadBudgetDefault,
 		MediaUploadBudgetWindow: MediaUploadBudgetWindowDefault,
@@ -653,7 +653,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
 
-	applyDemoMode(&c) // DEMO MODE
+	applyDemoMode(&c)
 
 	if err = parseSMTPConfig(getenv, &c); err != nil {
 		return nil, err
@@ -686,7 +686,7 @@ func (c *Config) GoogleLoginEnabled() bool {
 // Centralising the derivation here keeps demo mode a single config concept
 // rather than a check scattered across the handlers, and means env alone
 // cannot reconfigure the shared demo back into a full instance.
-func applyDemoMode(c *Config) { // DEMO MODE
+func applyDemoMode(c *Config) {
 	if !c.DemoMode {
 		return
 	}
@@ -710,7 +710,7 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 		c.RegistrationEnabled = b
 	}
 
-	if val := getenv("DEMO_MODE_ENABLED"); val != "" { // DEMO MODE
+	if val := getenv("DEMO_MODE_ENABLED"); val != "" {
 		b, err := strconv.ParseBool(val)
 		if err != nil {
 			return fmt.Errorf("invalid DEMO_MODE_ENABLED: %q, err: %w", val, err)

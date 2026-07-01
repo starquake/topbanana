@@ -118,7 +118,7 @@ func Handle(
 	store Store,
 	viewer ViewerFunc,
 	csrfToken CSRFTokenFunc,
-	demoMode bool, // DEMO MODE
+	demoMode bool,
 ) http.Handler {
 	t := parseTemplate("home/pages/index.gohtml")
 
@@ -187,7 +187,6 @@ func HandleAllQuizzes(
 	store QuizLister,
 	viewer ViewerFunc,
 	csrfToken CSRFTokenFunc,
-	demoMode bool, // DEMO MODE
 ) http.Handler {
 	t := parseTemplate("home/pages/all-quizzes.gohtml")
 
@@ -227,7 +226,7 @@ func HandleAllQuizzes(
 			})
 		}
 
-		rc := renderContext{csrfToken: csrfToken, viewer: data.Viewer, demoMode: demoMode}
+		rc := renderContext{csrfToken: csrfToken, viewer: data.Viewer}
 		executeTemplate(w, r, logger, t, rc, "render all-quizzes template", data)
 	})
 }
@@ -240,7 +239,7 @@ func HandleAllQuizzes(
 type renderContext struct {
 	csrfToken CSRFTokenFunc
 	viewer    *Viewer
-	demoMode  bool // DEMO MODE
+	demoMode  bool
 }
 
 // executeTemplate clones t, binds the per-request funcs, and runs
@@ -270,7 +269,7 @@ func executeTemplate(
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return viewerName },
 		"isSignedIn": func() bool { return rc.viewer != nil },
-		"demoMode":   func() bool { return rc.demoMode }, // DEMO MODE
+		"demoMode":   func() bool { return rc.demoMode },
 	}
 	if rc.csrfToken != nil {
 		funcs["csrfToken"] = func() string { return rc.csrfToken(w, r) }
@@ -320,8 +319,8 @@ func parseTemplate(page string) *template.Template {
 		// reltime.Humanize re-reads the clock on each call, so binding it once
 		// at parse time is safe (#927).
 		"humanizeTime": reltime.Humanize,
-		// DEMO MODE: rebound per request by executeTemplate from cfg.DemoMode;
-		// this parse-time placeholder keeps the template parseable.
+		// Rebound per request by executeTemplate from cfg.DemoMode; this
+		// parse-time placeholder keeps the template parseable.
 		"demoMode": func() bool { return false },
 	}
 	base := template.Must(

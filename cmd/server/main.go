@@ -41,7 +41,7 @@ func main() {
 			" Designed for Dockerfile HEALTHCHECK on distroless images (#344) so the image"+
 			" doesn't need a separate wget/curl binary",
 	)
-	seedDemo := flag.Bool( // DEMO MODE
+	seedDemo := flag.Bool(
 		"seed-demo",
 		false,
 		"seed the demo baseline (requires DEMO_MODE_ENABLED) and exit."+
@@ -53,7 +53,7 @@ func main() {
 	ctx := context.Background()
 
 	// Reject more than one mode flag: resolving by switch order would silently
-	// run a different recovery action than the operator asked for. // DEMO MODE
+	// run a different recovery action than the operator asked for.
 	if tooManyModes(*resetPasswordFor != "", *promoteAdminFor != "", *checkOnly, *healthcheckOnly, *seedDemo) {
 		if _, err := fmt.Fprintln(os.Stderr,
 			"error: -reset-password, -promote-admin, -check, -healthcheck, and"+
@@ -76,7 +76,7 @@ func main() {
 		err = app.Check(ctx, os.Getenv, os.Stdout)
 	case *healthcheckOnly:
 		err = app.Healthcheck(ctx, os.Getenv)
-	case *seedDemo: // DEMO MODE
+	case *seedDemo:
 		err = app.SeedDemo(ctx, os.Getenv, os.Stderr)
 	default:
 		err = app.Run(ctx, os.Getenv, os.Stdout, nil)
