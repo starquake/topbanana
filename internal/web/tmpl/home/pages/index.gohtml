@@ -1,10 +1,13 @@
 {{define "content"}}
 {{if demoMode}}
 <div class="mb-8 rounded-lg border border-accent-line bg-surface px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-    <p class="m-0 text-sm text-text-dim">This is the Top Banana! demo - everything resets daily.</p>
+    <div class="flex flex-col gap-1">
+        <p class="m-0 text-sm text-text-dim">This is the Top Banana! demo - everything resets daily.</p>
+        <p class="m-0 text-sm text-text-dim">The button signs you in to a shared host account - no sign-up - so you can build and host a quiz.</p>
+    </div>
     <form method="POST" action="/demo/enter" class="m-0 shrink-0">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-        <button type="submit" class="btn-primary">Build &amp; host a quiz</button>
+        <button type="submit" class="btn-primary">Sign in and host a quiz</button>
     </form>
 </div>
 {{end}}

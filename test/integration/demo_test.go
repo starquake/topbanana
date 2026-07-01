@@ -106,6 +106,9 @@ func TestDemo_HomeAffordancePresentWhenEnabled(t *testing.T) {
 	if got, want := strings.Contains(body, "resets daily"), true; got != want {
 		t.Errorf("demo home affordance 'resets daily' present in GET / = %v, want %v", got, want)
 	}
+	if got, want := strings.Contains(body, "signs you in to a shared host account"), true; got != want {
+		t.Errorf("demo home affordance sign-in instruction present in GET / = %v, want %v", got, want)
+	}
 }
 
 // TestDemo_HomeAffordanceAbsentWhenDisabled asserts that when
