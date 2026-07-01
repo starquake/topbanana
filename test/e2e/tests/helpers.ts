@@ -568,3 +568,42 @@ export async function claimAndJoin(
   const joinResp = await request.post(`/api/sessions/${code}/join`);
   expect(joinResp.status(), `join ${displayName}: ${await joinResp.text()}`).toBe(200);
 }
+
+// installAppearanceFlashProbe records on window[key] whether any element matching
+// `selector` ever mounts while active - a MutationObserver catches a mount/unmount
+// faster than Playwright can poll, so a "flash" can't slip through. Read it back
+// with flashProbeSeen. beforeBoot (default) installs via addInitScript to watch
+// from the first frame; pass false to install now, ignoring an earlier in-scope
+// appearance and counting only later mounts.
+export async function installAppearanceFlashProbe(
+  page: Page,
+  { selector, key, beforeBoot = true }: { selector: string; key: string; beforeBoot?: boolean },
+): Promise<void> {
+  const probe = (arg: { selector: string; key: string }) => {
+    const flags = window as unknown as Record<string, boolean>;
+    flags[arg.key] = false;
+    const check = () => {
+      if (document.querySelector(arg.selector)) flags[arg.key] = true;
+    };
+    check();
+    // Observe document, not documentElement (null before <html> under beforeBoot).
+    const observer = new MutationObserver(() => {
+      check();
+      if (flags[arg.key]) observer.disconnect();
+    });
+    if (!flags[arg.key]) observer.observe(document, { childList: true, subtree: true });
+  };
+  if (beforeBoot) {
+    await page.addInitScript(probe, { selector, key });
+  } else {
+    await page.evaluate(probe, { selector, key });
+  }
+}
+
+// flashProbeSeen reads back the probe's result (false if it never ran).
+export async function flashProbeSeen(page: Page, key: string): Promise<boolean> {
+  return page.evaluate(
+    (k) => Boolean((window as unknown as Record<string, boolean>)[k]),
+    key,
+  );
+}

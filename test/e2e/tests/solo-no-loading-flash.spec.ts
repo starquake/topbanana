@@ -1,5 +1,11 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, installPlaythroughClock, QUIZ_QUESTIONS } from './helpers';
+import {
+  seedQuiz,
+  installPlaythroughClock,
+  QUIZ_QUESTIONS,
+  installAppearanceFlashProbe,
+  flashProbeSeen,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // The solo client used to render a "Loading question..." fallback for the
@@ -28,19 +34,13 @@ test('Loading question fallback never paints between solo questions', async ({ p
   await page.clock.runFor(3_500);
   await expect(page.getByRole('button', { name: QUIZ_QUESTIONS[0].options[0], exact: true })).toBeVisible({ timeout: 10_000 });
 
-  // Install the probe after Q1 is on screen. Tick on every animation frame
-  // and record any moment the "Loading question..." fallback paints.
-  await page.evaluate(() => {
-    const seen: string[] = [];
-    (window as unknown as { __loadingFlashSeen: string[] }).__loadingFlashSeen = seen;
-    const tick = () => {
-      const text = document.body.textContent ?? '';
-      if (text.includes('Loading question')) {
-        seen.push(new Date().toISOString());
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+  // Install after Q1 (beforeBoot: false): the pre-Q1 loading state is legit and
+  // out of scope. Post-start the audio-loading x-if fallback only ever reads
+  // "Loading question...", so any mount between questions is the #982 regression.
+  await installAppearanceFlashProbe(page, {
+    selector: '[data-testid="audio-loading"]',
+    key: '__loadingFlashSeen',
+    beforeBoot: false,
   });
 
   // Q1 already on screen; answer it and advance through the remaining
@@ -61,11 +61,9 @@ test('Loading question fallback never paints between solo questions', async ({ p
   // Finished screen: leaderboard heading visible.
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible({ timeout: 15_000 });
 
-  const flashes = await page.evaluate(
-    () => (window as unknown as { __loadingFlashSeen: string[] }).__loadingFlashSeen,
-  );
+  const loadingFlashed = await flashProbeSeen(page, '__loadingFlashSeen');
   expect(
-    flashes.length,
-    `the "Loading question..." fallback painted ${flashes.length} times during the playthrough: ${JSON.stringify(flashes)}`,
-  ).toBe(0);
+    loadingFlashed,
+    'the "Loading question..." fallback mounted between solo questions',
+  ).toBe(false);
 });
