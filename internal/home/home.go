@@ -118,6 +118,7 @@ func Handle(
 	store Store,
 	viewer ViewerFunc,
 	csrfToken CSRFTokenFunc,
+	demoMode bool,
 ) http.Handler {
 	t := parseTemplate("home/pages/index.gohtml")
 
@@ -148,7 +149,8 @@ func Handle(
 			data.ActivePlayers = truncate(players)
 		}
 
-		executeTemplate(w, r, logger, t, csrfToken, data.Viewer, "render home template", data)
+		rc := renderContext{csrfToken: csrfToken, viewer: data.Viewer, demoMode: demoMode}
+		executeTemplate(w, r, logger, t, rc, "render home template", data)
 	})
 }
 
@@ -224,21 +226,33 @@ func HandleAllQuizzes(
 			})
 		}
 
-		executeTemplate(w, r, logger, t, csrfToken, data.Viewer, "render all-quizzes template", data)
+		rc := renderContext{csrfToken: csrfToken, viewer: data.Viewer}
+		executeTemplate(w, r, logger, t, rc, "render all-quizzes template", data)
 	})
+}
+
+// renderContext carries the per-request inputs executeTemplate binds into the
+// cloned template's funcs: the CSRF-token minter, the viewer (drives the top
+// bar's account cluster), and whether demo mode is on (gates the demo
+// affordance). Grouped into one value so executeTemplate stays within the
+// argument-count limit.
+type renderContext struct {
+	csrfToken CSRFTokenFunc
+	viewer    *Viewer
+	demoMode  bool
 }
 
 // executeTemplate clones t, binds the per-request funcs, and runs
 // base.gohtml. The clone is mandatory: concurrent renders race on the
 // shared template tree without it (#294).
 //
-// viewer drives the shared top bar's account cluster: non-nil renders
+// rc.viewer drives the shared top bar's account cluster: non-nil renders
 // the signed-in identity + log out, nil renders the log-in link. The
 // home surface never knows whether the viewer is an admin, so isAdmin
 // stays false (the section nav is admin-console-only anyway).
 func executeTemplate(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	t *template.Template, csrfToken CSRFTokenFunc, viewer *Viewer, errMsg string, data any,
+	t *template.Template, rc renderContext, errMsg string, data any,
 ) {
 	rt, cerr := t.Clone()
 	if cerr != nil {
@@ -248,16 +262,17 @@ func executeTemplate(
 		return
 	}
 	viewerName := ""
-	if viewer != nil {
-		viewerName = viewer.DisplayName
+	if rc.viewer != nil {
+		viewerName = rc.viewer.DisplayName
 	}
 	funcs := template.FuncMap{
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return viewerName },
-		"isSignedIn": func() bool { return viewer != nil },
+		"isSignedIn": func() bool { return rc.viewer != nil },
+		"demoMode":   func() bool { return rc.demoMode },
 	}
-	if csrfToken != nil {
-		funcs["csrfToken"] = func() string { return csrfToken(w, r) }
+	if rc.csrfToken != nil {
+		funcs["csrfToken"] = func() string { return rc.csrfToken(w, r) }
 	}
 	rt = rt.Funcs(funcs)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -304,6 +319,9 @@ func parseTemplate(page string) *template.Template {
 		// reltime.Humanize re-reads the clock on each call, so binding it once
 		// at parse time is safe (#927).
 		"humanizeTime": reltime.Humanize,
+		// Rebound per request by executeTemplate from cfg.DemoMode; this
+		// parse-time placeholder keeps the template parseable.
+		"demoMode": func() bool { return false },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

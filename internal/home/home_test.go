@@ -30,7 +30,7 @@ func serve(t *testing.T, db *sql.DB) string {
 	t.Helper()
 
 	stores := store.New(db, slog.New(slog.DiscardHandler))
-	handler := Handle(slog.New(slog.DiscardHandler), stores.Home, nil, nil)
+	handler := Handle(slog.New(slog.DiscardHandler), stores.Home, nil, nil, false)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)
@@ -300,7 +300,7 @@ func TestHandle_StoreErrorsDegradeToEmptyState(t *testing.T) {
 		t.Fatalf("db.Close err = %v, want nil", err)
 	}
 
-	handler := Handle(slog.New(slog.DiscardHandler), stores.Home, nil, nil)
+	handler := Handle(slog.New(slog.DiscardHandler), stores.Home, nil, nil, false)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)

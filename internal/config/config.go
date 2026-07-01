@@ -275,6 +275,19 @@ type Config struct {
 	// opt-in per deployment. Parsed from the REGISTRATION_ENABLED env var via strconv.ParseBool.
 	RegistrationEnabled bool
 
+	// DemoMode turns the deployment into the public shared demo (#1147).
+	// Parsed from DEMO_MODE_ENABLED via strconv.ParseBool. When on, it gates
+	// the one-click /demo/enter affordance on and, through applyDemoMode,
+	// forces the locked-down posture: no profile pages, no registration, and
+	// no Google sign-in regardless of those vars.
+	DemoMode bool
+
+	// ProfileEnabled gates the /profile routes. Defaults to true; demo mode
+	// forces it false (see applyDemoMode) so the shared demo account's profile
+	// cannot be edited. Not independently env-configurable - demo mode is its
+	// only driver today.
+	ProfileEnabled bool
+
 	// RevealDelay overrides the per-question reveal beat (#247). Zero means
 	// "use the built-in default" (3 s). Parsed from the REVEAL_DELAY env var
 	// via time.ParseDuration; e2e and load-test deployments shrink this to a
@@ -574,6 +587,7 @@ func defaultConfig() Config {
 		DBMaxOpenConns:          DBMaxOpenConnsDefault,
 		DBMaxIdleConns:          DBMaxIdleConnsDefault,
 		DBConnMaxLifetime:       DBConnMaxLifetimeDefault,
+		ProfileEnabled:          true,
 		LoginCooldown:           LoginCooldownDefault,
 		MediaUploadBudget:       MediaUploadBudgetDefault,
 		MediaUploadBudgetWindow: MediaUploadBudgetWindowDefault,
@@ -639,6 +653,8 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
 
+	applyDemoMode(&c)
+
 	if err = parseSMTPConfig(getenv, &c); err != nil {
 		return nil, err
 	}
@@ -657,9 +673,28 @@ func Parse(getenv func(string) string) (*Config, error) {
 // populated. The Google sign-in routes only register when this returns
 // true; the login template hides the button as well. Lets a deployment
 // roll out the feature by setting credentials rather than flipping a
-// separate REGISTRATION_ENABLED-style switch.
+// separate REGISTRATION_ENABLED-style switch. Demo mode clears the
+// credentials (see applyDemoMode), so this returns false there.
 func (c *Config) GoogleLoginEnabled() bool {
 	return c.GoogleClientID != "" && c.GoogleClientSecret != "" && c.GoogleRedirectURL != ""
+}
+
+// applyDemoMode forces the public demo's locked-down posture once
+// DEMO_MODE_ENABLED is on (#1147): the profile pages are removed,
+// registration is disabled regardless of REGISTRATION_ENABLED, and the
+// Google OAuth credentials are cleared so GoogleLoginEnabled reports false.
+// Centralising the derivation here keeps demo mode a single config concept
+// rather than a check scattered across the handlers, and means env alone
+// cannot reconfigure the shared demo back into a full instance.
+func applyDemoMode(c *Config) {
+	if !c.DemoMode {
+		return
+	}
+	c.ProfileEnabled = false
+	c.RegistrationEnabled = false
+	c.GoogleClientID = ""
+	c.GoogleClientSecret = ""
+	c.GoogleRedirectURL = ""
 }
 
 // parseTypedEnvVars reads strict-typed env vars (ints, durations, bools) into c. It returns a
@@ -673,6 +708,14 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 			return fmt.Errorf("invalid REGISTRATION_ENABLED: %q, err: %w", val, err)
 		}
 		c.RegistrationEnabled = b
+	}
+
+	if val := getenv("DEMO_MODE_ENABLED"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid DEMO_MODE_ENABLED: %q, err: %w", val, err)
+		}
+		c.DemoMode = b
 	}
 
 	if err := parseNonNegativeDuration(getenv, "REVEAL_DELAY", ErrRevealDelayNegative, &c.RevealDelay); err != nil {

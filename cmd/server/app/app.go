@@ -171,6 +171,7 @@ func Run(
 	version.SetEnv(cfg.AppEnvironment)
 
 	stores := store.New(conn, logger)
+
 	startSweeps(signalCtx, cfg, logger, stores)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
 	// Own the runner's context so shutdown waits for its goroutine to exit

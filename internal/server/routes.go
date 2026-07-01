@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
@@ -63,6 +64,9 @@ func addRoutes(
 	gameDeps := adminGameDeps{gameService: gameService, runningGames: realtime.SessionService}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	if cfg.DemoMode {
+		mux.Handle("POST /demo/enter", demo.HandleEnter(sessions, stores.Players, logger))
+	}
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
 	addMediaRoutes(
 		mux,
@@ -73,7 +77,9 @@ func addRoutes(
 		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
 		cfg,
 	)
-	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	if cfg.ProfileEnabled {
+		addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	}
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService, cfg.BaseURL)
 	addClientAndPublicRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
@@ -130,7 +136,7 @@ func addClientAndPublicRoutes(
 	// CSRF middleware.
 	viewerFunc := homeViewerFunc(stores.Players, sessions)
 	csrfTokenFunc := home.CSRFTokenFunc(csrfMgr.Token)
-	mux.Handle("GET /{$}", home.Handle(logger, stores.Home, viewerFunc, csrfTokenFunc))
+	mux.Handle("GET /{$}", home.Handle(logger, stores.Home, viewerFunc, csrfTokenFunc, cfg.DemoMode))
 	// Public quizzes list (#284). Lists every visible quiz so players
 	// can find ones outside the home page's top-six popular slice.
 	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))

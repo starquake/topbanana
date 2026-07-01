@@ -492,6 +492,111 @@ func TestParse_RegistrationEnabled(t *testing.T) {
 	})
 }
 
+func TestParse_DemoMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  bool
+		}{
+			{"unset defaults to false", "", false},
+			{"true string", "true", true},
+			{"false string", "false", false},
+			{"numeric 1 parses as true", "1", true},
+			{"numeric 0 parses as false", "0", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					switch key {
+					case "DEMO_MODE_ENABLED":
+						return tt.value
+					case "APP_ENV":
+						return "development"
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.DemoMode, tt.want; got != want {
+					t.Errorf("DemoMode = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("DEMO_MODE_ENABLED", "maybe"))
+		if err == nil {
+			t.Fatal("Parse() with invalid DEMO_MODE_ENABLED: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid DEMO_MODE_ENABLED"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("off leaves profile enabled", func(t *testing.T) {
+		t.Parallel()
+
+		c, err := Parse(func(key string) string {
+			if key == "APP_ENV" {
+				return "development"
+			}
+
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.ProfileEnabled, true; got != want {
+			t.Errorf("ProfileEnabled = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("on forces the locked-down posture", func(t *testing.T) {
+		t.Parallel()
+
+		// Demo mode must override REGISTRATION_ENABLED and the Google
+		// credentials so env alone cannot reopen the shared demo.
+		getenv := func(key string) string {
+			return map[string]string{
+				"DEMO_MODE_ENABLED":    "true",
+				"REGISTRATION_ENABLED": "true",
+				"GOOGLE_CLIENT_ID":     "id",
+				"GOOGLE_CLIENT_SECRET": "secret",
+				"GOOGLE_REDIRECT_URL":  "https://demo.example/callback",
+				"APP_ENV":              "development",
+			}[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.ProfileEnabled, false; got != want {
+			t.Errorf("ProfileEnabled = %v, want %v", got, want)
+		}
+		if got, want := c.RegistrationEnabled, false; got != want {
+			t.Errorf("RegistrationEnabled = %v, want %v (demo overrides REGISTRATION_ENABLED)", got, want)
+		}
+		if got, want := c.GoogleLoginEnabled(), false; got != want {
+			t.Errorf("GoogleLoginEnabled() = %v, want %v (demo clears Google credentials)", got, want)
+		}
+	})
+}
+
 func TestParse_RevealDelay(t *testing.T) {
 	t.Parallel()
 

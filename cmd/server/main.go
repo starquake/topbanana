@@ -41,15 +41,23 @@ func main() {
 			" Designed for Dockerfile HEALTHCHECK on distroless images (#344) so the image"+
 			" doesn't need a separate wget/curl binary",
 	)
+	seedDemo := flag.Bool(
+		"seed-demo",
+		false,
+		"seed the demo baseline (requires DEMO_MODE_ENABLED) and exit."+
+			" The server should not be running concurrently against the same database."+
+			" Mutually exclusive with the other mode flags",
+	)
 	flag.Parse()
 
 	ctx := context.Background()
 
 	// Reject more than one mode flag: resolving by switch order would silently
 	// run a different recovery action than the operator asked for.
-	if tooManyModes(*resetPasswordFor != "", *promoteAdminFor != "", *checkOnly, *healthcheckOnly) {
+	if tooManyModes(*resetPasswordFor != "", *promoteAdminFor != "", *checkOnly, *healthcheckOnly, *seedDemo) {
 		if _, err := fmt.Fprintln(os.Stderr,
-			"error: -reset-password, -promote-admin, -check, and -healthcheck are mutually exclusive"); err != nil {
+			"error: -reset-password, -promote-admin, -check, -healthcheck, and"+
+				" -seed-demo are mutually exclusive"); err != nil {
 			panic(err)
 		}
 
@@ -68,6 +76,8 @@ func main() {
 		err = app.Check(ctx, os.Getenv, os.Stdout)
 	case *healthcheckOnly:
 		err = app.Healthcheck(ctx, os.Getenv)
+	case *seedDemo:
+		err = app.SeedDemo(ctx, os.Getenv, os.Stderr)
 	default:
 		err = app.Run(ctx, os.Getenv, os.Stdout, nil)
 	}

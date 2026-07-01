@@ -14,6 +14,7 @@ on:
         options:
           - staging
           - production
+          - demo
 
 env:
   REGISTRY: ghcr.io
@@ -44,7 +45,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "deployments/demo/docker-compose.staging.yml"
+          source: "deployments/app/docker-compose.staging.yml"
           target: "~/topbanana-staging"
           strip_components: 2
 
@@ -226,7 +227,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "deployments/demo/docker-compose.production.yml"
+          source: "deployments/app/docker-compose.production.yml"
           target: "~/topbanana-production"
           strip_components: 2
 
@@ -363,6 +364,161 @@ jobs:
             docker logout ghcr.io
 
       - name: Verify production deployment
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "${{ secrets.HEALTH_URL }}" >/dev/null; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Health check attempt $i/12 failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 12 attempts (60s); failing the deploy" >&2
+          exit 1
+
+  deploy-demo:
+    runs-on: ubuntu-latest
+    # Read-only token: the runner resolves + verifies the image digest
+    # and the host pulls by it; nothing here writes packages.
+    permissions:
+      contents: read
+      packages: read
+    # Gated so a missing demo host does not red the release pipeline.
+    # Only fires when DEMO_DEPLOY_ENABLED is set and either a v* release
+    # tag triggered this workflow or a manual dispatch targets 'demo'.
+    if: >-
+      vars.DEMO_DEPLOY_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) ||
+       (github.event_name == 'workflow_dispatch' && inputs.environment == 'demo'))
+    environment:
+      name: demo
+      url: "${{ env.SERVER_URL }}"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          IMAGE_TAG="${{ github.event.workflow_run.head_branch || github.ref_name }}"
+          IMAGE_TAG="${IMAGE_TAG#v}"
+          if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IMAGE_TAG="latest"
+          fi
+          echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Copy docker-compose file
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deployments/app/docker-compose.demo.yml"
+          target: "~/topbanana-demo"
+          strip_components: 2
+
+      - name: Copy demo seed archive
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dev/fixtures/demo-quiz.zip"
+          target: "~/topbanana-demo"
+          strip_components: 2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Resolve the release tag to the immutable digest the host pulls.
+      # The version tag is created by promote retagging the tested,
+      # signed sha-<commit> image from main, so the digest is the same
+      # one CI signed. Pinning the deploy to it means a later tag move
+      # cannot swap the running bytes.
+      - name: Resolve image digest
+        id: digest
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Manifest.Digest}}')"
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: could not resolve a digest for ${IMAGE_REF} (got '${DIGEST}')" >&2
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Reject the deploy unless the digest carries a valid keyless
+      # signature from this repo's CI workflow on main. docker-build
+      # signs the digest there; the signature binds to the digest, so a
+      # forged or untrusted image fails here before the host pulls it.
+      - name: Verify image signature
+        env:
+          IMAGE_DIGEST_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.digest.outputs.digest }}
+        run: |
+          cosign verify "$IMAGE_DIGEST_REF" \
+            --certificate-identity-regexp '^https://github\.com/starquake/topbanana/\.github/workflows/ci\.yml@refs/heads/main$' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+      - name: Deploy to demo server
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          SESSION_KEY: ${{ secrets.SESSION_KEY }}
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+          IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          # appleboy/ssh-action only forwards env vars named here; missing
+          # one means the script sees an empty value and the .env heredoc
+          # bakes in a blank, which the compose ${VAR:?...} guard then
+          # rejects on boot. Keep this list in lockstep with the env block
+          # above and the .env heredoc below.
+          envs: SESSION_KEY,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
+          script: |
+            set -e
+            if [ -z "$SESSION_KEY" ]; then
+              echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
+              exit 1
+            fi
+            mkdir -p ~/topbanana-demo
+            cd ~/topbanana-demo
+            umask 077
+            cat > .env <<EOF
+            SESSION_KEY='${SESSION_KEY}'
+            DEMO_MODE_ENABLED='true'
+            BASE_URL='https://demo.topbanana.app'
+            ADMIN_EMAILS='${ADMIN_EMAILS}'
+            IMAGE_NAME='${IMAGE_NAME}'
+            IMAGE_DIGEST='${IMAGE_DIGEST}'
+            EOF
+            mv -f docker-compose.demo.yml docker-compose.yml
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            docker compose pull
+            docker compose up -d
+            docker image prune -af
+            docker logout ghcr.io
+
+      - name: Verify demo deployment
         run: |
           for i in $(seq 1 12); do
             if curl -fsS "${{ secrets.HEALTH_URL }}" >/dev/null; then

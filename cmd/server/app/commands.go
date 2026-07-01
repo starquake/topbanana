@@ -16,6 +16,8 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/demo"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -115,6 +117,15 @@ var errPromoteEmailRequired = errors.New("email is required")
 // matches the supplied email.
 var errPromoteEmailNotFound = errors.New("email not found")
 
+// errSeedDemoDisabled is returned by SeedDemo when demo mode (Config.DemoMode,
+// from DEMO_MODE_ENABLED) is off; defined at package scope so callers can match
+// it via [errors.Is].
+var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
+
+// errSeedDemoArchiveNotSet is returned by SeedDemo when DEMO_SEED_ARCHIVE is
+// empty; defined at package scope so callers can match it via [errors.Is].
+var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE is not set")
+
 // PromoteAdmin looks up a player by email and sets them to the top tier
 // (role = 'admin') (#538). This is a break-glass recovery tool: the first
 // Admin normally comes from the first credentialled registration, so this
@@ -168,6 +179,53 @@ func PromoteAdmin(
 		return fmt.Errorf("promote admin: write confirmation: %w", err)
 	}
 	logger.InfoContext(ctx, "promoted to admin", slog.String("email", email))
+
+	return nil
+}
+
+// SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz)
+// against the configured database. It exits early with an error when demo mode
+// is off (Config.DemoMode) so it cannot accidentally seed a non-demo DB.
+// The quiz archive is read from the path given by DEMO_SEED_ARCHIVE; it is
+// not embedded in the binary so the ~3 MB file stays out of the production
+// image and is supplied by the demo deployment's bind mount instead.
+func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error {
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg, err := config.Parse(getenv)
+	if err != nil {
+		return fmt.Errorf("seed-demo: parse config: %w", err)
+	}
+	if !cfg.DemoMode {
+		return fmt.Errorf("seed-demo: %w", errSeedDemoDisabled)
+	}
+
+	archivePath := getenv("DEMO_SEED_ARCHIVE")
+	if archivePath == "" {
+		return fmt.Errorf("seed-demo: %w", errSeedDemoArchiveNotSet)
+	}
+
+	raw, err := os.ReadFile(archivePath) //nolint:gosec // operator-provided path from a trusted env var
+	if err != nil {
+		return fmt.Errorf("seed-demo: read archive: %w", err)
+	}
+
+	conn, err := setupDB(ctx, cfg.DatabaseConfig(), logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+		}
+	}()
+
+	stores := store.New(conn, logger)
+	mediaSvc := media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger)
+
+	if err := demo.SeedIfEnabled(ctx, cfg, stores, mediaSvc, logger, raw); err != nil {
+		return fmt.Errorf("seed-demo: %w", err)
+	}
 
 	return nil
 }
