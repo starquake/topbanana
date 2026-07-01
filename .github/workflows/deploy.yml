@@ -383,12 +383,15 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # Gated so a missing demo host does not red the release pipeline.
-    # Only fires when DEMO_DEPLOY_ENABLED is set and either a v* release
-    # tag triggered this workflow or a manual dispatch targets 'demo'.
+    # Gated so a missing demo host does not red the main or release
+    # pipeline. Fires when DEMO_DEPLOY_ENABLED is set and CI succeeded on
+    # main (the demo tracks main via the edge image, like staging) or on a
+    # v* release tag (deploy that version), or on a manual dispatch to
+    # 'demo' (deploy edge).
     if: >-
       vars.DEMO_DEPLOY_ENABLED == 'true' &&
-      ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) ||
+      ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+        (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) ||
        (github.event_name == 'workflow_dispatch' && inputs.environment == 'demo'))
     environment:
       name: demo
@@ -400,13 +403,19 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # A v* release tag deploys that version (retagged by promote from the
+      # tested main image). Main CI success or a manual dispatch deploys the
+      # current main build (edge), so the demo tracks main without a release.
+      # edge is signed on main, so the cosign identity check below still holds.
       - name: Determine image tag
         id: tag
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          IMAGE_TAG="${{ github.event.workflow_run.head_branch || github.ref_name }}"
-          IMAGE_TAG="${IMAGE_TAG#v}"
-          if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            IMAGE_TAG="latest"
+          if [[ "$HEAD_BRANCH" == v* ]]; then
+            IMAGE_TAG="${HEAD_BRANCH#v}"
+          else
+            IMAGE_TAG="edge"
           fi
           echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
