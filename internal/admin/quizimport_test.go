@@ -1,10 +1,39 @@
 package admin_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/admin"
 )
+
+// TestQuizImportExampleParses is the golden test that the exact JSON
+// sample rendered on the import screen parses cleanly through the real
+// importer: the same DisallowUnknownFields decode and payload-to-domain
+// translation the POST handler runs, then the shared form validation.
+// It fails if the sample carries a field the parser rejects (or drops a
+// documented one), so the on-screen example and the parser cannot drift
+// (#1138).
+func TestQuizImportExampleParses(t *testing.T) {
+	t.Parallel()
+
+	var payload admin.QuizImportPayload
+	dec := json.NewDecoder(strings.NewReader(admin.QuizImportExample))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("decoding sample: err = %v, want nil", err)
+	}
+
+	qz, err := admin.QuizFromImportPayload(payload)
+	if err != nil {
+		t.Fatalf("QuizFromImportPayload err = %v, want nil", err)
+	}
+
+	if problems := admin.ValidateQuizForm(t.Context(), qz); len(problems) > 0 {
+		t.Errorf("ValidateQuizForm problems = %v, want none", problems)
+	}
+}
 
 // TestQuizFromImportPayload_MapsQuestions pins the payload-to-domain
 // translation: the title drives the slug, and questions keep their
