@@ -102,10 +102,12 @@ test('the host bigscreen shows an Image unavailable placeholder when the questio
     await expect(placeholder).toContainText('Image unavailable');
     await expect(page.getByTestId('question-image')).toBeHidden();
   } finally {
-    await caseyCtx.close();
-    // End the session this spec started as the shared admin: a live game left
-    // running flips the next shared-admin host test's "Host live" into the
-    // confirm-restart modal (no /host/<code> navigation), stalling it (#1143).
+    // End the session this spec started as the shared admin BEFORE closing the
+    // player context, so a rejecting caseyCtx.close() cannot skip the
+    // session-end: a live game left running flips the next shared-admin host
+    // test's "Host live" into the confirm-restart modal (no /host/<code>
+    // navigation), stalling it (#1143).
     await endHostedSession(page, code).catch(() => undefined);
+    await caseyCtx.close();
   }
 });

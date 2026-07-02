@@ -170,10 +170,12 @@ test('the question image renders on the host bigscreen during the question and r
     await expect(page.locator('[data-answer-option][data-correct="true"]')).toHaveCount(1, { timeout: 15_000 });
     await expect(questionImage).toBeVisible();
   } finally {
-    await caseyCtx.close();
-    // End the session this spec started as the shared admin: a live game left
-    // running flips the next shared-admin host test's "Host live" into the
-    // confirm-restart modal (no /host/<code> navigation), stalling it (#1143).
+    // End the session this spec started as the shared admin BEFORE closing the
+    // player context, so a rejecting caseyCtx.close() cannot skip the
+    // session-end: a live game left running flips the next shared-admin host
+    // test's "Host live" into the confirm-restart modal (no /host/<code>
+    // navigation), stalling it (#1143).
     await endHostedSession(page, code).catch(() => undefined);
+    await caseyCtx.close();
   }
 });

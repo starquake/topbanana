@@ -63,7 +63,9 @@ test.describe('session-first live hosting', () => {
     // staging room open, "Host this" ARMS the quiz in that room but stays in the
     // lobby (#863) - it does NOT auto-start - so the host starts when ready.
     await host.getByTestId('pick-quiz-link').locator('a').click();
-    await expect(host).toHaveURL(/\/host\/quizzes$/);
+    // waitForURL (test-timeout budget) not expect().toHaveURL (5s) so a slow
+    // /host/quizzes navigation under CI load does not flake the assertion (#1143).
+    await host.waitForURL(/\/host\/quizzes$/);
     const quizCard = host.locator('article').filter({ hasText: quizTitle });
     await quizCard.getByRole('button', { name: 'Host this' }).click();
 
