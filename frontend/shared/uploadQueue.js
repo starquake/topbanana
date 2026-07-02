@@ -59,6 +59,12 @@ function finishRow(row, status, text, success) {
 //   - rowTestId:    data-testid set on each row ('upload-row' / 'audio-upload-row').
 //   - cancellable:  when true, each row renders a Cancel button that aborts the
 //                   XHR (an aborted file counts toward the batch's cancelled tally).
+//   - maxBytes:     optional per-file size cap in bytes. A picked file larger
+//                   than this is rejected before its XHR opens (counts as
+//                   skipped); zero or absent disables the guard. The server
+//                   stays authoritative - this is a client courtesy (#1139).
+//   - maxSizeLabel: human-readable form of maxBytes ('10 MB') shown in the
+//                   rejection message. Optional; falls back to a generic message.
 //   - prepare(file): optional async hook resolving to extra FormData fields,
 //                   e.g. { duration_ms: '1234' }. Defaults to no extra fields.
 //   - isLanded(json): given a parsed 2xx JSON body, returns true when the file
@@ -76,11 +82,15 @@ export function createUploadQueue(config) {
         fieldName,
         rowTestId,
         cancellable = false,
+        maxBytes = 0,
+        maxSizeLabel = '',
         prepare = () => Promise.resolve(null),
         isLanded,
         failureReason = () => '',
         onSettle,
     } = config;
+
+    const oversizeMessage = maxSizeLabel ? `Too large (max ${maxSizeLabel})` : 'File is too large';
 
     // Batch-scoped counters so a prior all-fail batch can't leak into the next
     // settle. pending holds files picked but not yet started.
@@ -144,6 +154,27 @@ export function createUploadQueue(config) {
         status.textContent = '0%';
         topRow.appendChild(status);
 
+        queue.appendChild(row);
+        b.inFlight++;
+
+        // Client-side size guard (#1139): reject an over-cap file before opening
+        // its XHR so the browser never uploads bytes the server would reject. The
+        // server 4xx stays the real boundary; this is a courtesy. Settle in a
+        // microtask (as the valid path does via prepare().then) so the pump loop
+        // that started this file finishes before batch accounting unwinds - a
+        // synchronous settle here could null the batch mid-loop. A rejected file
+        // counts as skipped and frees its slot immediately, so it holds no queue
+        // slot while doing nothing.
+        if (maxBytes > 0 && file.size > maxBytes) {
+            Promise.resolve().then(() => {
+                b.skipped++;
+                finishRow(row, status, oversizeMessage, false);
+                settle(b);
+            });
+
+            return;
+        }
+
         let cancelBtn = null;
         if (cancellable) {
             cancelBtn = document.createElement('button');
@@ -160,10 +191,6 @@ export function createUploadQueue(config) {
         bar.max = 100;
         bar.value = 0;
         row.appendChild(bar);
-
-        queue.appendChild(row);
-
-        b.inFlight++;
 
         Promise.resolve(prepare(file)).then((extraFields) => {
             sendUpload({ file, b, row, status, bar, cancelBtn, extraFields });
