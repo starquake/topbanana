@@ -509,6 +509,25 @@
                md:col-auto md:w-auto md:p-0 md:m-0 md:border-0;
     }
 
+    /* At-a-glance question badges (#1141): a compact icon+label cluster
+     * that surfaces attached media and the option/correct counts so a host
+     * can scan for mistakes without expanding each question. */
+    .q-meta {
+        @apply flex flex-wrap items-center gap-2;
+    }
+    .q-badge {
+        @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+               bg-surface-2 border border-border-soft
+               text-text-dim text-[0.72rem] font-medium tabular-nums;
+    }
+    .q-badge svg {
+        @apply w-3.5 h-3.5 shrink-0;
+    }
+    /* Danger tint when a question has no option marked correct. */
+    .q-badge-warn {
+        @apply text-danger border-danger/40 bg-danger/10;
+    }
+
     /* Players list — striped, edge-to-edge, rounded outer container. */
     .player-list {
         @apply flex flex-col border border-border-soft rounded-lg overflow-hidden;
