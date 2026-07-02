@@ -2,6 +2,23 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.7.0 — 2026-07-02
+
+This release adds recovery controls for interrupted live games and clearer handling of failed images and quiz-list load errors.
+
+### Players
+- A live player can reconnect from the connection-trouble banner, and can return to the join screen when the game is no longer available.
+- A question image that fails to load shows an "Image unavailable" placeholder instead of an empty gap, on the play screen and the big screen.
+- When the quiz list fails to load, the start screen shows an error and a Retry button instead of appearing to have no quizzes.
+- Keyboard focus stays within an open dialog and returns to the control that opened it when the dialog closes.
+
+### Visual / chrome
+- A card no longer briefly flashes when the game moves to a new round.
+
+### Behind the scenes
+- The app no longer sends a Server response header naming the web server.
+- An optional demo mode can run a public, sign-up-free instance that resets daily; it is off by default.
+
 ## v2026.6.7 — 2026-06-27
 
 This release adds audio to quiz questions, and quiz export and import as an archive that includes a quiz's images and sounds.
