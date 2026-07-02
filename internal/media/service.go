@@ -68,7 +68,9 @@ func NewService(store Store, root string, imageMaxBytes, audioMaxBytes int64, lo
 // StoreImage processes the upload into a normalised jpeg full image plus
 // thumbnail, writes both under <root>/<quizID>/, inserts the media row with the
 // relative paths and metadata, and returns the stored Media. createdBy is the
-// uploading player.
+// uploading player; filename is the client-supplied upload name, stored (base
+// name, length-capped) as the row's OriginalFilename so the library can show it
+// as a tooltip (#1137).
 //
 // The row is inserted not-ready, then the files are written, the paths
 // recorded, and only then the row is flipped ready (a two-phase commit, #992).
@@ -78,7 +80,9 @@ func NewService(store Store, root string, imageMaxBytes, audioMaxBytes int64, lo
 // any step removes the just-written files and the row so a failed upload leaves
 // no orphans. The stored Path / ThumbPath are relative to root so a later root
 // remount does not strand the references.
-func (s *Service) StoreImage(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
+func (s *Service) StoreImage(
+	ctx context.Context, quizID, createdBy int64, filename string, r io.Reader,
+) (*Media, error) {
 	// Two ctx.Err checks around Process: the first skips Process if the
 	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
 	// the second catches a cancel that arrived during Process, which is sync
@@ -106,6 +110,7 @@ func (s *Service) StoreImage(ctx context.Context, quizID, createdBy int64, r io.
 		Height:            processed.Height,
 		SizeBytes:         int64(processed.SizeBytes),
 		SHA256:            processed.SHA256,
+		OriginalFilename:  sanitizeFilename(filename),
 		CreatedByPlayerID: createdBy,
 	})
 	if err != nil {
@@ -125,6 +130,30 @@ func (s *Service) StoreImage(ctx context.Context, quizID, createdBy int64, r io.
 	row.ThumbPath = relThumb
 
 	return row, nil
+}
+
+// maxOriginalFilenameLen bounds a stored original filename so a crafted upload
+// cannot persist an unbounded string. Measured in runes so a multi-byte name is
+// not cut mid-character. The library truncates visually anyway; this is the
+// storage guard.
+const maxOriginalFilenameLen = 255
+
+// sanitizeFilename reduces a client-supplied upload filename to the value stored
+// as a media row's OriginalFilename (#1137): its base name (stripping any
+// directory components a crafted client may prepend), length-capped. A name that
+// is empty or resolves to no real base ("." or a bare separator) yields the empty
+// string so an unnamed upload stores no tooltip rather than a stray ".".
+func sanitizeFilename(filename string) string {
+	base := filepath.Base(strings.TrimSpace(filename))
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	runes := []rune(base)
+	if len(runes) > maxOriginalFilenameLen {
+		base = strings.TrimSpace(string(runes[:maxOriginalFilenameLen]))
+	}
+
+	return base
 }
 
 // Delete removes the media row, then unlinks its two files best-effort. A

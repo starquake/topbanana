@@ -66,11 +66,12 @@ const (
 
 // StoreAudio persists an already-browser-playable audio upload as-is under
 // <root>/<quizID>/<id><ext>, recording a media row with the sniffed MIME, byte
-// size, sha256, the caller-supplied duration, and a description label. Audio is
-// not decoded or transcoded server-side: the format is detected by sniffing
-// magic bytes, and an unrecognised container is rejected with ErrUnsupportedAudio
-// rather than converted. durationMs is advisory (read in-browser by the caller);
-// a value of zero or less stores NULL.
+// size, sha256, the caller-supplied duration, a description label, and the
+// original upload filename (base name, length-capped) as OriginalFilename for the
+// library tooltip (#1137). Audio is not decoded or transcoded server-side: the
+// format is detected by sniffing magic bytes, and an unrecognised container is
+// rejected with ErrUnsupportedAudio rather than converted. durationMs is advisory
+// (read in-browser by the caller); a value of zero or less stores NULL.
 //
 // description is the host-facing library label (#1072). When it is empty it
 // defaults to filename without its extension, so a clip always has a readable
@@ -105,6 +106,7 @@ func (s *Service) StoreAudio(
 		SHA256:            hex.EncodeToString(sum[:]),
 		DurationMs:        durationToPtr(durationMs),
 		Description:       defaultDescription(description, filename),
+		OriginalFilename:  sanitizeFilename(filename),
 		CreatedByPlayerID: createdBy,
 	})
 	if err != nil {

@@ -30,8 +30,9 @@ type Viewer func(r *http.Request) (*auth.Player, bool)
 // service.
 type MediaService interface {
 	// StoreImage processes an uploaded image through the pipeline, writes the jpeg
-	// full + thumbnail under the quiz directory, records a row, and returns it.
-	StoreImage(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
+	// full + thumbnail under the quiz directory, records a row (with filename as
+	// the row's original upload name), and returns it.
+	StoreImage(ctx context.Context, quizID, createdBy int64, filename string, r io.Reader) (*media.Media, error)
 	// StoreAudio validates and stores an already-browser-playable audio upload
 	// as-is, recording an audio row with the caller-supplied duration and a
 	// description label (defaulting to filename without extension when empty), and

@@ -22,3 +22,7 @@ var ExportSniffAudio = sniffAudio
 // ExportDefaultDescription re-exports the unexported description-defaulting
 // helper for tests.
 var ExportDefaultDescription = defaultDescription
+
+// ExportSanitizeFilename re-exports the unexported upload-filename sanitizer for
+// tests.
+var ExportSanitizeFilename = sanitizeFilename

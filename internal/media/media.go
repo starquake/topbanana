@@ -46,7 +46,12 @@ type Media struct {
 	// Description is a host-supplied, host-facing label for the row (#1072).
 	// Defaults to the uploaded filename without its extension and is editable
 	// afterwards; the empty string means unlabelled.
-	Description       string
+	Description string
+	// OriginalFilename is the client-supplied upload filename, reduced to its
+	// base name and length-capped (#1137), kept so a host can tell which source
+	// file a stored media row came from. Empty when the upload carried no usable
+	// name and for rows predating the column.
+	OriginalFilename  string
 	CreatedByPlayerID int64
 	CreatedAt         time.Time
 }

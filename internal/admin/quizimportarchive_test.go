@@ -95,7 +95,7 @@ func exportArchiveBytes(t *testing.T) []byte {
 	mediaSvc := newMediaServiceOverTemp(t, env)
 	qz := env.seedQuiz(t, roundedQuiz())
 
-	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, bytes.NewReader(tinyPNG(t)))
+	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, "pic.png", bytes.NewReader(tinyPNG(t)))
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}

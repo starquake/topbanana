@@ -109,7 +109,7 @@ func (r *mediaRestorer) resolveImage(ctx context.Context, ref *quizArchiveImageR
 	}
 	defer func() { _ = rc.Close() }()
 
-	stored, err := r.mediaSvc.StoreImage(ctx, r.quizID, r.importerID, rc)
+	stored, err := r.mediaSvc.StoreImage(ctx, r.quizID, r.importerID, ref.File, rc)
 	if err != nil {
 		return nil, fmt.Errorf("restoring image %q: %w", ref.File, err)
 	}

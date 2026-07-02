@@ -224,7 +224,7 @@ func TestWriteQuizArchive(t *testing.T) {
 	qz := env.seedQuiz(t, roundedQuiz())
 
 	// Store one image + one audio clip in the quiz's library.
-	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, bytes.NewReader(tinyPNG(t)))
+	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, "pic.png", bytes.NewReader(tinyPNG(t)))
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
