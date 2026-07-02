@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // fullSuffix and thumbSuffix name the two files a stored image writes under
@@ -148,12 +149,35 @@ func sanitizeFilename(filename string) string {
 	if base == "." || base == string(filepath.Separator) {
 		return ""
 	}
-	runes := []rune(base)
-	if len(runes) > maxOriginalFilenameLen {
-		base = strings.TrimSpace(string(runes[:maxOriginalFilenameLen]))
+
+	return capRunes(stripControlRunes(base), maxOriginalFilenameLen)
+}
+
+// capRunes trims s and caps it to limit runes, trimming again after a mid-string
+// cut so a truncation never leaves trailing whitespace. Shared by the filename
+// and description normalizers so their length-cap semantics stay identical.
+func capRunes(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) > limit {
+		s = strings.TrimSpace(string(runes[:limit]))
 	}
 
-	return base
+	return s
+}
+
+// stripControlRunes drops Unicode control characters (newlines, tabs, etc.) from
+// s so a crafted upload filename cannot render as a garbled multi-line library
+// tooltip (#1137). html/template already escapes the HTML-dangerous characters;
+// this is display hygiene for the title text.
+func stripControlRunes(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+
+		return r
+	}, s)
 }
 
 // Delete removes the media row, then unlinks its two files best-effort. A

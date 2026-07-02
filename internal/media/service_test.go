@@ -199,8 +199,8 @@ func TestServiceStoreImageSanitizesFilename(t *testing.T) {
 }
 
 // TestSanitizeFilename pins the upload-filename sanitizer: it reduces a name to
-// its base, drops directory-only and empty inputs to the empty string, and caps
-// the length in runes (#1137).
+// its base, drops directory-only and empty inputs to the empty string, strips
+// control characters, and caps the length in runes (#1137).
 func TestSanitizeFilename(t *testing.T) {
 	t.Parallel()
 
@@ -208,12 +208,14 @@ func TestSanitizeFilename(t *testing.T) {
 		in   string
 		want string
 	}{
-		"plain name":       {in: "photo.png", want: "photo.png"},
-		"strips directory": {in: "uploads/sub/photo.png", want: "photo.png"},
-		"trims whitespace": {in: "  photo.png  ", want: "photo.png"},
-		"empty":            {in: "", want: ""},
-		"dot":              {in: ".", want: ""},
-		"root separator":   {in: "/", want: ""},
+		"plain name":           {in: "photo.png", want: "photo.png"},
+		"strips directory":     {in: "uploads/sub/photo.png", want: "photo.png"},
+		"trims whitespace":     {in: "  photo.png  ", want: "photo.png"},
+		"empty":                {in: "", want: ""},
+		"dot":                  {in: ".", want: ""},
+		"root separator":       {in: "/", want: ""},
+		"strips control runes": {in: "pho\nto\t.png", want: "photo.png"},
+		"control runes only":   {in: "\x00\x01\x02", want: ""},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {

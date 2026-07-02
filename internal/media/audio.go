@@ -182,13 +182,7 @@ func defaultDescription(description, filename string) string {
 // maxDescriptionLen runes, the single normalization both the upload default and
 // the inline edit apply so the stored value is bounded and consistent.
 func normalizeDescription(description string) string {
-	trimmed := strings.TrimSpace(description)
-	runes := []rune(trimmed)
-	if len(runes) > maxDescriptionLen {
-		trimmed = strings.TrimSpace(string(runes[:maxDescriptionLen]))
-	}
-
-	return trimmed
+	return capRunes(description, maxDescriptionLen)
 }
 
 // durationToPtr maps a caller-supplied duration in milliseconds to the *int the
