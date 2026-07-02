@@ -121,6 +121,11 @@ type QuizImportOptionPayload = quizImportOptionPayload
 // without spinning the full HTTP handler.
 var QuizFromImportPayload = quizFromImportPayload
 
+// QuizImportExample exposes the exact JSON sample rendered on the import
+// page so the golden test can decode it through the real importer,
+// keeping the on-screen example and the parser from drifting (#1138).
+const QuizImportExample = quizImportExample
+
 // StripCodeFences exposes the unexported fenced-code-block stripper so the
 // test package can pin the paste-from-an-LLM-code-block tolerance.
 var StripCodeFences = stripCodeFences

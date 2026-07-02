@@ -148,6 +148,7 @@ Fields:
 - rounds (array, in play order, required) - each named round has:
     - title (string, required)
     - summary (string, optional) - shown to the player between rounds
+    - boundaryDurationSeconds (integer, optional) - seconds the round's intro and recap cards show before auto-advancing; omit to inherit the quiz default
     - questions (array, in play order, required) - each has:
         - text (string, required)
         - options (array of {text, correct}, required) - mark at least one correct; more than one may be correct
@@ -168,8 +169,10 @@ Give me X rounds of Y questions.</code></pre>
             <li><code class="font-mono text-[0.8rem]">title</code> - string, required. Slug is derived server-side.</li>
             <li><code class="font-mono text-[0.8rem]">description</code> - string, required.</li>
             <li><code class="font-mono text-[0.8rem]">timeLimitSeconds</code> - integer, optional. Quiz-wide default answer window.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[]</code> or <code class="font-mono text-[0.8rem]">questions[]</code> - array, required. Supply exactly one: <code class="font-mono text-[0.8rem]">rounds[]</code> for named rounds (the prompt above), or a top-level <code class="font-mono text-[0.8rem]">questions[]</code> for a single flat round. Not both, not neither. A top-level question takes the same shape as a round's question.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].title</code> - string, required. Names the round.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].summary</code> - string, optional. Shown to the player between rounds.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].boundaryDurationSeconds</code> - integer, optional. Seconds the round's intro and recap cards show before auto-advancing; omit to inherit the quiz default.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].questions[].text</code> - string, required.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].questions[].timeLimitSeconds</code> - integer, optional. Overrides the quiz default.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].questions[].options[]</code> - array of <code class="font-mono text-[0.8rem]">{text, correct}</code>. At least one option must be correct; more than one may be correct, and the player scores by picking any correct option.</li>
