@@ -242,7 +242,7 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 			fmt.Sprintf(`src="/media/%d"`, audioID),
 			`data-testid="audio-duration"`,
 			"1:35",
-			`title="tune.mp3"`,
+			`data-testid="audio-library-filename">tune.mp3</p>`,
 			fmt.Sprintf(`action="/admin/quizzes/%d/media/audio"`, quizID),
 		} {
 			if !strings.Contains(page, want) {
