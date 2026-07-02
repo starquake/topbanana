@@ -142,8 +142,8 @@ type QuestionData struct {
 }
 
 // CorrectCount reports how many of the question's options are marked
-// correct. The quiz view surfaces it as a per-question badge so a host
-// can spot a question with no correct answer at a glance (#1141).
+// correct. Zero means the question has no correct option, a likely
+// authoring mistake a caller can flag (#1141).
 func (d *QuestionData) CorrectCount() int {
 	n := 0
 	for _, op := range d.Options {
