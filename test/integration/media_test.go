@@ -543,6 +543,7 @@ func TestMediaLibraryView_Integration(t *testing.T) {
 		for _, want := range []string{
 			fmt.Sprintf(`src="/media/%d/thumb"`, mediaID),
 			fmt.Sprintf(`openImageViewer('/media/%d')`, mediaID),
+			`title="pic.png"`,
 			`enctype="multipart/form-data"`,
 		} {
 			if !strings.Contains(page, want) {

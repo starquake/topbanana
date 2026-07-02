@@ -324,6 +324,7 @@
                                     class="block w-full p-0 aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface cursor-pointer hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
                                 <img src="/media/{{.ID}}/thumb"
                                      alt="Quiz image {{.ID}}"
+                                     {{if .OriginalFilename}}title="{{.OriginalFilename}}"{{end}}
                                      loading="lazy"
                                      width="{{.Width}}" height="{{.Height}}"
                                      class="h-full w-full object-cover"
@@ -517,6 +518,7 @@
                              removes both atomically (no orphan dialogs). */}}
                         <li id="sound-tile-{{.ID}}"
                             data-testid="audio-library-item"
+                            {{if .OriginalFilename}}title="{{.OriginalFilename}}"{{end}}
                             class="flex flex-wrap items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3">
                             <div class="flex min-w-0 grow items-center gap-3">
                                 <span class="shrink-0 text-text-dim" aria-hidden="true">
