@@ -432,6 +432,12 @@ func assertImportedMedia(t *testing.T, env *adminEnv, imported *quiz.Quiz) {
 	imageID := images[0].ID
 	audio := audios[0]
 
+	// The original upload filename round-trips through the manifest (#1137), so a
+	// re-imported quiz restores the library tooltip rather than a synthetic path.
+	if got, want := images[0].OriginalFilename, "pic.png"; got != want {
+		t.Errorf("restored image OriginalFilename = %q, want %q", got, want)
+	}
+
 	withImage, withAudio := questionsByMedia(imported, imageID, audio.ID)
 	if got, want := withImage, 2; got != want {
 		t.Errorf("questions referencing the restored image = %d, want %d", got, want)
@@ -476,6 +482,9 @@ func assertAudioMeta(t *testing.T, imported *quiz.Quiz, audio *media.Media) {
 
 	if got, want := audio.Description, "Theme"; got != want {
 		t.Errorf("audio Description = %q, want %q", got, want)
+	}
+	if got, want := audio.OriginalFilename, "theme.mp3"; got != want {
+		t.Errorf("audio OriginalFilename = %q, want %q", got, want)
 	}
 	if audio.DurationMs == nil {
 		t.Fatal("audio DurationMs = nil, want 1234")
