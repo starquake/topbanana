@@ -471,10 +471,19 @@
                        id="quiz-media-upload"
                        name="images"
                        accept="image/jpeg,image/png"
+                       data-max-bytes="{{.UploadLimits.ImageMaxBytes}}"
+                       data-max-size-label="{{.UploadLimits.ImageMaxLabel}}"
                        multiple
                        required
                        class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
                 <button type="submit" class="btn-primary" data-testid="upload-button">Upload</button>
+                {{/* Upload limits (#1139): show the caps so a host does not pick a
+                     file the server will reject; basis-full drops it to its own
+                     line under the picker. The client guard reads the numeric cap
+                     from the input's data-max-bytes. */}}
+                <p class="basis-full text-xs text-text-dim" data-testid="image-upload-limits">
+                    {{if .UploadLimits.ImageMaxLabel}}Up to {{.UploadLimits.ImageMaxLabel}} per image. {{end}}JPG or PNG{{if .UploadLimits.MaxFilesPerBatch}}, up to {{.UploadLimits.MaxFilesPerBatch}} at a time{{end}}{{if .UploadLimits.PerQuizImageLimit}}, {{.UploadLimits.PerQuizImageLimit}} images per quiz{{end}}.
+                </p>
             </form>
 
             {{/* Auto-upload progress queue (#951): quiz-image-upload.js
@@ -576,10 +585,18 @@
                        id="quiz-audio-upload"
                        name="audio"
                        accept="audio/mpeg,audio/mp4,audio/ogg,audio/wav,.mp3,.m4a,.ogg,.wav"
+                       data-max-bytes="{{.UploadLimits.AudioMaxBytes}}"
+                       data-max-size-label="{{.UploadLimits.AudioMaxLabel}}"
                        multiple
                        required
                        class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
                 <button type="submit" class="btn-primary" data-testid="audio-upload-button">Upload</button>
+                {{/* Upload limits (#1139): audio posts one file per request, so the
+                     files-per-batch cap does not apply here; show the size cap and
+                     the per-quiz clip ceiling. */}}
+                <p class="basis-full text-xs text-text-dim" data-testid="audio-upload-limits">
+                    {{if .UploadLimits.AudioMaxLabel}}Up to {{.UploadLimits.AudioMaxLabel}} per clip. {{end}}MP3, M4A, OGG, or WAV{{if .UploadLimits.PerQuizImageLimit}}, {{.UploadLimits.PerQuizImageLimit}} clips per quiz{{end}}.
+                </p>
             </form>
 
             {{/* Auto-upload progress queue (#1059): quiz-audio-upload.js

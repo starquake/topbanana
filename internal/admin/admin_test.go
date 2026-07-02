@@ -287,7 +287,15 @@ func TestHandleQuizView(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -302,6 +310,43 @@ func TestHandleQuizView(t *testing.T) {
 		}
 	})
 
+	t.Run("renders the upload limits", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Limited Quiz", "limited-quiz"))
+
+		handler := HandleQuizView(
+			logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
+		)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("quiz view status = %d, want %d", got, want)
+		}
+		body := rr.Body.String()
+		// Human-readable helper text (images: size + batch cap + per-quiz cap;
+		// audio: size + per-quiz cap) plus the numeric byte caps the client-side
+		// size guard reads from the file inputs.
+		for _, want := range []string{
+			"Up to 10 MB per image",
+			"up to 10 at a time",
+			"200 images per quiz",
+			"Up to 20 MB per clip",
+			"200 clips per quiz",
+			`data-max-bytes="10485760"`,
+			`data-max-bytes="20971520"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("quiz view missing upload-limit text %q", want)
+			}
+		}
+	})
+
 	t.Run("quiz not found", func(t *testing.T) {
 		t.Parallel()
 
@@ -310,7 +355,15 @@ func TestHandleQuizView(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/999", nil)
 		req.SetPathValue("quizID", "999")
 		rr := httptest.NewRecorder()
@@ -452,7 +505,15 @@ func TestHandleQuizView_RestartModalGating(t *testing.T) {
 
 	viewBody := func(t *testing.T, env *adminEnv, qz *quiz.Quiz, running RunningGameLookup) string {
 		t.Helper()
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			running,
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -513,7 +574,15 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		req.SetPathValue("quizID", "abc")
 		rr := httptest.NewRecorder()
@@ -538,7 +607,15 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		env.seedQuiz(t, ownedQuiz("Q", "q"))
 		env.closeStore(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
@@ -2772,7 +2849,15 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env.playThrough(t, qz, alice)
 		env.playThrough(t, qz, bob)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2822,7 +2907,15 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+		handler := HandleQuizView(
+			logger,
+			nil,
+			env.quizzes,
+			env.newGameService(),
+			runningGameLookup{},
+			mediaLister{},
+			testUploadLimits(),
+		)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -3174,6 +3267,13 @@ type mediaLister struct{ items []*media.Media }
 
 func (l mediaLister) ListMediaByQuiz(_ context.Context, _ int64) ([]*media.Media, error) {
 	return l.items, nil
+}
+
+// testUploadLimits mirrors the production defaults (10 MB image, 20 MB audio, 10
+// files per batch, 200 per quiz) so the quiz-view tests exercise the same
+// helper text a real host sees.
+func testUploadLimits() MediaUploadLimits {
+	return NewMediaUploadLimits(10<<20, 20<<20, 10, 200)
 }
 
 func TestHandleQuizCreate(t *testing.T) {

@@ -24,11 +24,13 @@ const (
 	// uploadFormField is the multipart field images arrive under.
 	uploadFormField = "images"
 
-	// maxUploadFilesPerRequest caps how many files a single upload request may
+	// MaxUploadFilesPerRequest caps how many files a single upload request may
 	// carry. Defense in depth on top of the form's own size + count limits.
 	// Sized so a host can submit a folder of thumbnails in one action without
-	// pinning the parser on a malicious flood.
-	maxUploadFilesPerRequest = 10
+	// pinning the parser on a malicious flood. Exported so the admin quiz view
+	// can show a host the batch limit before they pick files (#1139), in sync
+	// with what this handler enforces.
+	MaxUploadFilesPerRequest = 10
 
 	// maxUploadRequestBytes caps the whole multipart request body. It sits
 	// above N x media.MaxUploadBytes (the ~10 MB image cap the pipeline
@@ -37,7 +39,7 @@ const (
 	// the pipeline can return the cleaner ErrUploadTooLarge for an oversized
 	// image. The pipeline still rejects each image part over MaxUploadBytes,
 	// so this is only a coarse outer guard.
-	maxUploadRequestBytes = maxUploadFilesPerRequest*media.MaxUploadBytes + multipartEnvelopeHeadroom
+	maxUploadRequestBytes = MaxUploadFilesPerRequest*media.MaxUploadBytes + multipartEnvelopeHeadroom
 
 	// multipartEnvelopeHeadroom is the slack added over the image cap to cover
 	// the multipart envelope (boundaries, the csrf_token field, part headers).
@@ -147,8 +149,8 @@ func HandleMediaUpload(
 
 			return
 		}
-		if len(files) > maxUploadFilesPerRequest {
-			http.Error(w, fmt.Sprintf("too many files in one upload (max %d)", maxUploadFilesPerRequest),
+		if len(files) > MaxUploadFilesPerRequest {
+			http.Error(w, fmt.Sprintf("too many files in one upload (max %d)", MaxUploadFilesPerRequest),
 				http.StatusBadRequest)
 
 			return

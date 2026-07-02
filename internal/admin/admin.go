@@ -1053,6 +1053,7 @@ func HandleQuizView(
 	gameService *game.Service,
 	runningGames RunningGameLookup,
 	mediaLister MediaLister,
+	uploadLimits MediaUploadLimits,
 ) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
@@ -1089,6 +1090,7 @@ func HandleQuizView(
 		data := newQuizViewData(quizData, players, rounds)
 		data.Images = images
 		data.Sounds = sounds
+		data.UploadLimits = uploadLimits
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
 		data.UploadedCount, data.FailedCount, data.CancelledCount = parseUploadCounts(r)
 		renderer.Render(w, r, http.StatusOK, data)
@@ -1138,6 +1140,10 @@ type QuizViewData struct {
 	// (#1059). Each tile shows a duration label and an inline audio preview.
 	// Gated on CanEdit in the template, like Images.
 	Sounds []MediaCardData
+	// UploadLimits are the media caps shown as helper text near the upload
+	// pickers and fed to the client-side pre-upload size guard (#1139), so a
+	// host does not pick a file the server would reject.
+	UploadLimits MediaUploadLimits
 	// HostHasRunningGame gates the "Host live" confirm-and-restart prompt
 	// (#853): true when the signed-in host already has a game in flight, so the
 	// control opens a modal that ends the running session before hosting this
