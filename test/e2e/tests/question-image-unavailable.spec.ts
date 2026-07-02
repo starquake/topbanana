@@ -3,8 +3,10 @@ import {
   seedQuiz,
   attachQuizImage,
   setQuizMode,
+  endHostedSession,
   installPlaythroughClock,
   playerRow,
+  waitForHostRoom,
   type QuestionSpec,
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
@@ -70,8 +72,7 @@ test('the host bigscreen shows an Image unavailable placeholder when the questio
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   // One player joins and readies from a fresh anonymous context so the host
   // start has a non-empty, all-ready roster.
@@ -102,5 +103,9 @@ test('the host bigscreen shows an Image unavailable placeholder when the questio
     await expect(page.getByTestId('question-image')).toBeHidden();
   } finally {
     await caseyCtx.close();
+    // End the session this spec started as the shared admin: a live game left
+    // running flips the next shared-admin host test's "Host live" into the
+    // confirm-restart modal (no /host/<code> navigation), stalling it (#1143).
+    await endHostedSession(page, code).catch(() => undefined);
   }
 });

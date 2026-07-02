@@ -10,6 +10,7 @@ import {
   setQuizMode,
   importQuiz,
   playerRow,
+  waitForHostRoom,
 } from './helpers';
 
 // MP-8 (#685): the host TV in-game view. The host puts a live quiz on a TV,
@@ -85,8 +86,7 @@ test('host TV shows the live question, answered order, and the reveal', async ({
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   // Two players join from fresh anonymous contexts (each gets its own
   // anonymous player). They ready up so the host start has a non-empty,
@@ -224,8 +224,7 @@ test('the host TV roster reflects a player rename', async ({
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   // Player names are global on players.display_name now (#716), so use unique
   // names to avoid colliding with a parallel spec on the worker DB.
@@ -323,8 +322,7 @@ test('host TV round intro shows the round title, summary, and an accurate Round 
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   // One player joins and readies so the start has a non-empty, all-ready roster
   // and the runner advances into the round intro.

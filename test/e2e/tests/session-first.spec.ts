@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, setQuizMode } from './helpers';
+import { seedQuiz, setQuizMode, waitForHostRoom } from './helpers';
 import type { Page } from '@playwright/test';
 
 // session-first live hosting (#836, #851): a host opens a live room BEFORE
@@ -69,7 +69,7 @@ test.describe('session-first live hosting', () => {
 
     // Back on the lobby the quiz is now armed: the Start controls appear and the
     // pick link is gone. The game has not started - the player is still waiting.
-    await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
+    await waitForHostRoom(host);
     await expect(host.getByTestId('start-now')).toBeVisible({ timeout: 15_000 });
     await expect(host.getByTestId('pick-quiz-link')).toBeHidden();
     await expect(page.getByTestId('question-view')).toBeHidden();
