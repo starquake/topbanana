@@ -57,16 +57,18 @@ type exportOption struct {
 }
 
 type exportImageRef struct {
-	File string `json:"file"`
-	MIME string `json:"mime"`
+	File             string `json:"file"`
+	MIME             string `json:"mime"`
+	OriginalFilename string `json:"originalFilename"`
 }
 
 type exportAudioRef struct {
-	File        string `json:"file"`
-	MIME        string `json:"mime"`
-	Description string `json:"description"`
-	DurationMs  *int   `json:"durationMs"`
-	Repeat      bool   `json:"repeat"`
+	File             string `json:"file"`
+	MIME             string `json:"mime"`
+	Description      string `json:"description"`
+	DurationMs       *int   `json:"durationMs"`
+	Repeat           bool   `json:"repeat"`
+	OriginalFilename string `json:"originalFilename"`
 }
 
 // tinyPNG returns a small valid 4x4 PNG, a valid upload StoreImage can process.
@@ -224,7 +226,7 @@ func TestWriteQuizArchive(t *testing.T) {
 	qz := env.seedQuiz(t, roundedQuiz())
 
 	// Store one image + one audio clip in the quiz's library.
-	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, bytes.NewReader(tinyPNG(t)))
+	img, err := mediaSvc.StoreImage(t.Context(), qz.ID, testExportPlayerID, "pic.png", bytes.NewReader(tinyPNG(t)))
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -536,6 +538,9 @@ func assertImageRef(t *testing.T, ref *exportImageRef, img *media.Media) {
 	if got, want := ref.File, "media/"+strconv.FormatInt(img.ID, 10)+".jpg"; got != want {
 		t.Errorf("image ref File = %q, want %q", got, want)
 	}
+	if got, want := ref.OriginalFilename, img.OriginalFilename; got != want {
+		t.Errorf("image ref OriginalFilename = %q, want %q", got, want)
+	}
 }
 
 func assertAudioRef(t *testing.T, ref *exportAudioRef, aud *media.Media) {
@@ -561,6 +566,9 @@ func assertAudioRef(t *testing.T, ref *exportAudioRef, aud *media.Media) {
 	}
 	if !ref.Repeat {
 		t.Error("audio ref Repeat = false, want true")
+	}
+	if got, want := ref.OriginalFilename, aud.OriginalFilename; got != want {
+		t.Errorf("audio ref OriginalFilename = %q, want %q", got, want)
 	}
 }
 

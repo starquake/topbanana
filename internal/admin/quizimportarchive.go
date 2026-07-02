@@ -65,7 +65,7 @@ var ErrArchiveInvalidQuiz = errors.New("archive is not a valid quiz")
 // consumer-side so the admin package depends only on what it calls; the concrete
 // *media.Service satisfies it.
 type MediaImporter interface {
-	StoreImage(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
+	StoreImage(ctx context.Context, quizID, createdBy int64, filename string, r io.Reader) (*media.Media, error)
 	StoreAudio(
 		ctx context.Context, quizID, createdBy int64, durationMs int, description, filename string, r io.Reader,
 	) (*media.Media, error)

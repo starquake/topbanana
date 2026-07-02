@@ -1230,6 +1230,10 @@ type MediaCardData struct {
 	// the audio library and the question picker. Empty for an unlabelled clip and
 	// for image tiles, which do not surface it.
 	Description string
+	// OriginalFilename is the file's original upload name (#1137), surfaced in the
+	// library so a host can match a stored file back to its source. Empty when the
+	// upload carried no usable name.
+	OriginalFilename string
 }
 
 // DurationLabel renders DurationMs as an "M:SS" clip-length label, or "" when
@@ -1254,12 +1258,13 @@ func mediaCardDataFromMedia(items []*media.Media) []MediaCardData {
 	cards := make([]MediaCardData, 0, len(items))
 	for _, m := range items {
 		cards = append(cards, MediaCardData{
-			ID:          m.ID,
-			Width:       m.Width,
-			Height:      m.Height,
-			DurationMs:  m.DurationMs,
-			QuizID:      m.QuizID,
-			Description: m.Description,
+			ID:               m.ID,
+			Width:            m.Width,
+			Height:           m.Height,
+			DurationMs:       m.DurationMs,
+			QuizID:           m.QuizID,
+			Description:      m.Description,
+			OriginalFilename: m.OriginalFilename,
 		})
 	}
 

@@ -54,6 +54,9 @@ func TestMediaTypeAudioMigration_CheckAndShape(t *testing.T) {
 		// description is added later by 20260620120000; dbtest.Open migrates to
 		// the latest schema, so it is present here (#1072).
 		"description",
+		// original_filename is added later by 20260702120000; dbtest.Open
+		// migrates to the latest schema, so it is present here (#1137).
+		"original_filename",
 	}
 	gotCols := tableColumns(t, db, "media")
 	for _, col := range wantCols {

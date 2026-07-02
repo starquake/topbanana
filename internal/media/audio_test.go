@@ -179,6 +179,33 @@ func TestServiceStoreAudioAcceptsFormats(t *testing.T) {
 	}
 }
 
+// TestServiceStoreAudioRecordsOriginalFilename pins that StoreAudio records the
+// base name of the client-supplied upload filename as the row's OriginalFilename,
+// and that it round-trips through the DB (#1137).
+func TestServiceStoreAudioRecordsOriginalFilename(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.StoreAudio(
+		t.Context(), fx.quizID, seededAdminID, 1000, "Theme", "uploads/Intro Theme.mp3", bytes.NewReader(mp3ID3()),
+	)
+	if err != nil {
+		t.Fatalf("StoreAudio err = %v, want nil", err)
+	}
+	if got, want := m.OriginalFilename, "Intro Theme.mp3"; got != want {
+		t.Errorf("OriginalFilename = %q, want %q (base name only)", got, want)
+	}
+
+	stored, err := fx.svc.Get(t.Context(), m.ID)
+	if err != nil {
+		t.Fatalf("Get err = %v, want nil", err)
+	}
+	if got, want := stored.OriginalFilename, "Intro Theme.mp3"; got != want {
+		t.Errorf("stored OriginalFilename = %q, want %q", got, want)
+	}
+}
+
 // TestServiceStoreAudioPersistsDuration pins that the stored duration round-trips
 // through the DB (not just the in-memory return), and that a non-positive
 // duration stores NULL.

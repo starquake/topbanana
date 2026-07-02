@@ -39,7 +39,8 @@ func (q *Queries) CountMediaByQuizAndType(ctx context.Context, arg CountMediaByQ
 const createMedia = `-- name: CreateMedia :one
 INSERT INTO media (
     quiz_id, type, mime, path, thumb_path,
-    width, height, size_bytes, sha256, duration_ms, description, created_by_player_id, ready
+    width, height, size_bytes, sha256, duration_ms, description, original_filename,
+    created_by_player_id, ready
 )
 VALUES (
     ?1,
@@ -54,9 +55,10 @@ VALUES (
     ?10,
     ?11,
     ?12,
+    ?13,
     0
 )
-RETURNING id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
+RETURNING id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description, original_filename
 `
 
 type CreateMediaParams struct {
@@ -71,6 +73,7 @@ type CreateMediaParams struct {
 	Sha256            string
 	DurationMs        sql.NullInt64
 	Description       string
+	OriginalFilename  string
 	CreatedByPlayerID int64
 }
 
@@ -97,6 +100,7 @@ func (q *Queries) CreateMedia(ctx context.Context, arg CreateMediaParams) (Mediu
 		arg.Sha256,
 		arg.DurationMs,
 		arg.Description,
+		arg.OriginalFilename,
 		arg.CreatedByPlayerID,
 	)
 	var i Medium
@@ -116,6 +120,7 @@ func (q *Queries) CreateMedia(ctx context.Context, arg CreateMediaParams) (Mediu
 		&i.Ready,
 		&i.DurationMs,
 		&i.Description,
+		&i.OriginalFilename,
 	)
 	return i, err
 }
@@ -134,7 +139,7 @@ func (q *Queries) DeleteMedia(ctx context.Context, id int64) (sql.Result, error)
 }
 
 const getMedia = `-- name: GetMedia :one
-SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
+SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description, original_filename
 FROM media
 WHERE id = ?1
 `
@@ -160,12 +165,13 @@ func (q *Queries) GetMedia(ctx context.Context, id int64) (Medium, error) {
 		&i.Ready,
 		&i.DurationMs,
 		&i.Description,
+		&i.OriginalFilename,
 	)
 	return i, err
 }
 
 const listMediaByQuiz = `-- name: ListMediaByQuiz :many
-SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
+SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description, original_filename
 FROM media
 WHERE quiz_id = ?1
   AND ready = 1
@@ -203,6 +209,7 @@ func (q *Queries) ListMediaByQuiz(ctx context.Context, quizID int64) ([]Medium, 
 			&i.Ready,
 			&i.DurationMs,
 			&i.Description,
+			&i.OriginalFilename,
 		); err != nil {
 			return nil, err
 		}

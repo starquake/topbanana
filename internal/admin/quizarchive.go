@@ -56,19 +56,24 @@ type quizArchiveOption struct {
 // quizArchiveImageRef points at an image file stored in the archive. File is
 // the archive-relative path ("media/<id>.<ext>"); MIME is the stored content
 // type so the importer can re-register the media without re-sniffing.
+// OriginalFilename carries the row's original upload name (#1137) so a re-import
+// restores the library tooltip; empty for archives written before it was added.
 type quizArchiveImageRef struct {
-	File string `json:"file"`
-	MIME string `json:"mime"`
+	File             string `json:"file"`
+	MIME             string `json:"mime"`
+	OriginalFilename string `json:"originalFilename,omitempty"`
 }
 
 // quizArchiveAudioRef points at an audio file stored in the archive. It
 // carries the same File / MIME as the image ref plus the advisory audio
 // metadata (host-supplied description, duration, repeat flag) so an import
-// round-trips the clip's playback behaviour.
+// round-trips the clip's playback behaviour. OriginalFilename is the row's
+// original upload name (#1137), empty for pre-#1137 archives.
 type quizArchiveAudioRef struct {
-	File        string `json:"file"`
-	MIME        string `json:"mime"`
-	Description string `json:"description,omitempty"`
-	DurationMs  *int   `json:"durationMs,omitempty"`
-	Repeat      bool   `json:"repeat,omitempty"`
+	File             string `json:"file"`
+	MIME             string `json:"mime"`
+	Description      string `json:"description,omitempty"`
+	DurationMs       *int   `json:"durationMs,omitempty"`
+	Repeat           bool   `json:"repeat,omitempty"`
+	OriginalFilename string `json:"originalFilename,omitempty"`
 }

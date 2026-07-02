@@ -109,7 +109,7 @@ func (r *mediaRestorer) resolveImage(ctx context.Context, ref *quizArchiveImageR
 	}
 	defer func() { _ = rc.Close() }()
 
-	stored, err := r.mediaSvc.StoreImage(ctx, r.quizID, r.importerID, rc)
+	stored, err := r.mediaSvc.StoreImage(ctx, r.quizID, r.importerID, ref.OriginalFilename, rc)
 	if err != nil {
 		return nil, fmt.Errorf("restoring image %q: %w", ref.File, err)
 	}
@@ -137,7 +137,7 @@ func (r *mediaRestorer) resolveAudio(ctx context.Context, ref *quizArchiveAudioR
 	defer func() { _ = rc.Close() }()
 
 	stored, err := r.mediaSvc.StoreAudio(
-		ctx, r.quizID, r.importerID, durationMsFor(ref.DurationMs), ref.Description, ref.File, rc,
+		ctx, r.quizID, r.importerID, durationMsFor(ref.DurationMs), ref.Description, ref.OriginalFilename, rc,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("restoring audio %q: %w", ref.File, err)

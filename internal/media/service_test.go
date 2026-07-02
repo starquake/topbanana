@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,7 +108,13 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 800, 400)))
+	m, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 800, 400)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -156,6 +163,75 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	if got, want := row.SHA256, m.SHA256; got != want {
 		t.Errorf("stored SHA256 = %q, want %q", got, want)
 	}
+	if got, want := m.OriginalFilename, "pic.png"; got != want {
+		t.Errorf("OriginalFilename = %q, want %q", got, want)
+	}
+	if got, want := row.OriginalFilename, "pic.png"; got != want {
+		t.Errorf("stored OriginalFilename = %q, want %q", got, want)
+	}
+}
+
+// TestServiceStoreImageSanitizesFilename pins that StoreImage records the base
+// name of the client-supplied upload filename (stripping any directory
+// components) as the row's OriginalFilename (#1137).
+func TestServiceStoreImageSanitizesFilename(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.StoreImage(
+		t.Context(), fx.quizID, seededAdminID, "uploads/sub/My Vacation.png", bytes.NewReader(pngUpload(t, 64, 64)),
+	)
+	if err != nil {
+		t.Fatalf("StoreImage err = %v, want nil", err)
+	}
+	if got, want := m.OriginalFilename, "My Vacation.png"; got != want {
+		t.Errorf("OriginalFilename = %q, want %q (base name only)", got, want)
+	}
+
+	row, err := fx.svc.Get(t.Context(), m.ID)
+	if err != nil {
+		t.Fatalf("Get err = %v, want nil", err)
+	}
+	if got, want := row.OriginalFilename, "My Vacation.png"; got != want {
+		t.Errorf("stored OriginalFilename = %q, want %q", got, want)
+	}
+}
+
+// TestSanitizeFilename pins the upload-filename sanitizer: it reduces a name to
+// its base, drops directory-only and empty inputs to the empty string, strips
+// control characters, and caps the length in runes (#1137).
+func TestSanitizeFilename(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		in   string
+		want string
+	}{
+		"plain name":           {in: "photo.png", want: "photo.png"},
+		"strips directory":     {in: "uploads/sub/photo.png", want: "photo.png"},
+		"trims whitespace":     {in: "  photo.png  ", want: "photo.png"},
+		"empty":                {in: "", want: ""},
+		"dot":                  {in: ".", want: ""},
+		"root separator":       {in: "/", want: ""},
+		"strips control runes": {in: "pho\nto\t.png", want: "photo.png"},
+		"control runes only":   {in: "\x00\x01\x02", want: ""},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := ExportSanitizeFilename(tc.in), tc.want; got != want {
+				t.Errorf("ExportSanitizeFilename(%q) = %q, want %q", tc.in, got, want)
+			}
+		})
+	}
+
+	t.Run("caps length", func(t *testing.T) {
+		t.Parallel()
+		if got, want := len([]rune(ExportSanitizeFilename(strings.Repeat("a", 300)))), 255; got != want {
+			t.Errorf("len(runes) = %d, want %d (capped)", got, want)
+		}
+	})
 }
 
 // TestServiceStoreImageOverCap pins that an image upload over the configured
@@ -175,7 +251,7 @@ func TestServiceStoreImageOverCap(t *testing.T) {
 	const tinyCap int64 = 8
 	svc := NewService(store.NewMediaStore(db, slog.Default()), root, tinyCap, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)))
 	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
 		t.Errorf("StoreImage err = %v, want %v", got, want)
 	}
@@ -193,7 +269,7 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := fx.svc.StoreImage(ctx, fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := fx.svc.StoreImage(ctx, fx.quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)))
 	if got, want := err, context.Canceled; !errors.Is(got, want) {
 		t.Errorf("StoreImage err = %v, want %v", got, want)
 	}
@@ -272,7 +348,7 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 	wrapped := &cancelOnUpdatePathsStore{Store: innerStore, cancel: cancel}
 	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.StoreImage(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(ctx, quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
 		t.Fatal("StoreImage err = nil, want non-nil (ctx was cancelled mid-flight)")
 	}
@@ -330,7 +406,7 @@ func TestServiceStoreCancelledAfterPathsLeavesNothing(t *testing.T) {
 	wrapped := &cancelAfterPathsStore{Store: innerStore, cancel: cancel}
 	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.StoreImage(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(ctx, quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
 		t.Fatal("StoreImage err = nil, want non-nil (ctx cancelled after paths committed)")
 	}
@@ -397,7 +473,7 @@ func TestServiceStoreCreateMediaFailureLeavesNoDir(t *testing.T) {
 		t.Fatalf("db.Close err = %v, want nil", err)
 	}
 
-	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
 		t.Fatal("StoreImage err = nil, want non-nil (CreateMedia ran against a closed DB)")
 	}
@@ -418,7 +494,13 @@ func TestServiceDeleteRemovesRowAndFiles(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 320, 240)))
+	m, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 320, 240)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -459,11 +541,23 @@ func TestServiceListByQuizScoped(t *testing.T) {
 	// A second quiz in the same DB whose media must not leak into quizA's list.
 	quizB := seedQuiz(t, fx.db, "media-svc-b")
 
-	first, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
+	first, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 100, 100)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage first err = %v, want nil", err)
 	}
-	second, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 120, 120)))
+	second, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 120, 120)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage second err = %v, want nil", err)
 	}
@@ -471,6 +565,7 @@ func TestServiceListByQuizScoped(t *testing.T) {
 		t.Context(),
 		quizB,
 		seededAdminID,
+		"pic.png",
 		bytes.NewReader(pngUpload(t, 80, 80)),
 	); err != nil {
 		t.Fatalf("StoreImage quizB err = %v, want nil", err)
@@ -499,7 +594,13 @@ func TestServiceOpenRoundTrip(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 200, 200)))
+	m, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 200, 200)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -543,7 +644,13 @@ func TestServiceQuizDeleteCascadesMedia(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 160, 90)))
+	m, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 160, 90)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -564,7 +671,13 @@ func TestServiceStoreFlipsRowReady(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
+	m, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 100, 100)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -624,7 +737,13 @@ func TestServiceSweepStaleNotReadyDropsRowAndFiles(t *testing.T) {
 	staleID := seedNotReadyMedia(t, fx, staleFull, staleThumb, "2000-01-01 00:00:00")
 	freshID := seedNotReadyMedia(t, fx, "1/101.jpg", "1/101-thumb.jpg",
 		time.Now().UTC().Format("2006-01-02 15:04:05"))
-	readyMedia, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	readyMedia, err := fx.svc.StoreImage(
+		t.Context(),
+		fx.quizID,
+		seededAdminID,
+		"pic.png",
+		bytes.NewReader(pngUpload(t, 64, 64)),
+	)
 	if err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
@@ -664,7 +783,7 @@ func TestService_RemoveQuizDir(t *testing.T) {
 	fx := newServiceWithQuiz(t)
 
 	if _, err := fx.svc.StoreImage(
-		t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)),
+		t.Context(), fx.quizID, seededAdminID, "pic.png", bytes.NewReader(pngUpload(t, 64, 64)),
 	); err != nil {
 		t.Fatalf("StoreImage err = %v, want nil", err)
 	}

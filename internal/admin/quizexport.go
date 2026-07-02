@@ -223,7 +223,11 @@ func (b *manifestBuilder) imageRef(ctx context.Context, id *int64) (*quizArchive
 		return nil, err
 	}
 
-	return &quizArchiveImageRef{File: archiveMediaPath(m), MIME: m.MIME}, nil
+	return &quizArchiveImageRef{
+		File:             archiveMediaPath(m),
+		MIME:             m.MIME,
+		OriginalFilename: m.OriginalFilename,
+	}, nil
 }
 
 // audioRef resolves the audio media id into a manifest ref, carrying the clip's
@@ -238,11 +242,12 @@ func (b *manifestBuilder) audioRef(ctx context.Context, id *int64, repeat bool) 
 	}
 
 	return &quizArchiveAudioRef{
-		File:        archiveMediaPath(m),
-		MIME:        m.MIME,
-		Description: m.Description,
-		DurationMs:  m.DurationMs,
-		Repeat:      repeat,
+		File:             archiveMediaPath(m),
+		MIME:             m.MIME,
+		Description:      m.Description,
+		DurationMs:       m.DurationMs,
+		Repeat:           repeat,
+		OriginalFilename: m.OriginalFilename,
 	}, nil
 }
 

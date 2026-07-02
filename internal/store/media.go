@@ -40,6 +40,7 @@ func (s *MediaStore) CreateMedia(ctx context.Context, m *media.Media) (*media.Me
 		Sha256:            m.SHA256,
 		DurationMs:        nullableInt(m.DurationMs),
 		Description:       m.Description,
+		OriginalFilename:  m.OriginalFilename,
 		CreatedByPlayerID: m.CreatedByPlayerID,
 	})
 	if err != nil {
@@ -212,6 +213,7 @@ func mediaFromRow(row db.Medium) *media.Media {
 		SHA256:            row.Sha256,
 		DurationMs:        nullableIntToPtr(row.DurationMs),
 		Description:       row.Description,
+		OriginalFilename:  row.OriginalFilename,
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		CreatedAt:         row.CreatedAt,
 	}

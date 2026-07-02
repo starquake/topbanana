@@ -174,6 +174,55 @@ func TestMediaStore_DescriptionRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMediaStore_OriginalFilenameRoundTrip pins that a row's original upload
+// filename survives the create/get/list round trip and that a row that never sets
+// one reads back the empty-string default (#1137).
+func TestMediaStore_OriginalFilenameRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	s, quizID := newMediaStoreWithQuiz(t)
+
+	named := newMediaRow(quizID)
+	named.OriginalFilename = "holiday photo.png"
+	created, err := s.CreateMedia(t.Context(), named)
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+	if got, want := created.OriginalFilename, "holiday photo.png"; got != want {
+		t.Errorf("created OriginalFilename = %q, want %q", got, want)
+	}
+	if err = s.MarkMediaReady(t.Context(), created.ID); err != nil {
+		t.Fatalf("MarkMediaReady err = %v, want nil", err)
+	}
+
+	got, err := s.GetMedia(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("GetMedia err = %v, want nil", err)
+	}
+	if got, want := got.OriginalFilename, "holiday photo.png"; got != want {
+		t.Errorf("GetMedia OriginalFilename = %q, want %q", got, want)
+	}
+
+	list, err := s.ListMediaByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListMediaByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(list), 1; got != want {
+		t.Fatalf("ListMediaByQuiz len = %d, want %d", got, want)
+	}
+	if got, want := list[0].OriginalFilename, "holiday photo.png"; got != want {
+		t.Errorf("ListMediaByQuiz OriginalFilename = %q, want %q", got, want)
+	}
+
+	unnamed, err := s.CreateMedia(t.Context(), newMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia (unnamed) err = %v, want nil", err)
+	}
+	if got, want := unnamed.OriginalFilename, ""; got != want {
+		t.Errorf("unnamed OriginalFilename = %q, want %q (empty default)", got, want)
+	}
+}
+
 // TestMediaStore_UpdateDescription pins that UpdateMediaDescription overwrites the
 // label and that an unknown id maps to media.ErrMediaNotFound (#1072).
 func TestMediaStore_UpdateDescription(t *testing.T) {

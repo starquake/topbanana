@@ -329,6 +329,12 @@
                                      class="h-full w-full object-cover"
                                      data-testid="library-thumb">
                             </button>
+                            {{/* Original upload filename shown as a caption under the
+                                 thumbnail (#1137) so a host can match a stored image to
+                                 its source; truncated to keep the grid tidy. */}}
+                            {{if .OriginalFilename}}
+                                <p class="mt-1 truncate text-[0.72rem] text-text-dim" data-testid="library-filename">{{.OriginalFilename}}</p>
+                            {{end}}
                             {{/* Always visible on touch; hover-fade gated on
                                  (hover: hover) so an iPad keeps it visible. */}}
                             <button type="button" aria-label="Delete image {{.ID}}"
@@ -536,6 +542,12 @@
                                     class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text-dim transition hover:bg-danger hover:text-text focus-visible:outline-none focus-visible:shadow-focus">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
                             </button>
+                            {{/* Original upload filename as a full-width caption line
+                                 under the row controls (#1137); basis-full drops it to
+                                 its own line. */}}
+                            {{if .OriginalFilename}}
+                                <p class="basis-full truncate text-[0.72rem] text-text-dim" data-testid="audio-library-filename">{{.OriginalFilename}}</p>
+                            {{end}}
                             <div id="modal-delete-sound-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-sound-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                                 <div class="absolute inset-0" onclick="closeModal('modal-delete-sound-{{.ID}}')"></div>
                                 <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
