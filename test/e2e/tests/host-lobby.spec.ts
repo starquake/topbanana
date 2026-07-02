@@ -8,6 +8,7 @@ import {
   setQuizMode,
   claimAndJoin,
   playerRow,
+  waitForHostRoom,
 } from './helpers';
 
 // MP-3 (#680): the host puts a live quiz on a TV and gets a lobby with the
@@ -44,9 +45,7 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
 
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
-  expect(code).toMatch(/^[A-Z0-9]+$/);
+  const code = await waitForHostRoom(page);
 
   // Lobby chrome: the scan card, a server-rendered QR svg, and the big code.
   await expect(page.getByText('Scan to join')).toBeVisible();

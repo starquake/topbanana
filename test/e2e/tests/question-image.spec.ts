@@ -1,7 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, installPlaythroughClock, playerRow, setQuizMode, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -132,8 +132,7 @@ test('the question image renders on the host bigscreen during the question and r
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   // ---- One player joins and readies from a fresh anonymous context so the
   // host start has a non-empty, all-ready roster.
@@ -171,6 +170,12 @@ test('the question image renders on the host bigscreen during the question and r
     await expect(page.locator('[data-answer-option][data-correct="true"]')).toHaveCount(1, { timeout: 15_000 });
     await expect(questionImage).toBeVisible();
   } finally {
+    // End the session this spec started as the shared admin BEFORE closing the
+    // player context, so a rejecting caseyCtx.close() cannot skip the
+    // session-end: a live game left running flips the next shared-admin host
+    // test's "Host live" into the confirm-restart modal (no /host/<code>
+    // navigation), stalling it (#1143).
+    await endHostedSession(page, code).catch(() => undefined);
     await caseyCtx.close();
   }
 });

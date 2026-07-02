@@ -8,6 +8,7 @@ import {
   installPlaythroughClock,
   playerRow,
   setQuizMode,
+  waitForHostRoom,
   type QuestionSpec,
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
@@ -542,8 +543,7 @@ async function startLiveAudioSession(
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
 
   const casey = `Casey-${browserName}-${Date.now()}`;
   const caseyCtx = await context.browser()!.newContext({ storageState: undefined, baseURL });

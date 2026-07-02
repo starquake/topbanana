@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import type { HostSessions } from './fixtures';
-import { importQuiz, setQuizMode, claimAndJoin, playerRow } from './helpers';
+import { importQuiz, setQuizMode, claimAndJoin, playerRow, waitForHostRoom } from './helpers';
 import type { APIRequestContext, Page } from '@playwright/test';
 
 // confirm-and-restart (#853): a host already running a game on quiz A opens
@@ -104,8 +104,7 @@ test.describe('confirm-and-restart hosting', () => {
     // Confirm: end the current session and start a new one hosting quiz B. The
     // host lands on a NEW big screen (a different /host/{code}).
     await modal.getByRole('button', { name: 'End and start' }).click();
-    await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
-    const newCode = host.url().split('/host/')[1];
+    const newCode = await waitForHostRoom(host);
     expect(newCode).not.toBe(runningCode);
     // The restart created this second room out of band (not via a factory open),
     // so register it for teardown too.

@@ -10,6 +10,7 @@ import {
   setQuizMode,
   claimAndJoin,
   execSqlite,
+  waitForHostRoom,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -62,8 +63,7 @@ test('a player leaving drops out of the host roster live', async ({
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('button', { name: 'Host live' }).click();
 
-  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-  const code = page.url().split('/host/')[1];
+  const code = await waitForHostRoom(page);
   // page is this test's own freshly-registered admin host (not the shared admin
   // the factory opens), so register the room with the factory so teardown ends
   // it through page and the dashboard returns hostable for the next test (#850).

@@ -511,6 +511,20 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
 }
 
+// waitForHostRoom waits for the big-screen room URL after a host-start action
+// (clicking "Host live", "Host a session", "Host this", or "End and start") and
+// returns the join code. It replaces a bare `expect(page).toHaveURL(/\/host\//)`,
+// whose 5s expect timeout was too tight for the `/host/<code>` navigation to land
+// under CI load (#1143): page.waitForURL is bounded by the test timeout, not the
+// 5s expect budget, so it absorbs a slow-runner navigation. It stops at 'commit'
+// rather than the default 'load': the big screen opens an SSE EventSource as it
+// boots, and firefox holds the page 'load' event open while that stream stays
+// connected, so a default wait can hang past the test budget (#1035).
+export async function waitForHostRoom(host: Page): Promise<string> {
+  await host.waitForURL(/\/host\/[A-Z0-9]{6}$/, { waitUntil: 'commit' });
+  return host.url().split('/host/')[1];
+}
+
 // endHostedSession ends a live session through its lobby End-session control so
 // the host's dashboard returns to a hostable state for the next test (a host
 // runs one session at a time, #850). Idempotent: a no-op if the room is already

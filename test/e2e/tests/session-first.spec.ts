@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, setQuizMode } from './helpers';
+import { seedQuiz, setQuizMode, waitForHostRoom } from './helpers';
 import type { Page } from '@playwright/test';
 
 // session-first live hosting (#836, #851): a host opens a live room BEFORE
@@ -63,13 +63,15 @@ test.describe('session-first live hosting', () => {
     // staging room open, "Host this" ARMS the quiz in that room but stays in the
     // lobby (#863) - it does NOT auto-start - so the host starts when ready.
     await host.getByTestId('pick-quiz-link').locator('a').click();
-    await expect(host).toHaveURL(/\/host\/quizzes$/);
+    // waitForURL (test-timeout budget) not expect().toHaveURL (5s) so a slow
+    // /host/quizzes navigation under CI load does not flake the assertion (#1143).
+    await host.waitForURL(/\/host\/quizzes$/);
     const quizCard = host.locator('article').filter({ hasText: quizTitle });
     await quizCard.getByRole('button', { name: 'Host this' }).click();
 
     // Back on the lobby the quiz is now armed: the Start controls appear and the
     // pick link is gone. The game has not started - the player is still waiting.
-    await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
+    await waitForHostRoom(host);
     await expect(host.getByTestId('start-now')).toBeVisible({ timeout: 15_000 });
     await expect(host.getByTestId('pick-quiz-link')).toBeHidden();
     await expect(page.getByTestId('question-view')).toBeHidden();

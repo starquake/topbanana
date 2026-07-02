@@ -9,7 +9,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { join } from 'node:path';
 
 import { SEED_ADMIN_PASSWORD_HASH, adminStatePath } from '../e2e-auth';
-import { endHostedSession } from './helpers';
+import { endHostedSession, waitForHostRoom } from './helpers';
 import { execSqlite } from './sqlite';
 
 // HostSessions is the test-scoped factory the host-session specs use to open
@@ -45,17 +45,6 @@ export type HostSessions = {
   // cookie -> a distinct anonymous player), auto-closed in teardown.
   newPlayerContext(): Promise<BrowserContext>;
 };
-
-// waitForHostRoom waits for the big-screen room URL after a host action and
-// returns the join code. It stops at 'commit' rather than the default 'load':
-// the big screen opens an SSE EventSource as it boots, and firefox holds the
-// page 'load' event open while that stream stays connected, so a default
-// waitForURL can hang past the test budget (#1035). Callers need only the
-// committed /host/<code> URL; the page's content is awaited by later locators.
-async function waitForHostRoom(host: Page): Promise<string> {
-  await host.waitForURL(/\/host\/[A-Z0-9]{6}$/, { waitUntil: 'commit' });
-  return host.url().split('/host/')[1];
-}
 
 async function makeHostSessions(
   browser: Browser,

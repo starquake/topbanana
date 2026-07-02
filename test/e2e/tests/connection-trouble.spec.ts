@@ -11,6 +11,7 @@ import {
   markAdmin,
   login,
   setQuizMode,
+  waitForHostRoom,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -105,8 +106,7 @@ test.describe('live client connection trouble', () => {
     await page.getByRole('link', { name: quizTitle }).click();
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
     await page.getByRole('button', { name: 'Host live' }).click();
-    await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-    const code = page.url().split('/host/')[1];
+    const code = await waitForHostRoom(page);
     // page is this test's own freshly-registered admin host (not the shared
     // admin the factory opens), so register the room with the factory so
     // teardown ends it through page (#850).
@@ -167,8 +167,7 @@ test.describe('live client connection trouble', () => {
     await page.getByRole('link', { name: quizTitle }).click();
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
     await page.getByRole('button', { name: 'Host live' }).click();
-    await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
-    const code = page.url().split('/host/')[1];
+    const code = await waitForHostRoom(page);
     hostSessions.track(page, code);
 
     await expect(page.getByTestId('session-gone')).toHaveCount(0);
