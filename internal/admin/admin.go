@@ -141,6 +141,20 @@ type QuestionData struct {
 	Options               []*OptionData
 }
 
+// CorrectCount reports how many of the question's options are marked
+// correct. Zero means the question has no correct option, a likely
+// authoring mistake a caller can flag (#1141).
+func (d *QuestionData) CorrectCount() int {
+	n := 0
+	for _, op := range d.Options {
+		if op.Correct {
+			n++
+		}
+	}
+
+	return n
+}
+
 // RoundData backs the round sections on the quiz view and the round
 // form. Mirrors the QuestionData/QuizData shape so the templates stay
 // symmetric with their question equivalents (#444).

@@ -326,6 +326,113 @@ func TestHandleQuizView(t *testing.T) {
 	})
 }
 
+// TestHandleQuizView_QuestionIndicators pins the at-a-glance per-question
+// badges on the quiz view (#1141): the has-image / has-audio icons render only
+// for questions carrying that media, the option and correct-answer counts
+// reflect the seeded options, and a question with no correct option marked gets
+// the warning tint.
+func TestHandleQuizView_QuestionIndicators(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	env := newAdminEnv(t)
+
+	qz := ownedQuiz("Indicators Quiz", "indicators-quiz")
+	qz.Questions = []*quiz.Question{
+		{
+			Text:     "Question with media and two correct answers",
+			Position: 1,
+			Options: []*quiz.Option{
+				{Text: "A", Correct: true},
+				{Text: "B", Correct: true},
+				{Text: "C", Correct: false},
+			},
+		},
+		{
+			Text:     "Question with no correct answer marked",
+			Position: 2,
+			Options: []*quiz.Option{
+				{Text: "X", Correct: false},
+				{Text: "Y", Correct: false},
+			},
+		},
+	}
+	qz = env.seedQuiz(t, qz)
+
+	imageID := env.seedMedia(t, qz.ID)
+	audioID := env.seedAudioMedia(t, qz.ID, "clip")
+	withMedia := qz.Questions[0]
+	withMedia.ImageMediaID = &imageID
+	withMedia.AudioMediaID = &audioID
+	if err := env.quizzes.UpdateQuestion(t.Context(), withMedia); err != nil {
+		t.Fatalf("UpdateQuestion err = %v, want nil", err)
+	}
+
+	handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("quiz view status = %d, want %d", got, want)
+	}
+	body := rr.Body.String()
+
+	// Scope each set of assertions to the specific question's badge cluster
+	// (data-testid="q-meta-<id>") so a cross-question mixup can't pass on a
+	// stray match elsewhere in the page.
+	mediaMeta := questionMeta(t, body, qz.Questions[0].ID)
+	for _, want := range []string{
+		`data-testid="q-badge-image"`,
+		`data-testid="q-badge-audio"`,
+		"3 options",
+		"2 correct",
+	} {
+		if !strings.Contains(mediaMeta, want) {
+			t.Errorf("media question badges missing %q", want)
+		}
+	}
+	if strings.Contains(mediaMeta, "q-badge-warn") {
+		t.Error("media question (2 correct) should not carry the warning tint")
+	}
+
+	noCorrectMeta := questionMeta(t, body, qz.Questions[1].ID)
+	for _, want := range []string{"2 options", "0 correct", "q-badge-warn"} {
+		if !strings.Contains(noCorrectMeta, want) {
+			t.Errorf("no-correct question badges missing %q", want)
+		}
+	}
+	// A question without attached media shows neither the image nor the audio
+	// badge.
+	for _, notWant := range []string{`data-testid="q-badge-image"`, `data-testid="q-badge-audio"`} {
+		if strings.Contains(noCorrectMeta, notWant) {
+			t.Errorf("no-media question badges unexpectedly contain %q", notWant)
+		}
+	}
+}
+
+// questionMeta returns the rendered q-meta badge cluster for the given question
+// id, so badge assertions can be scoped to one question row instead of matching
+// anywhere in the page. The cluster holds only spans and svgs, so the first
+// </div> after its data-testid marker closes it.
+func questionMeta(t *testing.T, body string, questionID int64) string {
+	t.Helper()
+
+	marker := fmt.Sprintf(`data-testid="q-meta-%d"`, questionID)
+	_, after, found := strings.Cut(body, marker)
+	if !found {
+		t.Fatalf("quiz view body missing q-meta block for question %d", questionID)
+	}
+	meta, _, found := strings.Cut(after, "</div>")
+	if !found {
+		t.Fatalf("q-meta block for question %d is not closed", questionID)
+	}
+
+	return meta
+}
+
 // TestHandleQuizView_RestartModalGating pins the confirm-and-restart gating
 // (#853): on a live quiz, the restart modal and its hidden restart=true field
 // render only when the host already has a game in flight; otherwise the plain
