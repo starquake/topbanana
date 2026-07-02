@@ -66,8 +66,7 @@ func addRoutes(
 		runningGames: realtime.SessionService,
 		uploadLimits: admin.MediaUploadLimits{
 			ImageMaxBytes:     cfg.MediaImageMaxBytes,
-			AudioMaxBytes:     cfg.MediaAudioMaxBytes,
-			MaxFilesPerBatch:  mediahttp.MaxUploadFilesPerRequest,
+			AudioMaxBytes:     mediahttp.ClampSingleUploadBytes(cfg.MediaAudioMaxBytes),
 			PerQuizImageLimit: cfg.MediaQuizImageLimit,
 		},
 	}

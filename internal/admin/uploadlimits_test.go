@@ -24,6 +24,7 @@ func TestMediaUploadLimitsImageLabel(t *testing.T) {
 		{"round megabytes", 10 << 20, "10 MB"},
 		{"round gigabytes", 3 << 30, "3 GB"},
 		{"fractional megabytes", (10 << 20) + (512 << 10), "10.5 MB"},
+		{"floors a non-binary cap instead of rounding up", 10443816, "9.9 MB"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,7 +43,6 @@ func TestMediaUploadLimitsFields(t *testing.T) {
 	limits := admin.MediaUploadLimits{
 		ImageMaxBytes:     10 << 20,
 		AudioMaxBytes:     20 << 20,
-		MaxFilesPerBatch:  10,
 		PerQuizImageLimit: 200,
 	}
 
@@ -52,9 +52,6 @@ func TestMediaUploadLimitsFields(t *testing.T) {
 	if got, want := limits.AudioMaxLabel(), "20 MB"; got != want {
 		t.Errorf("AudioMaxLabel() = %q, want %q", got, want)
 	}
-	if got, want := limits.MaxFilesPerBatch, 10; got != want {
-		t.Errorf("MaxFilesPerBatch = %d, want %d", got, want)
-	}
 	if got, want := limits.PerQuizImageLimit, 200; got != want {
 		t.Errorf("PerQuizImageLimit = %d, want %d", got, want)
 	}
@@ -63,7 +60,7 @@ func TestMediaUploadLimitsFields(t *testing.T) {
 func TestMediaUploadLimitsAudioLabelDisabled(t *testing.T) {
 	t.Parallel()
 
-	limits := admin.MediaUploadLimits{ImageMaxBytes: 10 << 20, MaxFilesPerBatch: 10, PerQuizImageLimit: 200}
+	limits := admin.MediaUploadLimits{ImageMaxBytes: 10 << 20, PerQuizImageLimit: 200}
 	if got, want := limits.AudioMaxLabel(), ""; got != want {
 		t.Errorf("AudioMaxLabel() with disabled cap = %q, want %q", got, want)
 	}

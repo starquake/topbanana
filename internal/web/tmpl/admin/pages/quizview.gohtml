@@ -480,9 +480,11 @@
                 {{/* Upload limits (#1139): show the caps so a host does not pick a
                      file the server will reject; basis-full drops it to its own
                      line under the picker. The client guard reads the numeric cap
-                     from the input's data-max-bytes. */}}
+                     from the input's data-max-bytes. The per-request file-count cap
+                     is not shown: the uploader posts one file per request, so it
+                     bounds only the no-JS fallback, not the path a host uses. */}}
                 <p class="basis-full text-xs text-text-dim" data-testid="image-upload-limits">
-                    {{if .UploadLimits.ImageMaxLabel}}Up to {{.UploadLimits.ImageMaxLabel}} per image. {{end}}JPG or PNG{{if .UploadLimits.MaxFilesPerBatch}}, up to {{.UploadLimits.MaxFilesPerBatch}} at a time{{end}}{{if .UploadLimits.PerQuizImageLimit}}, {{.UploadLimits.PerQuizImageLimit}} images per quiz{{end}}.
+                    {{if .UploadLimits.ImageMaxLabel}}Up to {{.UploadLimits.ImageMaxLabel}} per image. {{end}}JPG or PNG{{if .UploadLimits.PerQuizImageLimit}}, {{.UploadLimits.PerQuizImageLimit}} images per quiz{{end}}.
                 </p>
             </form>
 

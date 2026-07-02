@@ -14,13 +14,11 @@ type MediaUploadLimits struct {
 	// ImageMaxBytes is the per-file image cap in bytes (config MediaImageMaxBytes).
 	// Zero means the cap is disabled: the guard is off and no size label shows.
 	ImageMaxBytes int64
-	// AudioMaxBytes is the per-file audio cap in bytes (config MediaAudioMaxBytes).
-	// Zero means disabled, as with ImageMaxBytes.
+	// AudioMaxBytes is the per-file audio cap in bytes: the configured audio cap
+	// (MediaAudioMaxBytes) clamped down to the largest a single file can be under
+	// the multipart request-body cap, so the shown label never exceeds what the
+	// server accepts. Zero means disabled, as with ImageMaxBytes.
 	AudioMaxBytes int64
-	// MaxFilesPerBatch is the per-request image file-count cap
-	// (mediahttp.MaxUploadFilesPerRequest). Audio posts one file per request, so
-	// this applies to the image picker only. Zero omits the clause.
-	MaxFilesPerBatch int
 	// PerQuizImageLimit is the per-quiz library ceiling per media type (config
 	// MediaQuizImageLimit). Zero means the ceiling is disabled.
 	PerQuizImageLimit int
@@ -42,7 +40,11 @@ func humanizeBytes(n int64) string {
 	if n <= 0 {
 		return ""
 	}
-	const unit = 1024
+	const (
+		unit = 1024
+		// decimalScale rounds the size to one decimal place via the floor below.
+		decimalScale = 10
+	)
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}
@@ -55,6 +57,10 @@ func humanizeBytes(n int64) string {
 			break
 		}
 	}
+	// Floor to one decimal so a cap that is not a clean binary multiple is
+	// never rounded UP past the real limit: 9.96 MB must read "9.9 MB", not
+	// "10 MB", or a host trusts a size the guard and server would reject.
+	value = math.Floor(value*decimalScale) / decimalScale
 	if value == math.Trunc(value) {
 		return fmt.Sprintf("%d %s", int64(value), label)
 	}

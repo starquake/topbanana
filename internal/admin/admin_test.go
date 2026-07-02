@@ -329,12 +329,11 @@ func TestHandleQuizView(t *testing.T) {
 			t.Fatalf("quiz view status = %d, want %d", got, want)
 		}
 		body := rr.Body.String()
-		// Human-readable helper text (images: size + batch cap + per-quiz cap;
-		// audio: size + per-quiz cap) plus the numeric byte caps the client-side
-		// size guard reads from the file inputs.
+		// Human-readable helper text (images: size + per-quiz cap; audio: size +
+		// per-quiz cap) plus the numeric byte caps the client-side size guard
+		// reads from the file inputs.
 		for _, want := range []string{
 			"Up to 10 MB per image",
-			"up to 10 at a time",
 			"200 images per quiz",
 			"Up to 20 MB per clip",
 			"200 clips per quiz",
@@ -3269,14 +3268,13 @@ func (l mediaLister) ListMediaByQuiz(_ context.Context, _ int64) ([]*media.Media
 	return l.items, nil
 }
 
-// testUploadLimits mirrors the production defaults (10 MB image, 20 MB audio, 10
-// files per batch, 200 per quiz) so the quiz-view tests exercise the same
-// helper text a real host sees.
+// testUploadLimits mirrors the production defaults (10 MB image, 20 MB audio,
+// 200 per quiz) so the quiz-view tests exercise the same helper text a real host
+// sees.
 func testUploadLimits() MediaUploadLimits {
 	return MediaUploadLimits{
 		ImageMaxBytes:     10 << 20,
 		AudioMaxBytes:     20 << 20,
-		MaxFilesPerBatch:  10,
 		PerQuizImageLimit: 200,
 	}
 }
