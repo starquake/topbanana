@@ -94,6 +94,7 @@ type Medium struct {
 	Ready             int64
 	DurationMs        sql.NullInt64
 	Description       string
+	OriginalFilename  string
 }
 
 type Option struct {
