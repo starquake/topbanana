@@ -64,10 +64,12 @@ func addRoutes(
 	gameDeps := adminGameDeps{
 		gameService:  gameService,
 		runningGames: realtime.SessionService,
-		uploadLimits: admin.NewMediaUploadLimits(
-			cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes,
-			mediahttp.MaxUploadFilesPerRequest, cfg.MediaQuizImageLimit,
-		),
+		uploadLimits: admin.MediaUploadLimits{
+			ImageMaxBytes:     cfg.MediaImageMaxBytes,
+			AudioMaxBytes:     cfg.MediaAudioMaxBytes,
+			MaxFilesPerBatch:  mediahttp.MaxUploadFilesPerRequest,
+			PerQuizImageLimit: cfg.MediaQuizImageLimit,
+		},
 	}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)

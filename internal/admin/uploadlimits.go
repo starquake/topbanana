@@ -26,19 +26,6 @@ type MediaUploadLimits struct {
 	PerQuizImageLimit int
 }
 
-// NewMediaUploadLimits bundles the media caps for the quiz view.
-func NewMediaUploadLimits(
-	imageMaxBytes, audioMaxBytes int64,
-	maxFilesPerBatch, perQuizImageLimit int,
-) MediaUploadLimits {
-	return MediaUploadLimits{
-		ImageMaxBytes:     imageMaxBytes,
-		AudioMaxBytes:     audioMaxBytes,
-		MaxFilesPerBatch:  maxFilesPerBatch,
-		PerQuizImageLimit: perQuizImageLimit,
-	}
-}
-
 // ImageMaxLabel is the human-readable per-image size cap (e.g. "10 MB"), or ""
 // when the cap is disabled.
 func (l MediaUploadLimits) ImageMaxLabel() string { return humanizeBytes(l.ImageMaxBytes) }

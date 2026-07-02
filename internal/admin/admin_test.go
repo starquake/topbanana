@@ -3273,7 +3273,12 @@ func (l mediaLister) ListMediaByQuiz(_ context.Context, _ int64) ([]*media.Media
 // files per batch, 200 per quiz) so the quiz-view tests exercise the same
 // helper text a real host sees.
 func testUploadLimits() MediaUploadLimits {
-	return NewMediaUploadLimits(10<<20, 20<<20, 10, 200)
+	return MediaUploadLimits{
+		ImageMaxBytes:     10 << 20,
+		AudioMaxBytes:     20 << 20,
+		MaxFilesPerBatch:  10,
+		PerQuizImageLimit: 200,
+	}
 }
 
 func TestHandleQuizCreate(t *testing.T) {
