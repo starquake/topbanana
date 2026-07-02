@@ -39,6 +39,14 @@ const (
 	// so this is only a coarse outer guard.
 	maxUploadRequestBytes = maxUploadFilesPerRequest*media.MaxUploadBytes + multipartEnvelopeHeadroom
 
+	// maxSingleUploadBytes is the largest a single uploaded file can be under the
+	// request-body cap: the body is capped at maxUploadRequestBytes and one file
+	// must leave room for the multipart envelope, so subtract the headroom. A
+	// host-facing per-file cap (e.g. the audio clip cap, whose configured value
+	// can exceed this) is clamped to it via ClampSingleUploadBytes so the host is
+	// never shown a size the body cap would reject (#1139).
+	maxSingleUploadBytes = maxUploadRequestBytes - multipartEnvelopeHeadroom
+
 	// multipartEnvelopeHeadroom is the slack added over the image cap to cover
 	// the multipart envelope (boundaries, the csrf_token field, part headers).
 	multipartEnvelopeHeadroom = 2 << 20
@@ -70,6 +78,19 @@ const (
 	// the access log as 5xx server faults.
 	httpStatusClientClosedRequest = 499
 )
+
+// ClampSingleUploadBytes bounds a configured per-file size cap to the largest a
+// single file can actually be under the multipart request-body cap, so a
+// host-facing cap (e.g. an audio clip cap raised above the body cap) is never
+// advertised or guarded higher than the server will accept (#1139). A zero
+// input (cap disabled) passes through unchanged.
+func ClampSingleUploadBytes(n int64) int64 {
+	if n > maxSingleUploadBytes {
+		return maxSingleUploadBytes
+	}
+
+	return n
+}
 
 // QuizEditLookup is the slice of the quiz store the upload handler uses to
 // enforce the per-quiz edit gate: a host may upload only to a quiz they

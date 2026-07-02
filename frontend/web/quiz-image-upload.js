@@ -29,6 +29,8 @@ function wireImageUpload() {
         fieldName: 'images',
         rowTestId: 'upload-row',
         cancellable: true,
+        maxBytes: Number(input.dataset.maxBytes) || 0,
+        maxSizeLabel: input.dataset.maxSizeLabel || '',
         isLanded: (json) => Array.isArray(json.uploaded) && json.uploaded.length > 0,
         failureReason: (json) => {
             // Only treat the body as a structured failure when it carries the

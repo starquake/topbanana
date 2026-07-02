@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -318,4 +319,35 @@ func TestMaxMultipartFormMiddlewareWithLimit(t *testing.T) {
 			t.Error("inner handler did not see the parsed multipart archive part")
 		}
 	})
+}
+
+func TestClampSingleUploadBytes(t *testing.T) {
+	t.Parallel()
+
+	// Recover the ceiling by clamping an absurd input rather than hardcoding the
+	// unexported constant, so the test tracks the real cap if the sizing changes.
+	ceiling := mediahttp.ClampSingleUploadBytes(math.MaxInt64)
+	if ceiling <= media.MaxUploadBytes {
+		t.Fatalf("ceiling = %d, want > one image cap (%d)", ceiling, media.MaxUploadBytes)
+	}
+
+	tests := []struct {
+		name string
+		in   int64
+		want int64
+	}{
+		{"zero passes through (cap disabled)", 0, 0},
+		{"small cap unchanged", media.MaxUploadBytes, media.MaxUploadBytes},
+		{"at the ceiling unchanged", ceiling, ceiling},
+		{"one over the ceiling clamps down", ceiling + 1, ceiling},
+		{"far over the ceiling clamps to it", 10 << 30, ceiling},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mediahttp.ClampSingleUploadBytes(tt.in); got != tt.want {
+				t.Errorf("ClampSingleUploadBytes(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
 }

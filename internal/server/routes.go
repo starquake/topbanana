@@ -61,7 +61,15 @@ func addRoutes(
 		mailConfigured: mail.Status.Configured,
 		tasks:          mail.Tasks,
 	}
-	gameDeps := adminGameDeps{gameService: gameService, runningGames: realtime.SessionService}
+	gameDeps := adminGameDeps{
+		gameService:  gameService,
+		runningGames: realtime.SessionService,
+		uploadLimits: admin.MediaUploadLimits{
+			ImageMaxBytes:     cfg.MediaImageMaxBytes,
+			AudioMaxBytes:     mediahttp.ClampSingleUploadBytes(cfg.MediaAudioMaxBytes),
+			PerQuizImageLimit: cfg.MediaQuizImageLimit,
+		},
+	}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	if cfg.DemoMode {
@@ -483,6 +491,9 @@ type adminPlayerDeps struct {
 type adminGameDeps struct {
 	gameService  *game.Service
 	runningGames admin.RunningGameLookup
+	// uploadLimits are the media caps the quiz view shows a host and feeds to
+	// the client-side pre-upload size guard (#1139).
+	uploadLimits admin.MediaUploadLimits
 }
 
 func addAdminRoutes(
@@ -521,6 +532,7 @@ func addAdminRoutes(
 		requireGameHost(
 			admin.HandleQuizView(
 				logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames, stores.Media,
+				gameDeps.uploadLimits,
 			),
 		),
 	)

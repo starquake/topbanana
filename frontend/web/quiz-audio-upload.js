@@ -73,6 +73,8 @@ function wireAudioUpload() {
         form,
         fieldName: 'audio',
         rowTestId: 'audio-upload-row',
+        maxBytes: Number(input.dataset.maxBytes) || 0,
+        maxSizeLabel: input.dataset.maxSizeLabel || '',
         prepare: async (file) => {
             const durationMs = await measureDuration(file);
             const fields = { description: descriptionFromFile(file.name) };
