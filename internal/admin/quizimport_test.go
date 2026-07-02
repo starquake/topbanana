@@ -12,9 +12,11 @@ import (
 // sample rendered on the import screen parses cleanly through the real
 // importer: the same DisallowUnknownFields decode and payload-to-domain
 // translation the POST handler runs, then the shared form validation.
-// It fails if the sample carries a field the parser rejects (or drops a
-// documented one), so the on-screen example and the parser cannot drift
-// (#1138).
+// DisallowUnknownFields fails the test if the sample carries a field the
+// parser rejects (a renamed or undocumented key), and the boundary-override
+// assertion below fails it if the sample stops demonstrating the
+// boundaryDurationSeconds optional the field reference documents, so the
+// on-screen example and the parser cannot drift (#1138).
 func TestQuizImportExampleParses(t *testing.T) {
 	t.Parallel()
 
@@ -32,6 +34,18 @@ func TestQuizImportExampleParses(t *testing.T) {
 
 	if problems := admin.ValidateQuizForm(t.Context(), qz); len(problems) > 0 {
 		t.Errorf("ValidateQuizForm problems = %v, want none", problems)
+	}
+
+	boundarySet := false
+	for _, r := range qz.Rounds {
+		if r.BoundaryDurationSeconds != nil {
+			boundarySet = true
+
+			break
+		}
+	}
+	if !boundarySet {
+		t.Error("sample no longer sets boundaryDurationSeconds on any round (#1138)")
 	}
 }
 
