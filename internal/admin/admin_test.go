@@ -420,7 +420,9 @@ func TestHandleQuizView_QuestionIndicators(t *testing.T) {
 		t.Fatalf("UpdateQuestion err = %v, want nil", err)
 	}
 
-	handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
+	handler := HandleQuizView(
+		logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
+	)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 	rr := httptest.NewRecorder()
