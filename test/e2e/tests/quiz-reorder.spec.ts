@@ -26,10 +26,14 @@ test.use({ storageState: adminStatePath() });
 // across browsers, and the full drop -> POST -> partial-swap -> persisted-order
 // chain is exercised end to end on Firefox.
 
-// dragReorder drags the grip handle onto the target. force:true bypasses the
-// actionability check the drifting drag-clone can otherwise fail.
+// dragReorder drags the grip handle onto the target's centre. force:true
+// bypasses the actionability check the drifting drag-clone can otherwise fail.
+// Dropping at the centre (no fixed targetPosition) keeps the drag robust to row
+// height: an earlier hardcoded top offset assumed a fixed .q-row height and
+// mis-resolved the insert index once the row grew (e.g. the #1141 per-question
+// badges), even though the reorder POST still fired.
 async function dragReorder(handle: Locator, target: Locator): Promise<void> {
-  await handle.dragTo(target, { targetPosition: { x: 60, y: 10 }, force: true });
+  await handle.dragTo(target, { force: true });
 }
 
 async function questionTexts(page: Page): Promise<string[]> {
