@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // fullSuffix and thumbSuffix name the two files a stored image writes under
@@ -158,12 +159,12 @@ func sanitizeFilename(filename string) string {
 // and description normalizers so their length-cap semantics stay identical.
 func capRunes(s string, limit int) string {
 	s = strings.TrimSpace(s)
-	runes := []rune(s)
-	if len(runes) > limit {
-		s = strings.TrimSpace(string(runes[:limit]))
+	if utf8.RuneCountInString(s) <= limit {
+		return s
 	}
 
-	return s
+	// Over the cap: materialise the runes only now, to slice at the limit-th one.
+	return strings.TrimSpace(string([]rune(s)[:limit]))
 }
 
 // stripControlRunes drops Unicode control characters (newlines, tabs, etc.) from
