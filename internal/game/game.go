@@ -51,11 +51,9 @@ var (
 	// the option being submitted does not belong to the supplied question.
 	ErrOptionNotInQuestion = errors.New("option does not belong to question")
 
-	// ErrAnswerWindowClosed is returned by [Service.SubmitAnswer] when the
-	// answer arrives after the question's window has closed (past
-	// ExpiredAt plus a small latency grace). A late answer scores nothing,
-	// so it is rejected rather than recorded (#1163). Handlers map it to
-	// 409.
+	// ErrAnswerWindowClosed is returned by [Service.SubmitAnswer] for an
+	// answer arriving past ExpiredAt plus the latency grace; it scores
+	// nothing, so it is rejected not recorded (#1163). Handlers map it to 409.
 	ErrAnswerWindowClosed = errors.New("answer window closed")
 
 	// ErrStartingGameNoRowsAffected is returned by [GameStore.StartGame]

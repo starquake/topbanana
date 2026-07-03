@@ -13,11 +13,8 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// TestQuizModeGating_Integration pins the MP-0 solo gate end-to-end
-// (#677): a live quiz is absent from the public/solo browse list and is
-// rejected by the game-create path - both with a 404 so a live quiz is
-// indistinguishable from a missing one. A solo quiz stays listed and
-// playable.
+// TestQuizModeGating_Integration pins the MP-0 solo gate (#677): a live
+// quiz is off the browse list and 404s game-create; a solo quiz stays playable.
 func TestQuizModeGating_Integration(t *testing.T) {
 	t.Parallel()
 

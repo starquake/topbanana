@@ -903,9 +903,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
 		playerID := env.seedPlayer(t, "answer-late")
 
-		// A negative reveal delay issues the question with its window
-		// already in the past, so the submit lands past ExpiredAt plus the
-		// latency grace without any real waiting (#1163).
+		// Negative reveal delay issues the question already expired (#1163).
 		svc := game.NewService(env.games, env.quizzes, env.logger)
 		svc.SetRevealDelay(-time.Hour)
 
@@ -944,10 +942,8 @@ func TestHandleAnswerPost(t *testing.T) {
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
 		playerID := env.seedPlayer(t, "answer-qdeleted")
 
-		// Issue the first question through the real store, then drive the
-		// submit through a service whose quiz store reports the question as
-		// deleted - the mid-game deletion race (#1180). It must 404, not
-		// 500.
+		// Issue the question for real, then submit through a store that
+		// reports it deleted - the mid-game race must 404, not 500 (#1180).
 		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)

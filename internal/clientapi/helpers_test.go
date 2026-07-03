@@ -17,12 +17,8 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// deletedQuestionQuizStore wraps a real quiz.Store but reports every
-// question lookup as deleted (quiz.ErrQuestionNotFound). It reproduces the
-// #1180 race where a host deletes a question between SubmitAnswer's
-// GetGame and its GetQuestion lookup - a state a real FK makes otherwise
-// unreachable, because deleting a played question also removes the
-// game_questions row that keeps it in the game.
+// deletedQuestionQuizStore reports every question as deleted, faking the
+// #1180 mid-game delete race a real FK makes otherwise unreachable.
 type deletedQuestionQuizStore struct {
 	quiz.Store
 }

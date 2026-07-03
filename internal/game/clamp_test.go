@@ -7,13 +7,8 @@ import (
 	. "github.com/starquake/topbanana/internal/game"
 )
 
-// TestClampTappedAt pins the #237 latency refund with the #1163 bound.
-// The recorded AnsweredAt equals the client's tappedAt only when it lands
-// inside [serverNow - maxRefund, serverNow]; anything else falls back to
-// serverNow, never to tappedAt. The lower bound is what stops a crafted
-// client from claiming the window start to take full points after
-// unlimited real time; the upper bound stops a forward-skewed client from
-// scoring faster than it earned.
+// TestClampTappedAt pins the bounded #237 refund: tappedAt is kept only
+// inside [serverNow - maxRefund, serverNow], else serverNow (#1163).
 func TestClampTappedAt(t *testing.T) {
 	t.Parallel()
 

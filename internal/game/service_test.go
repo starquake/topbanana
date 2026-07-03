@@ -431,9 +431,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		// A negative reveal delay issues the question with its window
-		// already in the past, so the answer below lands well past
-		// ExpiredAt plus the latency grace without any real waiting.
+		// Negative reveal delay issues the question already expired.
 		svc.SetRevealDelay(-time.Hour)
 
 		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)

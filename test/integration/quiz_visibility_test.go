@@ -10,12 +10,9 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// TestQuizVisibility_Integration pins #103 end-to-end: a private quiz
-// disappears from /api/quizzes for everyone, its per-quiz endpoints (the
-// visibility-gated leaderboard) are reachable only by an authenticated
-// player, and it rejects a start-game POST from an anonymous visitor.
-// Unlisted is not on the public list but stays reachable on its per-quiz
-// endpoints.
+// TestQuizVisibility_Integration pins #103: a private quiz is hidden from
+// the list and its gated leaderboard is reachable only by an authed player;
+// unlisted is off the list but reachable by link.
 func TestQuizVisibility_Integration(t *testing.T) {
 	t.Parallel()
 
