@@ -14,10 +14,10 @@ import (
 )
 
 // TestQuizModeGating_Integration pins the MP-0 solo gate end-to-end
-// (#677): a live quiz is absent from the public/solo browse list, is
-// rejected by the solo play data endpoint, and is rejected by the
-// game-create path - all with a 404 so a live quiz is indistinguishable
-// from a missing one. A solo quiz stays listed and playable.
+// (#677): a live quiz is absent from the public/solo browse list and is
+// rejected by the game-create path - both with a 404 so a live quiz is
+// indistinguishable from a missing one. A solo quiz stays listed and
+// playable.
 func TestQuizModeGating_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -83,24 +83,6 @@ func TestQuizModeGating_Integration(t *testing.T) {
 		}
 		if seen["Live Mode Quiz"] {
 			t.Error("solo browse list surfaced the live quiz")
-		}
-	})
-
-	t.Run("solo play endpoint 404s the live quiz", func(t *testing.T) {
-		t.Parallel()
-		resp := httpGet(ctx, t, anonClient, fmt.Sprintf("%s/api/quizzes/%s-%d", baseURL, liveQz.Slug, liveQz.ID))
-		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
-			t.Errorf("status = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("solo play endpoint still serves the solo quiz", func(t *testing.T) {
-		t.Parallel()
-		resp := httpGet(ctx, t, anonClient, fmt.Sprintf("%s/api/quizzes/%s-%d", baseURL, soloQz.Slug, soloQz.ID))
-		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusOK; got != want {
-			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
 

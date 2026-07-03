@@ -12,14 +12,8 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// quizGetImageRes decodes only the per-question image field off the solo
-// data endpoint (GET /api/quizzes/{slugID}).
-type quizGetImageRes struct {
-	Questions []questionImageRes `json:"questions"`
-}
-
-// questionImageRes is one question's text + image field, shared by the solo
-// data and /next decode targets.
+// questionImageRes is one question's text + image field, shared by the /next
+// and live-session decode targets.
 type questionImageRes struct {
 	Text     string `json:"text"`
 	ImageURL string `json:"imageUrl"`
@@ -94,10 +88,8 @@ func createSoloGame(
 	return created
 }
 
-// TestQuestionImage_SoloWire pins that the solo play endpoints surface a
-// question's attached image as imageUrl = /media/<id> and omit the field when
-// the question has none. Covers both the bulk data endpoint
-// (GET /api/quizzes/{slugID}) and the per-question /next endpoint.
+// TestQuestionImage_SoloWire pins that the per-question /next endpoint
+// surfaces a question's attached image as imageUrl = /media/<id>.
 func TestQuestionImage_SoloWire(t *testing.T) {
 	t.Parallel()
 
@@ -123,29 +115,6 @@ func TestQuestionImage_SoloWire(t *testing.T) {
 
 	mediaID := attachMediaToQuestion(ctx, t, stores, qz.ID, qz.Questions[0].ID)
 	wantURL := fmt.Sprintf("/media/%d", mediaID)
-	slugID := fmt.Sprintf("%s-%d", qz.Slug, qz.ID)
-
-	t.Run("data endpoint carries imageUrl", func(t *testing.T) {
-		t.Parallel()
-		resp := httpGet(ctx, t, newAnonClient(t), fmt.Sprintf("%s/api/quizzes/%s", baseURL, slugID))
-		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusOK; got != want {
-			t.Fatalf("quiz get status = %d, want %d", got, want)
-		}
-		var body quizGetImageRes
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			t.Fatalf("decode quiz get: %v", err)
-		}
-		if got, want := len(body.Questions), 2; got != want {
-			t.Fatalf("questions = %d, want %d", got, want)
-		}
-		if got, want := body.Questions[0].ImageURL, wantURL; got != want {
-			t.Errorf("question[0].imageUrl = %q, want %q", got, want)
-		}
-		if got := body.Questions[1].ImageURL; got != "" {
-			t.Errorf("question[1].imageUrl = %q, want empty (no image attached)", got)
-		}
-	})
 
 	t.Run("next endpoint carries imageUrl", func(t *testing.T) {
 		t.Parallel()

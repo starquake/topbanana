@@ -1,6 +1,7 @@
 package clientapi_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,20 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+// deletedQuestionQuizStore wraps a real quiz.Store but reports every
+// question lookup as deleted (quiz.ErrQuestionNotFound). It reproduces the
+// #1180 race where a host deletes a question between SubmitAnswer's
+// GetGame and its GetQuestion lookup - a state a real FK makes otherwise
+// unreachable, because deleting a played question also removes the
+// game_questions row that keeps it in the game.
+type deletedQuestionQuizStore struct {
+	quiz.Store
+}
+
+func (deletedQuestionQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, error) {
+	return nil, quiz.ErrQuestionNotFound
+}
 
 // seededAdminID is the id of the admin row inserted by migration
 // 20260111110308_add_admin_player.sql. Quiz fixtures attribute themselves

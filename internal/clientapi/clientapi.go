@@ -179,34 +179,6 @@ func gateQuizRead(
 	return canReadQuiz(w, r, visibility)
 }
 
-// quizGetOptionResponse, quizGetQuestionResponse, and quizGetResponse are
-// the wire shape of the solo play data endpoint (HandleQuizGet). Declared
-// at package scope so the question-mapping helper can build them outside
-// the handler body.
-type quizGetOptionResponse struct {
-	ID   int64  `json:"id"`
-	Text string `json:"text"`
-}
-
-type quizGetQuestionResponse struct {
-	ID          int64                   `json:"id"`
-	Text        string                  `json:"text"`
-	Position    int                     `json:"position"`
-	ImageURL    string                  `json:"imageUrl,omitempty"`
-	AudioURL    string                  `json:"audioUrl,omitempty"`
-	AudioRepeat bool                    `json:"audioRepeat,omitempty"`
-	Options     []quizGetOptionResponse `json:"options"`
-}
-
-type quizGetResponse struct {
-	ID          int64                     `json:"id"`
-	Title       string                    `json:"title"`
-	Slug        string                    `json:"slug"`
-	Description string                    `json:"description"`
-	CreatedAt   time.Time                 `json:"createdAt"`
-	Questions   []quizGetQuestionResponse `json:"questions"`
-}
-
 // decimalBase is the radix used when formatting ids as strings.
 const decimalBase = 10
 
@@ -219,79 +191,6 @@ func mediaURL(mediaID *int64) string {
 	}
 
 	return "/media/" + strconv.FormatInt(*mediaID, decimalBase)
-}
-
-// quizGetQuestions maps a quiz's questions + options onto the play
-// endpoint's wire shape. correct-flag and time-limit fields are
-// deliberately omitted so the solo client never receives the answer key.
-func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
-	questions := make([]quizGetQuestionResponse, 0, len(qz.Questions))
-	for _, qs := range qz.Questions {
-		opts := make([]quizGetOptionResponse, 0, len(qs.Options))
-		for _, o := range qs.Options {
-			opts = append(opts, quizGetOptionResponse{ID: o.ID, Text: o.Text})
-		}
-		questions = append(questions, quizGetQuestionResponse{
-			ID:          qs.ID,
-			Text:        qs.Text,
-			Position:    qs.Position,
-			ImageURL:    mediaURL(qs.ImageMediaID),
-			AudioURL:    mediaURL(qs.AudioMediaID),
-			AudioRepeat: qs.AudioRepeat,
-			Options:     opts,
-		})
-	}
-
-	return questions
-}
-
-// HandleQuizGet returns a single quiz with its questions and options.
-func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
-		if !ok {
-			return
-		}
-
-		qz, err := quizStore.GetQuiz(r.Context(), quizID)
-		if err != nil {
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			writeInternalError(w, r, logger, "error retrieving quiz from store", err)
-
-			return
-		}
-		if !canReadQuiz(w, r, qz.Visibility) {
-			return
-		}
-		// Live quizzes are hosted-only (MP-0 / #677): the solo play
-		// endpoint must not serve one. A 404 keeps it indistinguishable
-		// from a missing quiz so a hosted quiz can't be pre-played.
-		if qz.Mode == quiz.ModeLive {
-			http.NotFound(w, r)
-
-			return
-		}
-
-		res := quizGetResponse{
-			ID:          qz.ID,
-			Title:       qz.Title,
-			Slug:        qz.Slug,
-			Description: qz.Description,
-			CreatedAt:   qz.CreatedAt,
-			Questions:   quizGetQuestions(qz),
-		}
-
-		err = handlers.EncodeJSON(w, http.StatusOK, res)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error encoding quizResponse", slog.Any("err", err))
-
-			return
-		}
-	})
 }
 
 // leaderboardLimit caps the number of rows the REST + SSE leaderboards
@@ -1096,6 +995,7 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 //   - ErrGameNotFound / ErrQuestionNotInGame -> 404
 //   - ErrOptionNotInQuestion -> 400
 //   - ErrAnswerAlreadyRecorded -> 409 (double-tap / retry; #353)
+//   - ErrAnswerWindowClosed -> 409 (answer arrived too late; #1163)
 //   - anything else -> 500 via writeInternalError
 func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
@@ -1103,7 +1003,7 @@ func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog
 		http.NotFound(w, r)
 	case errors.Is(err, game.ErrOptionNotInQuestion):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, game.ErrAnswerAlreadyRecorded):
+	case errors.Is(err, game.ErrAnswerAlreadyRecorded), errors.Is(err, game.ErrAnswerWindowClosed):
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		writeInternalError(w, r, logger, "error submitting answer", err)

@@ -24,6 +24,13 @@ const (
 	// mobile network jitter.
 	defaultStalePeriod = 30 * time.Second
 
+	// lateAnswerGrace is how far past a question's ExpiredAt an answer may
+	// still land and be recorded, covering a last-instant tap delayed in
+	// flight. Beyond it [Service.SubmitAnswer] rejects the answer with
+	// [ErrAnswerWindowClosed] rather than storing a guaranteed-zero score
+	// (#1163).
+	lateAnswerGrace = 2 * time.Second
+
 	// errGetGameFmt is the wrap format for store.GetGame errors. Every
 	// entry-point gate (GetNextQuestion, GetNext, MarkRoundSeen,
 	// SubmitAnswer, GetResults) wraps the failure with the same
@@ -464,6 +471,14 @@ func (s *Service) SubmitAnswer(
 		return nil, err
 	}
 
+	// Reject an answer that reaches the server after the window has closed
+	// (#1163). The grace covers a last-instant tap delayed in flight; past
+	// it the answer scores nothing, so it is refused rather than recorded.
+	now := time.Now()
+	if now.After(question.ExpiredAt.Add(lateAnswerGrace)) {
+		return nil, ErrAnswerWindowClosed
+	}
+
 	a := &Answer{
 		GameID:     gameID,
 		PlayerID:   playerID,
@@ -471,7 +486,7 @@ func (s *Service) SubmitAnswer(
 		Question:   question,
 		OptionID:   optionID,
 		Option:     option,
-		AnsweredAt: clampTappedAt(tappedAt, question.StartedAt, time.Now()),
+		AnsweredAt: clampTappedAt(tappedAt, now, maxLatencyRefund),
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
@@ -583,6 +598,17 @@ func (s *Service) resolveAnswerTarget(
 
 	quizQuestion, err := s.quizStore.GetQuestion(ctx, question.QuestionID)
 	if err != nil {
+		// The question row can vanish mid-game when a host deletes it
+		// between this call's GetGame and here. Treat the deleted row as
+		// no-longer-in-game so the submit path 404s gracefully, matching
+		// how GetNext advances past a missing question rather than 500ing
+		// (#1180).
+		if errors.Is(err, quiz.ErrQuestionNotFound) {
+			return nil, nil, fmt.Errorf(
+				"question %d deleted from game %s: %w", question.QuestionID, gameID, ErrQuestionNotInGame,
+			)
+		}
+
 		return nil, nil, fmt.Errorf("failed to get question: %w", err)
 	}
 	question.QuizQuestion = quizQuestion
