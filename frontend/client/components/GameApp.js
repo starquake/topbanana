@@ -75,7 +75,8 @@ export class GameApp {
         // advance runs after the feedback pause, past the submit try/catch,
         // so without this a rejected /next left the player frozen on the
         // feedback card with every button disabled and no way forward (#1166).
-        // Cleared on the next advance attempt or when a fresh item loads.
+        // Cleared only when the next item successfully loads, so the banner
+        // stays up (showing its Loading state) while a retry is in flight.
         this.advanceError = false;
         // Guards the advance-retry banner's Retry button so a double-tap
         // does not fire two overlapping advances, and drives the button's
@@ -687,7 +688,6 @@ export class GameApp {
         this.audio.stopClip();
         this.revealing = false;
         this.submitError = false;
-        this.advanceError = false;
         let item;
         if (this.nextItemPromise) {
             item = await this.nextItemPromise;
@@ -1099,9 +1099,13 @@ export class GameApp {
     // markRoundSeen-style guard is unnecessary — feedback is still set, so the
     // feedback card stays on screen to host the banner and its Retry control.
     async advanceToNext() {
-        this.advanceError = false;
         try {
             await this.nextQuestion();
+            // Only a successful advance clears the banner. Clearing up front
+            // would hide it (and its Retry button) for the whole in-flight
+            // retry, so the "Loading..." + disabled affordance never rendered
+            // and the double-tap guard was moot (#1166).
+            this.advanceError = false;
         } catch (err) {
             console.error('advanceToNext:', err);
             this.advanceError = true;

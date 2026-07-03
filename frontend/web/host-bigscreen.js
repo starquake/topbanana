@@ -298,6 +298,9 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.disconnect();
             this.stopCountdown();
             this.stopStartCountdown();
+            if (this.onVisible) {
+                document.removeEventListener('visibilitychange', this.onVisible);
+            }
             // Tear down so no audio/timer leaks on navigation away (#1088).
             if (this.audio) this.audio.teardown();
         },

@@ -21,7 +21,7 @@ test.use({ storageState: adminStatePath() });
 test('advance-retry banner appears when the next-question fetch fails, and Retry advances the game', async ({ page, browserName }) => {
   test.setTimeout(45_000);
 
-  const quizTitle = `E2E Advance Err ${browserName}`;
+  const quizTitle = `E2E Advance Err ${browserName} ${Date.now()}`;
 
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
@@ -29,11 +29,17 @@ test('advance-retry banner appears when the next-question fetch fails, and Retry
   // Fail GET .../questions/next only while armed. The first question loads via
   // this same endpoint, so it must stay unarmed until Q1 is on screen; arming
   // after the answer click makes the prefetch + the direct advance fetch 500.
+  // holdNextMs delays a let-through response so the retry's in-flight state is
+  // observable (the banner staying up with a disabled "Loading..." button).
   let failNext = false;
+  let holdNextMs = 0;
   await page.route(/\/api\/games\/[^/]+\/questions\/next$/, async (route) => {
     if (failNext) {
       await route.fulfill({ status: 500, body: 'simulated server error' });
       return;
+    }
+    if (holdNextMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, holdNextMs));
     }
     await route.continue();
   });
@@ -57,12 +63,21 @@ test('advance-retry banner appears when the next-question fetch fails, and Retry
 
   const retry = page.getByTestId('advance-retry');
   await expect(retry).toBeEnabled();
+  await expect(retry).toHaveText('Retry');
 
-  // Recover: let the next-question fetch through and retry. The advance
-  // completes and the second question loads, and the banner clears.
+  // Recover: let the next-question fetch through but hold it, then retry. While
+  // the advance is in flight the banner must stay up with the button showing
+  // "Loading..." and disabled - that affordance is the whole point of the fix,
+  // and clearing advanceError up front would have hidden it.
   failNext = false;
+  holdNextMs = 3000;
   await retry.click();
+  await expect(banner).toBeVisible();
+  await expect(retry).toBeDisabled();
+  await expect(retry).toHaveText('Loading...');
 
+  // Once the held fetch lands, the advance completes: the second question loads
+  // and the banner clears.
   const secondChoice = QUIZ_QUESTIONS[1].options[0];
   await expect(page.getByRole('button', { name: secondChoice })).toBeVisible({ timeout: 15_000 });
   await expect(banner).toBeHidden();
