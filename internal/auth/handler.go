@@ -110,6 +110,9 @@ type formData struct {
 	// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URL
 	// env vars is unset.
 	ShowGoogle bool
+	// ShowForgotPassword renders the "Forgot your password?" link; false
+	// when SMTP is unconfigured and the reset routes are unmounted (#1170).
+	ShowForgotPassword bool
 	// Next is the validated same-site return path the login flow
 	// should send the user to on success (#449). Empty string means
 	// "no return target known"; callers fall back to the role landing.
@@ -436,7 +439,7 @@ func HandleLoginForm(
 	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
-	registrationEnabled, googleEnabled bool,
+	registrationEnabled, googleEnabled, forgotPasswordEnabled bool,
 ) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
@@ -446,10 +449,11 @@ func HandleLoginForm(
 			return
 		}
 		renderer.Render(w, r, http.StatusOK, formData{
-			Title:        "Log in",
-			ShowRegister: registrationEnabled,
-			ShowGoogle:   googleEnabled,
-			Next:         next,
+			Title:              "Log in",
+			ShowRegister:       registrationEnabled,
+			ShowGoogle:         googleEnabled,
+			ShowForgotPassword: forgotPasswordEnabled,
+			Next:               next,
 		})
 	})
 }
@@ -513,6 +517,9 @@ type LoginDeps struct {
 	BaseURL             string
 	RegistrationEnabled bool
 	GoogleEnabled       bool
+	// ForgotPasswordEnabled shows the "Forgot your password?" link on the
+	// login form's error re-renders; false when SMTP is unconfigured (#1170).
+	ForgotPasswordEnabled bool
 	// Tasks tracks the detached verify-email resend so a graceful
 	// shutdown drains it before the DB closes (#740). Nil in unit tests,
 	// which then run the dispatch untracked.
@@ -542,9 +549,10 @@ func HandleLoginSubmit(
 ) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 	formCfg := loginFormCfg{
-		render:              renderer,
-		registrationEnabled: deps.RegistrationEnabled,
-		googleEnabled:       deps.GoogleEnabled,
+		render:                renderer,
+		registrationEnabled:   deps.RegistrationEnabled,
+		googleEnabled:         deps.GoogleEnabled,
+		forgotPasswordEnabled: deps.ForgotPasswordEnabled,
 	}
 	// dummyHash computes a bcrypt hash once on first use. The handler runs
 	// CheckPassword against it when the email does not exist so the
@@ -636,11 +644,8 @@ func completeLogin(
 	// password is not penalised for earlier typos).
 	clearAccountFailures(deps.AccountLimiter, email)
 
-	// Credentials are correct but the account email is unverified
-	// (#492): refuse the sign-in, re-render the login form with a
-	// generic "check your email" banner, and dispatch a fresh verify
-	// link best-effort. The banner names no address and does not confirm
-	// the password (#787).
+	// Refuse an unverified account; renderUnverifiedLogin keeps the
+	// response indistinguishable from a wrong password (#492/#787/#1171).
 	if !player.IsEmailVerified() {
 		logger.InfoContext(r.Context(), "login blocked: email not verified",
 			slog.Int64(logPlayerKey, player.ID),
@@ -700,9 +705,10 @@ func recordAccountFailure(limiter *AccountLoginLimiter, account string) {
 // the inner helpers (authenticateLogin, renderInvalidCredentials,
 // renderLoginRateLimited) stay under revive's argument-limit.
 type loginFormCfg struct {
-	render              *render.Renderer
-	registrationEnabled bool
-	googleEnabled       bool
+	render                *render.Renderer
+	registrationEnabled   bool
+	googleEnabled         bool
+	forgotPasswordEnabled bool
 }
 
 // loginCreds bundles the per-attempt credential inputs so
@@ -779,21 +785,10 @@ func authenticateLogin(
 	return player, true
 }
 
-// renderUnverifiedLogin re-renders the login form with a generic
-// "check your email" banner and fires a fresh verify-email send through
-// the per-IP resend limiter. Status stays 200 OK so an unverified
-// visitor who reloads sees the form again without the browser flagging a
-// 4xx (the response shape mirrors the verify-email/request flow's
-// success render).
-//
-// The banner deliberately names no address and does not confirm the
-// password was right. Echoing the address ("we resent the link to
-// <email>") only happens when credentials are correct, so it would leak
-// both account existence and password correctness - an enumeration /
-// password oracle. The generic wording (#787, reversing the #492
-// address echo) keeps an unverified-but-correct attempt indistinguishable
-// from a wrong-password one. The submitted email is preserved in the
-// field only so a real user does not have to retype it.
+// renderUnverifiedLogin refuses a correct-password login against an
+// unverified account. It renders byte-identically to the wrong-password
+// 401 so a correct password isn't a password oracle; the verify-email
+// resend is dispatched silently (#492/#787/#1171).
 func renderUnverifiedLogin(
 	logger *slog.Logger,
 	cfg loginFormCfg,
@@ -804,14 +799,7 @@ func renderUnverifiedLogin(
 	email string,
 ) {
 	dispatchVerifyResend(r, logger, deps, player)
-	cfg.render.Render(w, r, http.StatusOK, formData{
-		Title:        "Log in",
-		Email:        email,
-		Message:      "Check your email to finish signing in.",
-		ShowRegister: cfg.registrationEnabled,
-		ShowGoogle:   cfg.googleEnabled,
-		Next:         SafeNextPath(r.PostFormValue("next")),
-	})
+	renderInvalidCredentials(cfg, w, r, email)
 }
 
 // dispatchVerifyResend mirrors dispatchVerifyEmail but routes through
@@ -865,12 +853,13 @@ func renderLoginRateLimited(
 	seconds := int((wait + time.Second - 1) / time.Second)
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	cfg.render.Render(w, r, http.StatusTooManyRequests, formData{
-		Title:        "Log in",
-		Email:        email,
-		Message:      "Too many attempts. Try again in a moment.",
-		ShowRegister: cfg.registrationEnabled,
-		ShowGoogle:   cfg.googleEnabled,
-		Next:         SafeNextPath(r.PostFormValue("next")),
+		Title:              "Log in",
+		Email:              email,
+		Message:            "Too many attempts. Try again in a moment.",
+		ShowRegister:       cfg.registrationEnabled,
+		ShowGoogle:         cfg.googleEnabled,
+		ShowForgotPassword: cfg.forgotPasswordEnabled,
+		Next:               SafeNextPath(r.PostFormValue("next")),
 	})
 }
 
@@ -967,11 +956,12 @@ func renderInvalidCredentials(
 	email string,
 ) {
 	cfg.render.Render(w, r, http.StatusUnauthorized, formData{
-		Title:        "Log in",
-		Email:        email,
-		Message:      "Invalid email or password.",
-		ShowRegister: cfg.registrationEnabled,
-		ShowGoogle:   cfg.googleEnabled,
+		Title:              "Log in",
+		Email:              email,
+		Message:            "Invalid email or password.",
+		ShowRegister:       cfg.registrationEnabled,
+		ShowGoogle:         cfg.googleEnabled,
+		ShowForgotPassword: cfg.forgotPasswordEnabled,
 		// Preserve the posted next so a failed login attempt does not
 		// drop the visitor's intended destination (#449).
 		Next: SafeNextPath(r.PostFormValue("next")),

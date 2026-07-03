@@ -13,17 +13,10 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
-// TestLogin_UnverifiedEmail_BlocksAndResends pins #492: a credentialled
-// account whose email_verified_at is NULL must be refused at /login.
-// Drives the full handler chain so route wiring, CSRF, the login
-// limiter, and the verify-resend dispatch all participate.
-//
-// The integration server keeps the no-op mailer in front of the
-// diagnostics Tester, so the side-effect we can observe is the
-// email_verify_tokens row the dispatch commits before SMTP. Register
-// commits one such row; a successful login-time resend pushes the
-// count up to two. We also assert that no session cookie is issued
-// and that the response body carries the verify banner.
+// TestLogin_UnverifiedEmail_BlocksAndResends: an unverified account is
+// refused with the generic 401 (no session) end-to-end, and the resend
+// still fires - observed via the second email_verify_tokens row the
+// dispatch commits before SMTP (#492/#1171).
 func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	t.Parallel()
 
@@ -73,21 +66,21 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	resp := postLoginFormFull(ctx, t, loginClient, srv.BaseURL, loginCSRF, displayName+"@example.test", password)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 
-	if got, want := resp.StatusCode, http.StatusOK; got != want {
+	if got, want := resp.StatusCode, http.StatusUnauthorized; got != want {
 		t.Fatalf("login status = %d, want %d", got, want)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("ReadAll err = %v, want nil", err)
 	}
-	if got, want := string(body), "Check your email to finish signing in."; !strings.Contains(got, want) {
-		t.Errorf("body missing generic check-email banner; body=%.300q", got)
+	if got, want := string(body), "Invalid email or password."; !strings.Contains(got, want) {
+		t.Errorf("body missing generic invalid-credentials banner; body=%.300q", got)
 	}
-	// The banner must not confirm the credentials were correct (#787):
-	// an unverified-but-correct attempt has to read the same as a
-	// wrong-password one, so no "we resent the link to <address>" echo.
-	if dontWant := "resent the link to"; strings.Contains(string(body), dontWant) {
-		t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, string(body))
+	// The response must not confirm the password was correct (#787/#1171).
+	for _, dontWant := range []string{"Check your email", "resent the link to", "finish signing in"} {
+		if strings.Contains(string(body), dontWant) {
+			t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, string(body))
+		}
 	}
 	for _, c := range resp.Cookies() {
 		if c.Name == session.CookieName && c.Value != "" {

@@ -246,6 +246,65 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	}
 }
 
+// TestAddRoutes_ForgotPassword_GatedOnSMTP: the forgot/reset routes are
+// mounted only when SMTP is configured, else they 404 (#1170).
+func TestAddRoutes_ForgotPassword_GatedOnSMTP(t *testing.T) {
+	t.Parallel()
+
+	paths := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "Forgot GET", method: http.MethodGet, path: "/forgot-password"},
+		{name: "Forgot POST", method: http.MethodPost, path: "/forgot-password"},
+		{name: "Reset GET", method: http.MethodGet, path: "/reset-password"},
+		{name: "Reset POST", method: http.MethodPost, path: "/reset-password"},
+	}
+
+	t.Run("unconfigured 404s", func(t *testing.T) {
+		t.Parallel()
+
+		mux := newRouter(t, dbtest.Open(t), &config.Config{})
+		for _, tc := range paths {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+
+				if got, want := rec.Code, http.StatusNotFound; got != want {
+					t.Errorf("status = %d, want %d for %s %s", got, want, tc.method, tc.path)
+				}
+			})
+		}
+	})
+
+	t.Run("configured is mounted", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.Config{
+			SessionKey: "test-session-key",
+			SMTPHost:   "smtp.example.test",
+			SMTPPort:   587,
+			SMTPFrom:   "noreply@example.test",
+		}
+		mux := newRouter(t, dbtest.Open(t), cfg)
+		for _, tc := range paths {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+
+				if got := rec.Code; got == http.StatusNotFound {
+					t.Errorf("unexpected 404 for %s %s when SMTP is configured", tc.method, tc.path)
+				}
+			})
+		}
+	})
+}
+
 func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	t.Parallel()
 

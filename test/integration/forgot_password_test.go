@@ -9,15 +9,28 @@ import (
 	"testing"
 )
 
+// smtpEnabledEnv builds a startServer env wired to a fake SMTP server, the
+// condition under which the forgot/reset routes are mounted (#1170).
+func smtpEnabledEnv(t *testing.T) map[string]string {
+	t.Helper()
+	smtp := startFakeSMTP(t)
+
+	return map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"SMTP_HOST":            smtp.host(t),
+		"SMTP_PORT":            smtp.port(t),
+		"SMTP_FROM":            "noreply@topbanana.example",
+		"SMTP_TLS":             "false",
+	}
+}
+
 // TestForgotPassword_GETRendersForm pins that an anonymous visitor
 // reaches the forgot-password form and sees the identifier input + a
 // CSRF token.
 func TestForgotPassword_GETRendersForm(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 
 	resp := getWith(ctx, t, authClient(t), srv.BaseURL+"/forgot-password")
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
@@ -49,9 +62,7 @@ func TestForgotPassword_POSTAlwaysFlashesGenericSuccess(t *testing.T) {
 		t.Run(ident, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, srv := startServer(t, map[string]string{
-				"REGISTRATION_ENABLED": "true",
-			})
+			ctx, srv := startServer(t, smtpEnabledEnv(t))
 			dbConn, stores := openStores(t, srv.DBURI)
 			defer dbConn.Close() //nolint:errcheck // cleanup.
 
@@ -91,9 +102,7 @@ func TestForgotPassword_POSTAlwaysFlashesGenericSuccess(t *testing.T) {
 func TestForgotPassword_RateLimited(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 
 	client := authClient(t)
 	first := postForgot(ctx, t, client, srv.BaseURL, "anyone")

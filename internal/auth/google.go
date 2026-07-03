@@ -171,7 +171,7 @@ func HandleGoogleCallback(
 	sessions *session.Manager,
 	games AnonymousGameMigrator,
 	adminEmails []string,
-	registrationEnabled bool,
+	registrationEnabled, forgotPasswordEnabled bool,
 ) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
@@ -185,7 +185,7 @@ func HandleGoogleCallback(
 		http.SetCookie(w, googleNextCookie("", authn.cfg.SecureCookies, -1))
 
 		if msg, ok := validateCallbackRequest(authn.stateKey, r); !ok {
-			renderGoogleError(renderer, w, r, msg, registrationEnabled)
+			renderGoogleError(renderer, w, r, msg, registrationEnabled, forgotPasswordEnabled)
 
 			return
 		}
@@ -197,7 +197,7 @@ func HandleGoogleCallback(
 			return
 		}
 		if result.UserMessage != "" {
-			renderGoogleError(renderer, w, r, result.UserMessage, registrationEnabled)
+			renderGoogleError(renderer, w, r, result.UserMessage, registrationEnabled, forgotPasswordEnabled)
 
 			return
 		}
@@ -213,7 +213,7 @@ func HandleGoogleCallback(
 			if !errors.Is(err, ErrRegistrationDisabled) {
 				logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
 			}
-			renderGoogleError(renderer, w, r, googleLinkErrorMessage(err), registrationEnabled)
+			renderGoogleError(renderer, w, r, googleLinkErrorMessage(err), registrationEnabled, forgotPasswordEnabled)
 
 			return
 		}
@@ -230,7 +230,7 @@ func HandleGoogleCallback(
 				slog.Int64("player_id", player.ID))
 			renderGoogleError(renderer, w, r,
 				"Sign-in blocked: your email is not verified. Try requesting a verification link.",
-				registrationEnabled)
+				registrationEnabled, forgotPasswordEnabled)
 
 			return
 		}
@@ -813,12 +813,13 @@ func renderGoogleError(
 	w http.ResponseWriter,
 	r *http.Request,
 	message string,
-	registrationEnabled bool,
+	registrationEnabled, forgotPasswordEnabled bool,
 ) {
 	renderer.Render(w, r, http.StatusUnauthorized, formData{
-		Title:        "Log in",
-		Message:      message,
-		ShowRegister: registrationEnabled,
-		ShowGoogle:   true,
+		Title:              "Log in",
+		Message:            message,
+		ShowRegister:       registrationEnabled,
+		ShowGoogle:         true,
+		ShowForgotPassword: forgotPasswordEnabled,
 	})
 }

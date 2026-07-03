@@ -207,7 +207,11 @@ func addEmailFlowRoutes(
 		)),
 	))
 
-	addPasswordResetRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	// Without SMTP the reset email can never send, so mounting these would
+	// dead-end every user; gate them like the Google-login routes (#1170).
+	if cfg.SMTPConfigured() {
+		addPasswordResetRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
+	}
 
 	mux.Handle("GET /accept-invite", auth.HandleAcceptInviteForm(logger, csrfMgr, stores.Invites))
 	mux.Handle("POST /accept-invite", admin.MaxFormSizeMiddleware(csrfMW(
@@ -331,7 +335,7 @@ func addAuthRoutes(
 			"GET /login/google/callback",
 			auth.HandleGoogleCallback(
 				logger, googleAuth, csrfMgr, stores.OAuth, stores.Players, stores.AdminPlayers, sessions,
-				stores.GameMigrator, cfg.AdminEmails, cfg.RegistrationEnabled,
+				stores.GameMigrator, cfg.AdminEmails, cfg.RegistrationEnabled, cfg.SMTPConfigured(),
 			),
 		)
 	} else {
@@ -365,26 +369,31 @@ func addLoginRoutes(
 	loginLimiter := auth.NewLoginRateLimiter(cfg.LoginCooldown, cfg.TrustedProxyCIDRs)
 	accountLoginLimiter := auth.NewAccountLoginLimiter(auth.AccountLoginThreshold(), auth.AccountLoginCooldown())
 	loginResendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
+	forgotPasswordEnabled := cfg.SMTPConfigured()
 	mux.Handle(
 		"GET /login",
-		auth.HandleLoginForm(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled),
+		auth.HandleLoginForm(
+			logger, csrfMgr, stores.Players, sessions,
+			cfg.RegistrationEnabled, googleEnabled, forgotPasswordEnabled,
+		),
 	)
 	mux.Handle(
 		"POST /login",
 		csrfMW(auth.HandleLoginSubmit(
 			logger, csrfMgr, auth.LoginDeps{
-				Players:             stores.Players,
-				Sessions:            sessions,
-				Games:               stores.GameMigrator,
-				Limiter:             loginLimiter,
-				AccountLimiter:      accountLoginLimiter,
-				Mailer:              mail.Tester,
-				Tokens:              stores.VerifyTokens,
-				ResendLimiter:       loginResendLimiter,
-				BaseURL:             cfg.BaseURL,
-				RegistrationEnabled: cfg.RegistrationEnabled,
-				GoogleEnabled:       googleEnabled,
-				Tasks:               mail.Tasks,
+				Players:               stores.Players,
+				Sessions:              sessions,
+				Games:                 stores.GameMigrator,
+				Limiter:               loginLimiter,
+				AccountLimiter:        accountLoginLimiter,
+				Mailer:                mail.Tester,
+				Tokens:                stores.VerifyTokens,
+				ResendLimiter:         loginResendLimiter,
+				BaseURL:               cfg.BaseURL,
+				RegistrationEnabled:   cfg.RegistrationEnabled,
+				GoogleEnabled:         googleEnabled,
+				ForgotPasswordEnabled: forgotPasswordEnabled,
+				Tasks:                 mail.Tasks,
 			},
 		)),
 	)
