@@ -14,11 +14,11 @@ services:
       # distroless image's app filesystem is ephemeral, so the default
       # ./media would be lost on every redeploy. Shares the data volume.
       - MEDIA_DIR=/home/nonroot/data/media
-      # REGISTRATION_ENABLED is now env-driven so the operator can
-      # flip it via a GitHub Actions variable (vars.REGISTRATION_ENABLED)
-      # without a redeploy. Defaults true when unset so a fresh stack
-      # behaves the way the previously-hardcoded value did.
-      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+      # REGISTRATION_ENABLED is env-driven so the operator can flip it
+      # via a GitHub Actions variable (vars.REGISTRATION_ENABLED) without
+      # a redeploy. Defaults false when unset to match the app's
+      # fail-closed default, so opening registration is always explicit.
+      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-false}
       # ADMIN_EMAILS pre-seeds the admin allowlist. Sourced from a
       # GitHub Actions variable (vars.ADMIN_EMAILS) so an operator can
       # rotate it without a redeploy; defaults to admin@example.test
