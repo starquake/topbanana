@@ -549,10 +549,11 @@ export class JoinApp {
         try {
             state = await sessionService.getState(this.code);
         } catch {
-            if (seq !== this.stateSeq) return; // superseded read (#1178)
-            // A transient read failure leaves the prior roster on screen; the
-            // next tick (or a reconnect) retries. Don't tear the lobby down on
-            // a single blip, but after several in a row tell the player why the
+            // Count every failure, even a superseded one: seq-gating this would
+            // drop a fast-superseded run and never trip the banner (#1178). A
+            // transient read failure leaves the prior roster on screen; the next
+            // tick (or a reconnect) retries. Don't tear the lobby down on a
+            // single blip, but after several in a row tell the player why the
             // roster looks frozen.
             this.stateFailures += 1;
             if (this.stateFailures >= STATE_FAILURE_LIMIT) {

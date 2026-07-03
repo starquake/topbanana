@@ -293,7 +293,6 @@ function hostBigScreen(joinCode, hasQuiz) {
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/state`,
                     { headers: { Accept: 'application/json' } },
                 );
-                if (seq !== this.stateSeq) return; // superseded read (#1178)
                 if (!response.ok) {
                     // A 404 means the session is gone (terminal), not a
                     // connection fault, so it does not feed the trouble banner.
@@ -305,17 +304,18 @@ function hostBigScreen(joinCode, hasQuiz) {
                     return;
                 }
                 const state = await response.json();
-                if (seq !== this.stateSeq) return; // stale snapshot resolved late (#1178)
+                // Guard only the success path: applying a stale snapshot could
+                // regress the screen (e.g. reveal->question) (#1178).
+                if (seq !== this.stateSeq) return;
                 // A good read clears the failure budget and the banner.
                 this.stateFailures = 0;
                 this.connectionTrouble = false;
                 this.applyState(state);
             } catch (err) {
-                // A transient fetch failure (network drop) is non-fatal: the
-                // next tick (or EventSource reconnect) drives another refresh.
-                // After several in a row the banner tells the host why the
-                // screen looks frozen.
-                if (seq !== this.stateSeq) return;
+                // Count every failure, even a superseded one: seq-gating this
+                // would drop a fast-superseded run of failures and never trip
+                // the trouble banner (#1178). Transient anyway - the next tick
+                // (or EventSource reconnect) drives another refresh.
                 this.noteStateFailure();
             }
         },
