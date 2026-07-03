@@ -175,10 +175,10 @@ func HandleSessionReady(service *livesession.Service) http.Handler {
 // arm, cancel) into an [http.Handler]. The three controls share the same shape:
 // resolve the context player, run action, then map the result - nil or the
 // supplied idempotent sentinel to 204, ErrSessionNotFound to 404, ErrNotHost to
-// 403, anything else to a logged 500. action is the only thing that differs per
-// control; idempotent is the per-control "already in that state" sentinel (an
-// already-started game for start, an already-left lobby for arm/cancel) that
-// maps to a 204 no-op; what names the action in the log messages.
+// 403, ErrNoQuizToStart to 409, anything else to a logged 500. action is the
+// only thing that differs per control; idempotent is the per-control "already in
+// that state" sentinel (an already-started game for start, an already-left lobby
+// for arm/cancel) that maps to a 204 no-op; what names the action in the logs.
 func hostSessionAction(
 	what string,
 	idempotent error,
@@ -205,6 +205,8 @@ func hostSessionAction(
 			http.NotFound(w, r)
 		case errors.Is(err, livesession.ErrNotHost):
 			http.Error(w, "forbidden", http.StatusForbidden)
+		case errors.Is(err, livesession.ErrNoQuizToStart):
+			http.Error(w, "this room has no quiz to start", http.StatusConflict)
 		default:
 			writeInternalError(w, r, logger, "error on session "+what, err)
 		}
@@ -214,8 +216,8 @@ func hostSessionAction(
 // HandleSessionStart is the host "Start now" control: it begins the game
 // immediately, skipping any armed last-call countdown. Only the host may call
 // it. Returns 204 on success, 403 when the caller is not the host, 404 for an
-// unknown code, and 204 (idempotent no-op) when the session has already
-// started.
+// unknown code, 409 when the room has no quiz to start, and 204 (idempotent
+// no-op) when the session has already started.
 func HandleSessionStart(service *livesession.Service) http.Handler {
 	return hostSessionAction("start", livesession.ErrSessionAlreadyStarted, service.Start)
 }
@@ -223,8 +225,8 @@ func HandleSessionStart(service *livesession.Service) http.Handler {
 // HandleSessionArmStart arms the host's last-call countdown (the "Start in 60s"
 // control): it stamps the absolute start deadline that every surface renders.
 // Only the host may call it. Returns 204 on success, 403 when the caller is not
-// the host, 404 for an unknown code, and 204 (idempotent no-op) when the
-// session has already left the lobby.
+// the host, 404 for an unknown code, 409 when the room has no quiz to start, and
+// 204 (idempotent no-op) when the session has already left the lobby.
 func HandleSessionArmStart(service *livesession.Service) http.Handler {
 	return hostSessionAction("arm-start", livesession.ErrNotInLobby,
 		func(ctx context.Context, code string, playerID int64) error {

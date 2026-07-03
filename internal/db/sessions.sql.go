@@ -912,14 +912,15 @@ func (q *Queries) SetSessionPlayerReady(ctx context.Context, arg SetSessionPlaye
 	return q.db.ExecContext(ctx, setSessionPlayerReady, arg.IsReady, arg.SessionID, arg.PlayerID)
 }
 
-const setSessionQuestion = `-- name: SetSessionQuestion :exec
+const setSessionQuestion = `-- name: SetSessionQuestion :execresult
 UPDATE sessions
 SET phase               = 'question',
-    current_round_id    = ?,
-    current_question_id = ?,
-    question_started_at = ?,
-    question_expires_at = ?
-WHERE id = ?
+    current_round_id    = ?1,
+    current_question_id = ?2,
+    question_started_at = ?3,
+    question_expires_at = ?4
+WHERE id = ?5
+  AND phase = ?6
 `
 
 type SetSessionQuestionParams struct {
@@ -928,73 +929,92 @@ type SetSessionQuestionParams struct {
 	QuestionStartedAt sql.NullTime
 	QuestionExpiresAt sql.NullTime
 	ID                string
+	ExpectedPhase     string
 }
 
 // Issues a question: records the current round + question and the server
 // answer window (started_at -> expires_at), and moves into the question phase.
-func (q *Queries) SetSessionQuestion(ctx context.Context, arg SetSessionQuestionParams) error {
-	_, err := q.db.ExecContext(ctx, setSessionQuestion,
+// Optimistic write; see SetSessionRoundIntro.
+func (q *Queries) SetSessionQuestion(ctx context.Context, arg SetSessionQuestionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionQuestion,
 		arg.CurrentRoundID,
 		arg.CurrentQuestionID,
 		arg.QuestionStartedAt,
 		arg.QuestionExpiresAt,
 		arg.ID,
+		arg.ExpectedPhase,
 	)
-	return err
 }
 
-const setSessionReveal = `-- name: SetSessionReveal :exec
+const setSessionReveal = `-- name: SetSessionReveal :execresult
 UPDATE sessions
 SET phase = 'reveal'
-WHERE id = ?
+WHERE id = ?1
+  AND phase = ?2
+  AND current_question_id = ?3
 `
+
+type SetSessionRevealParams struct {
+	ID                string
+	ExpectedPhase     string
+	CurrentQuestionID sql.NullInt64
+}
 
 // Moves the session into the reveal phase, leaving the current question and
 // its window in place so a reader still sees which question is being revealed.
-func (q *Queries) SetSessionReveal(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, setSessionReveal, id)
-	return err
+// Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
+// pins the reveal to the question the runner scored.
+func (q *Queries) SetSessionReveal(ctx context.Context, arg SetSessionRevealParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionReveal, arg.ID, arg.ExpectedPhase, arg.CurrentQuestionID)
 }
 
-const setSessionRoundIntro = `-- name: SetSessionRoundIntro :exec
+const setSessionRoundIntro = `-- name: SetSessionRoundIntro :execresult
 UPDATE sessions
 SET phase               = 'round_intro',
-    current_round_id    = ?,
+    current_round_id    = ?1,
     current_question_id = NULL,
     question_started_at = NULL,
     question_expires_at = NULL
-WHERE id = ?
+WHERE id = ?2
+  AND phase = ?3
 `
 
 type SetSessionRoundIntroParams struct {
 	CurrentRoundID sql.NullInt64
 	ID             string
+	ExpectedPhase  string
 }
 
-// Moves the session into the round_intro phase for the given round and clears
-// the per-question runner columns (the intro screen runs before any question
-// is issued).
-func (q *Queries) SetSessionRoundIntro(ctx context.Context, arg SetSessionRoundIntroParams) error {
-	_, err := q.db.ExecContext(ctx, setSessionRoundIntro, arg.CurrentRoundID, arg.ID)
-	return err
+// Moves the session into the round_intro phase for the given round.
+// Optimistic write: the expected_phase guard writes only from the phase the
+// runner loaded, so a stale beat cannot resurrect a room ended in between; zero
+// rows affected means the runner lost the race.
+func (q *Queries) SetSessionRoundIntro(ctx context.Context, arg SetSessionRoundIntroParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionRoundIntro, arg.CurrentRoundID, arg.ID, arg.ExpectedPhase)
 }
 
-const setSessionRoundResults = `-- name: SetSessionRoundResults :exec
+const setSessionRoundResults = `-- name: SetSessionRoundResults :execresult
 UPDATE sessions
 SET phase               = 'round_results',
     current_question_id = NULL,
     question_started_at = NULL,
     question_expires_at = NULL
-WHERE id = ?
+WHERE id = ?1
+  AND phase = ?2
 `
+
+type SetSessionRoundResultsParams struct {
+	ID            string
+	ExpectedPhase string
+}
 
 // Moves the session into the round_results phase shown after the last question
 // of a round (before the next round's intro). current_round_id stays put so the
 // state read knows which round just finished; the per-question runner columns
 // are cleared because no question is live in this phase.
-func (q *Queries) SetSessionRoundResults(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, setSessionRoundResults, id)
-	return err
+// Optimistic write; see SetSessionRoundIntro.
+func (q *Queries) SetSessionRoundResults(ctx context.Context, arg SetSessionRoundResultsParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionRoundResults, arg.ID, arg.ExpectedPhase)
 }
 
 const startSession = `-- name: StartSession :execresult

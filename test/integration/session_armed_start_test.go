@@ -139,3 +139,64 @@ func TestSessionArmedStart_LobbyPhaseOnly(t *testing.T) {
 		t.Errorf("startAt after start = %v, want nil (no countdown once running)", got)
 	}
 }
+
+// createEmptyRoom opens a host room with no quiz (quizId omitted) and returns
+// its join code.
+func createEmptyRoom(ctx context.Context, t *testing.T, client *http.Client, baseURL string) string {
+	t.Helper()
+	resp := httpPostJSON(ctx, t, client, baseURL+"/api/sessions", `{}`)
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusCreated; got != want {
+		t.Fatalf("create empty room status = %d, want %d", got, want)
+	}
+	var body struct {
+		JoinCode string `json:"joinCode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode create empty room: %v", err)
+	}
+	if body.JoinCode == "" {
+		t.Fatal("create empty room returned empty join code")
+	}
+
+	return body.JoinCode
+}
+
+// startQuizlessRoom posts the host start and asserts it is refused with 409.
+func startQuizlessRoom(ctx context.Context, t *testing.T, client *http.Client, baseURL, code string) {
+	t.Helper()
+	resp := httpPostJSON(ctx, t, client, fmt.Sprintf("%s/api/sessions/%s/start", baseURL, code), `{}`)
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusConflict; got != want {
+		t.Errorf("start quiz-less room status = %d, want %d", got, want)
+	}
+}
+
+// TestSession_StartAndArmRejectQuizlessRoom pins that POST /start and /arm-start
+// on a quiz-less room return 409 and leave it a plain lobby (#1177).
+func TestSession_StartAndArmRejectQuizlessRoom(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "quizless-host", "quizless-host-pass-123")
+
+	code := createEmptyRoom(ctx, t, host, baseURL)
+
+	startQuizlessRoom(ctx, t, host, baseURL, code)
+	armStart(ctx, t, host, baseURL, code, http.StatusConflict)
+
+	// Not wedged: still a lobby with no armed countdown.
+	after := getArmedStartState(ctx, t, host, baseURL, code)
+	if got, want := after.Phase, "lobby"; got != want {
+		t.Errorf("phase after refused start = %q, want %q", got, want)
+	}
+	if after.StartAt != nil {
+		t.Errorf("startAt after refused arm = %v, want nil", after.StartAt)
+	}
+}

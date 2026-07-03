@@ -257,50 +257,75 @@ func (s *LiveSessionStore) CancelStart(ctx context.Context, sessionID string) er
 }
 
 // EnterRoundIntro moves the session into the round_intro phase for the round.
-func (s *LiveSessionStore) EnterRoundIntro(ctx context.Context, sessionID string, roundID int64) error {
-	if err := s.q.SetSessionRoundIntro(ctx, db.SetSessionRoundIntroParams{
+// Optimistic write against expected (the phase the runner loaded): reports false
+// when it wrote no row because the session moved on (e.g. was ended).
+func (s *LiveSessionStore) EnterRoundIntro(
+	ctx context.Context, sessionID string, expected livesession.Phase, roundID int64,
+) (bool, error) {
+	res, err := s.q.SetSessionRoundIntro(ctx, db.SetSessionRoundIntroParams{
 		CurrentRoundID: sql.NullInt64{Int64: roundID, Valid: true},
 		ID:             sessionID,
-	}); err != nil {
-		return fmt.Errorf("failed to enter round intro: %w", err)
+		ExpectedPhase:  string(expected),
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to enter round intro: %w", err)
 	}
 
-	return nil
+	return database.MustRowsAffected(res) > 0, nil
 }
 
-// EnterQuestion issues a question with its server answer window.
+// EnterQuestion issues a question with its server answer window. Optimistic
+// write; see EnterRoundIntro.
 func (s *LiveSessionStore) EnterQuestion(
-	ctx context.Context, sessionID string, roundID, questionID int64, startedAt, expiresAt time.Time,
-) error {
-	if err := s.q.SetSessionQuestion(ctx, db.SetSessionQuestionParams{
+	ctx context.Context, sessionID string, expected livesession.Phase,
+	roundID, questionID int64, startedAt, expiresAt time.Time,
+) (bool, error) {
+	res, err := s.q.SetSessionQuestion(ctx, db.SetSessionQuestionParams{
 		CurrentRoundID:    sql.NullInt64{Int64: roundID, Valid: true},
 		CurrentQuestionID: sql.NullInt64{Int64: questionID, Valid: true},
 		QuestionStartedAt: sql.NullTime{Time: startedAt, Valid: true},
 		QuestionExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
 		ID:                sessionID,
-	}); err != nil {
-		return fmt.Errorf("failed to enter question: %w", err)
+		ExpectedPhase:     string(expected),
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to enter question: %w", err)
 	}
 
-	return nil
+	return database.MustRowsAffected(res) > 0, nil
 }
 
-// EnterReveal moves the session into the reveal phase.
-func (s *LiveSessionStore) EnterReveal(ctx context.Context, sessionID string) error {
-	if err := s.q.SetSessionReveal(ctx, sessionID); err != nil {
-		return fmt.Errorf("failed to enter reveal: %w", err)
+// EnterReveal moves the session into the reveal phase. Optimistic write; see
+// EnterRoundIntro. questionID pins the reveal to the question the runner scored.
+func (s *LiveSessionStore) EnterReveal(
+	ctx context.Context, sessionID string, expected livesession.Phase, questionID int64,
+) (bool, error) {
+	res, err := s.q.SetSessionReveal(ctx, db.SetSessionRevealParams{
+		ID:                sessionID,
+		ExpectedPhase:     string(expected),
+		CurrentQuestionID: sql.NullInt64{Int64: questionID, Valid: true},
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to enter reveal: %w", err)
 	}
 
-	return nil
+	return database.MustRowsAffected(res) > 0, nil
 }
 
-// EnterRoundResults moves the session into the round_results phase.
-func (s *LiveSessionStore) EnterRoundResults(ctx context.Context, sessionID string) error {
-	if err := s.q.SetSessionRoundResults(ctx, sessionID); err != nil {
-		return fmt.Errorf("failed to enter round results: %w", err)
+// EnterRoundResults moves the session into the round_results phase. Optimistic
+// write; see EnterRoundIntro.
+func (s *LiveSessionStore) EnterRoundResults(
+	ctx context.Context, sessionID string, expected livesession.Phase,
+) (bool, error) {
+	res, err := s.q.SetSessionRoundResults(ctx, db.SetSessionRoundResultsParams{
+		ID:            sessionID,
+		ExpectedPhase: string(expected),
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to enter round results: %w", err)
 	}
 
-	return nil
+	return database.MustRowsAffected(res) > 0, nil
 }
 
 // Finish ends the session terminally.

@@ -330,7 +330,8 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 	}
 
 	r.scoreQuestion(ctx, sess)
-	if err := r.store.EnterReveal(ctx, sess.ID); err != nil {
+	applied, err := r.store.EnterReveal(ctx, sess.ID, sess.Phase, *sess.CurrentQuestionID)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to enter reveal",
@@ -338,6 +339,9 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 			slog.Any("err", err),
 		)
 
+		return
+	}
+	if !applied {
 		return
 	}
 	r.markPhase(sess.ID, now)
@@ -424,7 +428,8 @@ func (r *Runner) enterFirstRound(ctx context.Context, sess *Session, now time.Ti
 // enterRoundIntro persists the round_intro transition and stamps the beat
 // clock so the intro shows for the full RoundIntroBeat.
 func (r *Runner) enterRoundIntro(ctx context.Context, sess *Session, roundID int64, now time.Time) {
-	if err := r.store.EnterRoundIntro(ctx, sess.ID, roundID); err != nil {
+	applied, err := r.store.EnterRoundIntro(ctx, sess.ID, sess.Phase, roundID)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to enter round intro",
@@ -432,6 +437,9 @@ func (r *Runner) enterRoundIntro(ctx context.Context, sess *Session, roundID int
 			slog.Any("err", err),
 		)
 
+		return
+	}
+	if !applied {
 		return
 	}
 	r.markPhase(sess.ID, now)
@@ -443,7 +451,8 @@ func (r *Runner) enterRoundIntro(ctx context.Context, sess *Session, roundID int
 // finished) and stamps the beat clock so the standings show for the full
 // RoundResultsBeat.
 func (r *Runner) enterRoundResults(ctx context.Context, sess *Session, now time.Time) {
-	if err := r.store.EnterRoundResults(ctx, sess.ID); err != nil {
+	applied, err := r.store.EnterRoundResults(ctx, sess.ID, sess.Phase)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to enter round results",
@@ -451,6 +460,9 @@ func (r *Runner) enterRoundResults(ctx context.Context, sess *Session, now time.
 			slog.Any("err", err),
 		)
 
+		return
+	}
+	if !applied {
 		return
 	}
 	r.markPhase(sess.ID, now)
@@ -472,7 +484,8 @@ func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Quest
 		quizID = *sess.QuizID
 	}
 	expires := startedAt.Add(r.questionWindow(ctx, quizID, q))
-	if err := r.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, startedAt, expires); err != nil {
+	applied, err := r.store.EnterQuestion(ctx, sess.ID, sess.Phase, q.RoundID, q.ID, startedAt, expires)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to enter question",
@@ -480,6 +493,9 @@ func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Quest
 			slog.Any("err", err),
 		)
 
+		return
+	}
+	if !applied {
 		return
 	}
 	r.markPhase(sess.ID, now)

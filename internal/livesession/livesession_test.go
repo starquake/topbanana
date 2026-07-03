@@ -173,17 +173,23 @@ func (*fakeStore) CancelStart(context.Context, string) error {
 	return errors.ErrUnsupported
 }
 
-func (*fakeStore) EnterRoundIntro(context.Context, string, int64) error {
-	return errors.ErrUnsupported
+func (*fakeStore) EnterRoundIntro(context.Context, string, Phase, int64) (bool, error) {
+	return false, errors.ErrUnsupported
 }
 
-func (*fakeStore) EnterQuestion(context.Context, string, int64, int64, time.Time, time.Time) error {
-	return errors.ErrUnsupported
+func (*fakeStore) EnterQuestion(
+	context.Context, string, Phase, int64, int64, time.Time, time.Time,
+) (bool, error) {
+	return false, errors.ErrUnsupported
 }
 
-func (*fakeStore) EnterReveal(context.Context, string) error { return errors.ErrUnsupported }
+func (*fakeStore) EnterReveal(context.Context, string, Phase, int64) (bool, error) {
+	return false, errors.ErrUnsupported
+}
 
-func (*fakeStore) EnterRoundResults(context.Context, string) error { return errors.ErrUnsupported }
+func (*fakeStore) EnterRoundResults(context.Context, string, Phase) (bool, error) {
+	return false, errors.ErrUnsupported
+}
 
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
 
@@ -663,9 +669,14 @@ func TestService_GetSessionState_QuestionPhaseWithoutQuiz(t *testing.T) {
 	}
 
 	// Drive the quiz-less room straight into the question phase: quiz_id stays
-	// NULL, current_question_id points at the seeded question.
-	if err = h.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, start, start.Add(10*time.Second)); err != nil {
+	// NULL, current_question_id points at the seeded question. The room is still
+	// in the lobby, so the optimistic write expects that phase.
+	applied, err := h.store.EnterQuestion(ctx, sess.ID, PhaseLobby, q.RoundID, q.ID, start, start.Add(10*time.Second))
+	if err != nil {
 		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+	if !applied {
+		t.Fatal("EnterQuestion applied = false, want true")
 	}
 
 	state, err := h.service.GetSessionState(ctx, sess.JoinCode, hostID)
@@ -680,5 +691,50 @@ func TestService_GetSessionState_QuestionPhaseWithoutQuiz(t *testing.T) {
 	}
 	if state.CurrentQuestion != nil {
 		t.Errorf("CurrentQuestion = %v, want nil (no quiz to resolve the question)", state.CurrentQuestion)
+	}
+}
+
+// TestService_StartRejectsQuizlessRoom pins that Start and ArmStart on a
+// quiz-less room fail with ErrNoQuizToStart and leave it a plain lobby a host
+// can still arm a quiz into (#1177).
+func TestService_StartRejectsQuizlessRoom(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1 // seeded admin
+	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
+	}
+
+	if got, want := h.service.Start(ctx, sess.JoinCode, hostID), ErrNoQuizToStart; !errors.Is(got, want) {
+		t.Errorf("Start on quiz-less room err = %v, want %v", got, want)
+	}
+	if got, want := h.service.ArmStart(ctx, sess.JoinCode, hostID, start), ErrNoQuizToStart; !errors.Is(got, want) {
+		t.Errorf("ArmStart on quiz-less room err = %v, want %v", got, want)
+	}
+
+	// Not wedged: still a plain lobby, never marked started, no armed countdown.
+	after, err := h.store.GetSessionByID(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if got, want := after.Phase, PhaseLobby; got != want {
+		t.Errorf("phase after refused start = %q, want %q", got, want)
+	}
+	if after.StartedAt != nil {
+		t.Errorf("StartedAt after refused start = %v, want nil (room must not be marked started)", after.StartedAt)
+	}
+	if after.StartAt != nil {
+		t.Errorf("StartAt after refused arm = %v, want nil (no countdown must be armed)", after.StartAt)
+	}
+
+	// Still armable: the host can point it at a quiz and start it.
+	qz := seedRunnerQuizSlug(t, h.quizStore, "quizless-start-guard", [][]bool{{true}})
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
+		t.Fatalf("StartQuiz after refused start err = %v, want nil (room must not be wedged)", err)
 	}
 }
