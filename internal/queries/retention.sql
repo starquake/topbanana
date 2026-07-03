@@ -42,9 +42,16 @@ WHERE gp.player_id IN (sqlc.slice('player_ids'));
 -- name: DeletePlayersByIDs :exec
 -- Hard-deletes the given player rows. Run last in the anonymous-player
 -- sweep, after every game_* row that references them has been removed.
+-- Re-asserts the anonymity predicate so the delete is a no-op for any id
+-- that was claimed (registered, verified, or renamed) between the snapshot
+-- and this delete (#1175): a guest active in that TOCTOU window survives.
 DELETE
 FROM players
-WHERE id IN (sqlc.slice('ids'));
+WHERE id IN (sqlc.slice('ids'))
+  AND role = 'player'
+  AND email IS NULL
+  AND password_hash IS NULL
+  AND display_name_claimed = 0;
 
 -- name: ListAbandonedGameIDs :many
 -- Lists ids of games that are NOT finished and were created more than 30

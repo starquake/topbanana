@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	dbgen "github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/dbtest"
 	. "github.com/starquake/topbanana/internal/store"
 )
@@ -69,6 +70,55 @@ func TestRetentionSweep(t *testing.T) {
 	}
 
 	assertRetention(ctx, t, db, seed)
+}
+
+// TestDeletePlayersByIDs_SkipsClaimedPlayer pins the #1175 TOCTOU fix: the
+// anonymous-player sweep snapshots ids under the anonymity predicate, but a
+// guest can claim their account (register / verify / rename) before the
+// per-batch delete runs. DeletePlayersByIDs re-asserts the predicate in its
+// WHERE clause, so a since-claimed id survives while a still-anonymous id in
+// the same call is deleted.
+func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	claimedID := insertAnonPlayer(ctx, t, conn, "guest-claims", seedOld)
+	stillAnonID := insertAnonPlayer(ctx, t, conn, "guest-stays", seedOld)
+
+	// Simulate the TOCTOU window: both ids were snapshotted as anonymous, but
+	// this one claims its display name before the batch delete lands.
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, claimedID,
+	); err != nil {
+		t.Fatalf("marking player claimed err = %v, want nil", err)
+	}
+
+	if err := dbgen.New(conn).DeletePlayersByIDs(ctx, []int64{claimedID, stillAnonID}); err != nil {
+		t.Fatalf("DeletePlayersByIDs err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, claimedID), true; got != want {
+		t.Errorf("claimed player exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, stillAnonID), false; got != want {
+		t.Errorf("still-anonymous player exists = %v, want %v (must be swept)", got, want)
+	}
+}
+
+// playerExists reports whether a players row with the given id is present.
+func playerExists(ctx context.Context, t *testing.T, conn *sql.DB, id int64) bool {
+	t.Helper()
+
+	var count int
+	if err := conn.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM players WHERE id = ?`, id,
+	).Scan(&count); err != nil {
+		t.Fatalf("counting player %d err = %v, want nil", id, err)
+	}
+
+	return count > 0
 }
 
 // TestSweepAbandonedGames_DeleteError pins the deleteGamesByIDs error
