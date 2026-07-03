@@ -31,6 +31,17 @@ WHERE p.role = 'player'
               (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
   );
 
+-- name: FilterAnonymousPlayerIDs :many
+-- Returns the subset of the given ids still anonymous, so the sweep spares a
+-- guest claimed after the snapshot (#1175).
+SELECT p.id
+FROM players p
+WHERE p.id IN (sqlc.slice('ids'))
+  AND p.role = 'player'
+  AND p.email IS NULL
+  AND p.password_hash IS NULL
+  AND p.display_name_claimed = 0;
+
 -- name: ListGameIDsForPlayers :many
 -- Lists every distinct game id any of the given players participates in.
 -- The anonymous-player sweep snapshots these up front so the dependent
@@ -40,11 +51,16 @@ FROM game_participants gp
 WHERE gp.player_id IN (sqlc.slice('player_ids'));
 
 -- name: DeletePlayersByIDs :exec
--- Hard-deletes the given player rows. Run last in the anonymous-player
--- sweep, after every game_* row that references them has been removed.
+-- Hard-deletes the given player rows. Run last in the anonymous-player sweep,
+-- after every game_* row that references them has been removed. Re-asserts the
+-- anonymity predicate as defense-in-depth so a since-claimed id survives (#1175).
 DELETE
 FROM players
-WHERE id IN (sqlc.slice('ids'));
+WHERE id IN (sqlc.slice('ids'))
+  AND role = 'player'
+  AND email IS NULL
+  AND password_hash IS NULL
+  AND display_name_claimed = 0;
 
 -- name: ListAbandonedGameIDs :many
 -- Lists ids of games that are NOT finished and were created more than 30

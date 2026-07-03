@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	dbgen "github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/dbtest"
 	. "github.com/starquake/topbanana/internal/store"
 )
@@ -69,6 +70,97 @@ func TestRetentionSweep(t *testing.T) {
 	}
 
 	assertRetention(ctx, t, db, seed)
+}
+
+// TestDeletePlayersByIDs_SkipsClaimedPlayer: DeletePlayersByIDs deletes a still-
+// anonymous id but spares a since-claimed one in the same call (#1175).
+func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	claimedID := insertAnonPlayer(ctx, t, conn, "guest-claims", seedOld)
+	stillAnonID := insertAnonPlayer(ctx, t, conn, "guest-stays", seedOld)
+
+	// One id claims its name after the snapshot, before the delete.
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, claimedID,
+	); err != nil {
+		t.Fatalf("marking player claimed err = %v, want nil", err)
+	}
+
+	if err := dbgen.New(conn).DeletePlayersByIDs(ctx, []int64{claimedID, stillAnonID}); err != nil {
+		t.Fatalf("DeletePlayersByIDs err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, claimedID), true; got != want {
+		t.Errorf("claimed player exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, stillAnonID), false; got != want {
+		t.Errorf("still-anonymous player exists = %v, want %v (must be swept)", got, want)
+	}
+}
+
+// TestSweepPlayerBatch_SparesClaimedPlayerGameData: a guest claimed after the
+// snapshot keeps both their player row and their game rows (#1175).
+func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	ownerID := insertSignedInPlayer(ctx, t, conn, "quiz-owner", seedRecent)
+	q := seedQuiz(ctx, t, conn, "toctou-quiz", seedOld, ownerID)
+
+	guestID := insertAnonPlayer(ctx, t, conn, "guest-claims-late", seedOld)
+	gameID := insertGame(ctx, t, conn, "g-toctou", q.quizID, seedOld)
+	insertParticipant(ctx, t, conn, gameID, guestID, q.quizID, seedOld)
+	gq := insertGameQuestion(ctx, t, conn, gameID, q.q1, seedOld)
+	insertGameAnswer(ctx, t, conn, gameID, guestID, gq, q.opt1, seedOld)
+
+	// The guest claims their name after the snapshot, before the batch runs.
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, guestID,
+	); err != nil {
+		t.Fatalf("marking guest claimed err = %v, want nil", err)
+	}
+
+	retention := NewRetentionStore(conn, slog.Default())
+	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}); err != nil {
+		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, guestID), true; got != want {
+		t.Errorf("claimed guest exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := rowExists(ctx, t, conn, `SELECT COUNT(*) FROM games WHERE id = ?`, gameID), true; got != want {
+		t.Errorf("guest game exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := rowExists(
+		ctx, t, conn, `SELECT COUNT(*) FROM game_answers WHERE game_id = ?`, gameID,
+	), true; got != want {
+		t.Errorf("guest game answer exists = %v, want %v (must survive the sweep)", got, want)
+	}
+}
+
+// rowExists reports whether the count query returns a positive count.
+func rowExists(ctx context.Context, t *testing.T, conn *sql.DB, query string, arg any) bool {
+	t.Helper()
+
+	var count int
+	if err := conn.QueryRowContext(ctx, query, arg).Scan(&count); err != nil {
+		t.Fatalf("counting rows err = %v, want nil", err)
+	}
+
+	return count > 0
+}
+
+// playerExists reports whether a players row with the given id is present.
+func playerExists(ctx context.Context, t *testing.T, conn *sql.DB, id int64) bool {
+	t.Helper()
+
+	return rowExists(ctx, t, conn, `SELECT COUNT(*) FROM players WHERE id = ?`, id)
 }
 
 // TestSweepAbandonedGames_DeleteError pins the deleteGamesByIDs error

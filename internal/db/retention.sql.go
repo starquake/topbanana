@@ -14,10 +14,15 @@ const deletePlayersByIDs = `-- name: DeletePlayersByIDs :exec
 DELETE
 FROM players
 WHERE id IN (/*SLICE:ids*/?)
+  AND role = 'player'
+  AND email IS NULL
+  AND password_hash IS NULL
+  AND display_name_claimed = 0
 `
 
-// Hard-deletes the given player rows. Run last in the anonymous-player
-// sweep, after every game_* row that references them has been removed.
+// Hard-deletes the given player rows. Run last in the anonymous-player sweep,
+// after every game_* row that references them has been removed. Re-asserts the
+// anonymity predicate as defense-in-depth so a since-claimed id survives (#1175).
 func (q *Queries) DeletePlayersByIDs(ctx context.Context, ids []int64) error {
 	query := deletePlayersByIDs
 	var queryParams []interface{}
@@ -31,6 +36,51 @@ func (q *Queries) DeletePlayersByIDs(ctx context.Context, ids []int64) error {
 	}
 	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
+}
+
+const filterAnonymousPlayerIDs = `-- name: FilterAnonymousPlayerIDs :many
+SELECT p.id
+FROM players p
+WHERE p.id IN (/*SLICE:ids*/?)
+  AND p.role = 'player'
+  AND p.email IS NULL
+  AND p.password_hash IS NULL
+  AND p.display_name_claimed = 0
+`
+
+// Returns the subset of the given ids still anonymous, so the sweep spares a
+// guest claimed after the snapshot (#1175).
+func (q *Queries) FilterAnonymousPlayerIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	query := filterAnonymousPlayerIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAbandonedGameIDs = `-- name: ListAbandonedGameIDs :many

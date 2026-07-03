@@ -1835,8 +1835,15 @@ func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 	})
 }
 
+// QuizMediaRemover drops a quiz's on-disk media directory (#1174).
+type QuizMediaRemover interface {
+	RemoveQuizDir(quizID int64) error
+}
+
 // HandleQuizDelete deletes a quiz and all its questions and options.
-func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+func HandleQuizDelete(
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, mediaSvc QuizMediaRemover,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -1859,6 +1866,13 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 			render500(w, r, logger, csrfMgr)
 
 			return
+		}
+
+		// The cascade drops the media rows but not their files; unlink them
+		// best-effort without failing the already-committed delete.
+		if err := mediaSvc.RemoveQuizDir(quizID); err != nil {
+			logger.WarnContext(r.Context(), "failed to remove quiz media directory after delete",
+				slog.Int64("quiz_id", quizID), slog.Any("err", err))
 		}
 
 		// htmx removes the card in place via an outerHTML swap; a plain

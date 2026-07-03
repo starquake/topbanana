@@ -275,14 +275,18 @@ VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: UpdateOption :execresult
+-- Scoped by question_id to keep the ownership boundary (#1165).
 UPDATE options
 SET text = ?,
     is_correct = ?
-WHERE id = ?;
+WHERE id = ?
+  AND question_id = ?;
 
 -- name: DeleteOption :execresult
+-- Scoped by question_id to keep the ownership boundary (#1165).
 DELETE FROM options
-WHERE id = ?;
+WHERE id = ?
+  AND question_id = ?;
 
 -- name: BumpQuizPlayCountForGame :exec
 -- Increments the durable hit counter (#891) for the quiz that owns this solo

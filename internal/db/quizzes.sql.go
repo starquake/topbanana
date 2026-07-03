@@ -158,10 +158,17 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 const deleteOption = `-- name: DeleteOption :execresult
 DELETE FROM options
 WHERE id = ?
+  AND question_id = ?
 `
 
-func (q *Queries) DeleteOption(ctx context.Context, id int64) (sql.Result, error) {
-	return q.db.ExecContext(ctx, deleteOption, id)
+type DeleteOptionParams struct {
+	ID         int64
+	QuestionID int64
+}
+
+// Scoped by question_id to keep the ownership boundary (#1165).
+func (q *Queries) DeleteOption(ctx context.Context, arg DeleteOptionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteOption, arg.ID, arg.QuestionID)
 }
 
 const deleteQuestion = `-- name: DeleteQuestion :execresult
@@ -904,16 +911,24 @@ UPDATE options
 SET text = ?,
     is_correct = ?
 WHERE id = ?
+  AND question_id = ?
 `
 
 type UpdateOptionParams struct {
-	Text      string
-	IsCorrect bool
-	ID        int64
+	Text       string
+	IsCorrect  bool
+	ID         int64
+	QuestionID int64
 }
 
+// Scoped by question_id to keep the ownership boundary (#1165).
 func (q *Queries) UpdateOption(ctx context.Context, arg UpdateOptionParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, updateOption, arg.Text, arg.IsCorrect, arg.ID)
+	return q.db.ExecContext(ctx, updateOption,
+		arg.Text,
+		arg.IsCorrect,
+		arg.ID,
+		arg.QuestionID,
+	)
 }
 
 const updateQuestion = `-- name: UpdateQuestion :execresult
