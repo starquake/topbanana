@@ -70,6 +70,11 @@ export class GameApp {
         // a submitAnswer POST throws (server 5xx, network drop). Cleared
         // on the next click or when a fresh question loads — see #179.
         this.submitError = false;
+        // Retry-banner flag for a failed /next advance; cleared only on a
+        // successful advance so the banner's Loading state survives a retry (#1166).
+        this.advanceError = false;
+        // Guards the Retry button against a double-tap and drives its Loading label.
+        this.advancing = false;
         this.progress = 100;
         this.timer = null;
         // Reset per-question; the <img> element is reused across questions
@@ -1075,7 +1080,32 @@ export class GameApp {
     // feedback-clear and question-set (#233).
     async resolveAndAdvance(pauseMs = 2000) {
         await new Promise(resolve => setTimeout(resolve, pauseMs));
-        await this.nextQuestion();
+        await this.advanceToNext();
+    }
+
+    // advanceToNext runs the /next swap past submitAnswer's try/catch and the
+    // fire-and-forget handleTimeout, so it must catch or a failed advance froze
+    // the player on the feedback card (#1166).
+    async advanceToNext() {
+        try {
+            await this.nextQuestion();
+            // Clear only on success so the banner's Loading state survives a retry.
+            this.advanceError = false;
+        } catch (err) {
+            console.error('advanceToNext:', err);
+            this.advanceError = true;
+        }
+    }
+
+    // retryAdvance re-attempts a failed advance from the banner's Retry button (#1166).
+    async retryAdvance() {
+        if (this.advancing) return;
+        this.advancing = true;
+        try {
+            await this.advanceToNext();
+        } finally {
+            this.advancing = false;
+        }
     }
 
     // continueRound is the Continue button's click handler on both the

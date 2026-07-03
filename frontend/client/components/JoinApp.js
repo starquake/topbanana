@@ -200,6 +200,9 @@ export class JoinApp {
         // Running count of consecutive non-404 GET /state failures, reset to 0
         // on any success.
         this.stateFailures = 0;
+        // Monotonic id per GET /state read; ignore a superseded response so an
+        // out-of-order read can't regress the surface (e.g. reveal->question) (#1178).
+        this.stateSeq = 0;
         // Guards the connection-trouble banner's "Reconnect now" control (#1121)
         // so a double-tap does not fire two overlapping recoveries, and drives
         // the button's in-flight "Reconnecting..." label.
@@ -541,13 +544,16 @@ export class JoinApp {
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
     async refreshState() {
+        const seq = ++this.stateSeq;
         let state;
         try {
             state = await sessionService.getState(this.code);
         } catch {
-            // A transient read failure leaves the prior roster on screen; the
-            // next tick (or a reconnect) retries. Don't tear the lobby down on
-            // a single blip, but after several in a row tell the player why the
+            // Count every failure, even a superseded one: seq-gating this would
+            // drop a fast-superseded run and never trip the banner (#1178). A
+            // transient read failure leaves the prior roster on screen; the next
+            // tick (or a reconnect) retries. Don't tear the lobby down on a
+            // single blip, but after several in a row tell the player why the
             // roster looks frozen.
             this.stateFailures += 1;
             if (this.stateFailures >= STATE_FAILURE_LIMIT) {
@@ -555,6 +561,7 @@ export class JoinApp {
             }
             return;
         }
+        if (seq !== this.stateSeq) return; // stale snapshot resolved late (#1178)
         if (state === null) {
             this.sessionClosed = true;
             this.releaseWakeLock();
