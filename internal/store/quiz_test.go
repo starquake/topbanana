@@ -2640,6 +2640,63 @@ func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
 	}
 }
 
+// TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID pins the #1165
+// fix: an option UPDATE whose id belongs to a different question must not
+// cross the ownership boundary. The store scopes the UPDATE by question_id,
+// so the crafted id affects 0 rows and the victim row is left untouched.
+func TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	quizzes := newTestQuizzes()
+	attacker, victim := quizzes[0], quizzes[1]
+	if err := quizStore.CreateQuiz(t.Context(), attacker); err != nil {
+		t.Fatalf("failed to create attacker quiz: %v", err)
+	}
+	if err := quizStore.CreateQuiz(t.Context(), victim); err != nil {
+		t.Fatalf("failed to create victim quiz: %v", err)
+	}
+
+	victimOption := victim.Questions[0].Options[0]
+	wantText := victimOption.Text
+	wantCorrect := victimOption.Correct
+
+	attackerQuestion := attacker.Questions[0]
+	attackerQuestion.Options = []*quiz.Option{
+		{ID: victimOption.ID, QuestionID: attackerQuestion.ID, Text: "HACKED", Correct: !wantCorrect},
+	}
+
+	err := quizStore.UpdateQuestion(t.Context(), attackerQuestion)
+	if got, want := err, quiz.ErrUpdatingOptionNoRowsAffected; !errors.Is(got, want) {
+		t.Fatalf("err = %v, want %v", got, want)
+	}
+
+	gotVictim, err := quizStore.GetQuestion(t.Context(), victim.Questions[0].ID)
+	if err != nil {
+		t.Fatalf("failed to get victim question: %v", err)
+	}
+
+	var found *quiz.Option
+	for _, o := range gotVictim.Options {
+		if o.ID == victimOption.ID {
+			found = o
+
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("victim option %d was deleted", victimOption.ID)
+	}
+	if got, want := found.Text, wantText; got != want {
+		t.Errorf("victim option Text = %q, want %q", got, want)
+	}
+	if got, want := found.Correct, wantCorrect; got != want {
+		t.Errorf("victim option Correct = %v, want %v", got, want)
+	}
+}
+
 func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 	t.Parallel()
 

@@ -275,14 +275,20 @@ VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: UpdateOption :execresult
+-- Scoped by question_id so a crafted option id from another owner's quiz
+-- cannot cross the ownership boundary (#1165). A mismatched question_id
+-- affects 0 rows, which callers treat as an error.
 UPDATE options
 SET text = ?,
     is_correct = ?
-WHERE id = ?;
+WHERE id = ?
+  AND question_id = ?;
 
 -- name: DeleteOption :execresult
+-- Scoped by question_id for the same ownership boundary as UpdateOption (#1165).
 DELETE FROM options
-WHERE id = ?;
+WHERE id = ?
+  AND question_id = ?;
 
 -- name: BumpQuizPlayCountForGame :exec
 -- Increments the durable hit counter (#891) for the quiz that owns this solo

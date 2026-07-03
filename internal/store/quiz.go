@@ -1169,7 +1169,7 @@ func (s *QuizStore) handleOptions(ctx context.Context, q *db.Queries, qs *quiz.Q
 			// UPDATE
 			incomingIDs[o.ID] = true
 
-			if updateErr := s.updateOption(ctx, q, o); updateErr != nil {
+			if updateErr := s.updateOption(ctx, q, qs.ID, o); updateErr != nil {
 				return fmt.Errorf("failed to update option: %w", updateErr)
 			}
 		}
@@ -1182,7 +1182,7 @@ func (s *QuizStore) handleOptions(ctx context.Context, q *db.Queries, qs *quiz.Q
 		}
 	}
 
-	if err = s.deleteOptions(ctx, q, deleteIDs); err != nil {
+	if err = s.deleteOptions(ctx, q, qs.ID, deleteIDs); err != nil {
 		return fmt.Errorf("failed to delete options: %w", err)
 	}
 
@@ -1204,11 +1204,12 @@ func (*QuizStore) createOption(ctx context.Context, q *db.Queries, o *quiz.Optio
 	return nil
 }
 
-func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, o *quiz.Option) error {
+func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, questionID int64, o *quiz.Option) error {
 	res, err := q.UpdateOption(ctx, db.UpdateOptionParams{
-		Text:      o.Text,
-		IsCorrect: o.Correct,
-		ID:        o.ID,
+		Text:       o.Text,
+		IsCorrect:  o.Correct,
+		ID:         o.ID,
+		QuestionID: questionID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update option: %w", err)
@@ -1220,9 +1221,9 @@ func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, o *quiz.Optio
 	return nil
 }
 
-func (s *QuizStore) deleteOptions(ctx context.Context, q *db.Queries, ids []int64) error {
+func (s *QuizStore) deleteOptions(ctx context.Context, q *db.Queries, questionID int64, ids []int64) error {
 	for _, id := range ids {
-		if err := s.deleteOption(ctx, q, id); err != nil {
+		if err := s.deleteOption(ctx, q, questionID, id); err != nil {
 			return fmt.Errorf("failed to delete option %d: %w", id, err)
 		}
 	}
@@ -1230,8 +1231,11 @@ func (s *QuizStore) deleteOptions(ctx context.Context, q *db.Queries, ids []int6
 	return nil
 }
 
-func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) error {
-	res, err := q.DeleteOption(ctx, id)
+func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, questionID, id int64) error {
+	res, err := q.DeleteOption(ctx, db.DeleteOptionParams{
+		ID:         id,
+		QuestionID: questionID,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to delete option %d: %w", id, err)
 	}
