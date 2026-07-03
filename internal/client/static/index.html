@@ -494,6 +494,26 @@
                             Couldn't submit your answer — please try again.
                         </div>
 
+                        <!-- Advance-retry banner (#1166): shown when the
+                             question-advance fetch failed after the feedback
+                             pause. The feedback card is still up with every
+                             answer button disabled, so this Retry control is
+                             the only way forward; without it a mobile network
+                             blip froze the game here. Cleared on the next
+                             advance attempt or when a fresh item loads. -->
+                        <div x-show="advanceError"
+                             role="alert"
+                             data-testid="advance-error"
+                             class="feedback-banner feedback-danger mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span>Couldn't load the next question — please try again.</span>
+                            <button type="button"
+                                    class="btn-ghost shrink-0 self-start sm:self-auto"
+                                    data-testid="advance-retry"
+                                    :disabled="advancing"
+                                    @click="retryAdvance()"
+                                    x-text="advancing ? 'Loading...' : 'Retry'"></button>
+                        </div>
+
                         <!-- 2x2 grid that matches the live answer pad and the
                              host big screen, so the three play surfaces read as
                              one family. Hidden during the pre-answer beat (#247)
