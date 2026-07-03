@@ -31,6 +31,20 @@ WHERE p.role = 'player'
               (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
   );
 
+-- name: FilterAnonymousPlayerIDs :many
+-- Returns the subset of the given ids still matching the anonymity predicate.
+-- The sweep snapshots stale ids, but a guest can claim their account (register,
+-- verify, or rename) before the batch runs; re-filtering here keeps the whole
+-- batch atomic so a since-claimed survivor keeps BOTH its player row and its
+-- game data, not just the row (#1175).
+SELECT p.id
+FROM players p
+WHERE p.id IN (sqlc.slice('ids'))
+  AND p.role = 'player'
+  AND p.email IS NULL
+  AND p.password_hash IS NULL
+  AND p.display_name_claimed = 0;
+
 -- name: ListGameIDsForPlayers :many
 -- Lists every distinct game id any of the given players participates in.
 -- The anonymous-player sweep snapshots these up front so the dependent

@@ -106,12 +106,25 @@ func (s *RetentionStore) SweepAbandonedGames(ctx context.Context, days int) erro
 }
 
 // sweepPlayerBatch deletes one chunk of anonymous players and all their game
-// data inside a single transaction. The player rows go last so every game_*
-// row that references them is already gone; a batch may reference more than
-// retentionBatchSize games, so the game-id deletes are chunked too.
+// data inside a single transaction. The snapshot ids are re-filtered to those
+// still matching the anonymity predicate at the top of the transaction, so a
+// guest who claimed their account (register / verify / rename) in the TOCTOU
+// window between snapshot and sweep keeps BOTH their player row and their game
+// data (#1175); the whole batch runs on the filtered set. The player rows go
+// last so every game_* row that references them is already gone; a batch may
+// reference more than retentionBatchSize games, so the game-id deletes are
+// chunked too.
 func (s *RetentionStore) sweepPlayerBatch(ctx context.Context, playerIDs []int64) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		gameIDs, err := q.ListGameIDsForPlayers(ctx, playerIDs)
+		stillAnon, err := q.FilterAnonymousPlayerIDs(ctx, playerIDs)
+		if err != nil {
+			return fmt.Errorf("failed to re-filter anonymous players: %w", err)
+		}
+		if len(stillAnon) == 0 {
+			return nil
+		}
+
+		gameIDs, err := q.ListGameIDsForPlayers(ctx, stillAnon)
 		if err != nil {
 			return fmt.Errorf("failed to list games for stale anonymous players: %w", err)
 		}
@@ -121,7 +134,7 @@ func (s *RetentionStore) sweepPlayerBatch(ctx context.Context, playerIDs []int64
 			}
 		}
 
-		if err := q.DeletePlayersByIDs(ctx, playerIDs); err != nil {
+		if err := q.DeletePlayersByIDs(ctx, stillAnon); err != nil {
 			return fmt.Errorf("failed to delete stale anonymous players: %w", err)
 		}
 

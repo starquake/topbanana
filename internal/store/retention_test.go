@@ -107,18 +107,69 @@ func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
 	}
 }
 
+// TestSweepPlayerBatch_SparesClaimedPlayerGameData pins the #1175 batch-level
+// fix: sweepPlayerBatch re-filters its snapshotted ids to the still-anonymous
+// subset before deleting anything, so a guest claimed in the TOCTOU window
+// keeps BOTH their player row and their game data, not just the row.
+func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	ownerID := insertSignedInPlayer(ctx, t, conn, "quiz-owner", seedRecent)
+	q := seedQuiz(ctx, t, conn, "toctou-quiz", seedOld, ownerID)
+
+	guestID := insertAnonPlayer(ctx, t, conn, "guest-claims-late", seedOld)
+	gameID := insertGame(ctx, t, conn, "g-toctou", q.quizID, seedOld)
+	insertParticipant(ctx, t, conn, gameID, guestID, q.quizID, seedOld)
+	gq := insertGameQuestion(ctx, t, conn, gameID, q.q1, seedOld)
+	insertGameAnswer(ctx, t, conn, gameID, guestID, gq, q.opt1, seedOld)
+
+	// The guest was snapshotted as anonymous, then claims their name before the
+	// batch delete runs.
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, guestID,
+	); err != nil {
+		t.Fatalf("marking guest claimed err = %v, want nil", err)
+	}
+
+	retention := NewRetentionStore(conn, slog.Default())
+	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}); err != nil {
+		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, guestID), true; got != want {
+		t.Errorf("claimed guest exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := rowExists(ctx, t, conn, `SELECT COUNT(*) FROM games WHERE id = ?`, gameID), true; got != want {
+		t.Errorf("guest game exists = %v, want %v (must survive the sweep)", got, want)
+	}
+	if got, want := rowExists(
+		ctx, t, conn, `SELECT COUNT(*) FROM game_answers WHERE game_id = ?`, gameID,
+	), true; got != want {
+		t.Errorf("guest game answer exists = %v, want %v (must survive the sweep)", got, want)
+	}
+}
+
+// rowExists reports whether the given single-count query returns a positive
+// count for the bound argument.
+func rowExists(ctx context.Context, t *testing.T, conn *sql.DB, query string, arg any) bool {
+	t.Helper()
+
+	var count int
+	if err := conn.QueryRowContext(ctx, query, arg).Scan(&count); err != nil {
+		t.Fatalf("counting rows err = %v, want nil", err)
+	}
+
+	return count > 0
+}
+
 // playerExists reports whether a players row with the given id is present.
 func playerExists(ctx context.Context, t *testing.T, conn *sql.DB, id int64) bool {
 	t.Helper()
 
-	var count int
-	if err := conn.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM players WHERE id = ?`, id,
-	).Scan(&count); err != nil {
-		t.Fatalf("counting player %d err = %v, want nil", id, err)
-	}
-
-	return count > 0
+	return rowExists(ctx, t, conn, `SELECT COUNT(*) FROM players WHERE id = ?`, id)
 }
 
 // TestSweepAbandonedGames_DeleteError pins the deleteGamesByIDs error

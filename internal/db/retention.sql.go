@@ -40,6 +40,54 @@ func (q *Queries) DeletePlayersByIDs(ctx context.Context, ids []int64) error {
 	return err
 }
 
+const filterAnonymousPlayerIDs = `-- name: FilterAnonymousPlayerIDs :many
+SELECT p.id
+FROM players p
+WHERE p.id IN (/*SLICE:ids*/?)
+  AND p.role = 'player'
+  AND p.email IS NULL
+  AND p.password_hash IS NULL
+  AND p.display_name_claimed = 0
+`
+
+// Returns the subset of the given ids still matching the anonymity predicate.
+// The sweep snapshots stale ids, but a guest can claim their account (register,
+// verify, or rename) before the batch runs; re-filtering here keeps the whole
+// batch atomic so a since-claimed survivor keeps BOTH its player row and its
+// game data, not just the row (#1175).
+func (q *Queries) FilterAnonymousPlayerIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	query := filterAnonymousPlayerIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAbandonedGameIDs = `-- name: ListAbandonedGameIDs :many
 SELECT g.id
 FROM games g
