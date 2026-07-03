@@ -258,7 +258,7 @@
                     </div>
                 </template>
                 <template x-if="startError && !finished && startStateResolved">
-                    <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
+                    <div class="feedback-banner feedback-danger mb-5" data-testid="start-error" x-text="startError"></div>
                 </template>
                 {{/* flex-row-reverse pushes Start Game to the right edge
                      of the row (thumb-friendly on phones) while keeping

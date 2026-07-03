@@ -613,7 +613,19 @@ export class GameApp {
         // each question plays an already-decoded Howl; the engine's budget keeps a
         // slow/failed clip from hanging the start.
         await this.preloadGameAudio();
-        await this.nextQuestion();
+        try {
+            await this.nextQuestion();
+        } catch (err) {
+            // Roll back to the start screen with a retry banner so a first-question
+            // /next failure can't freeze the player on "Loading question..." (#1188).
+            console.error('startGame: first question fetch failed', err);
+            this.gameId = null;
+            this.question = null;
+            this.roundItem = null;
+            this.startError = "Couldn't start the quiz — please refresh and try again.";
+            // Stop the iOS silent keep-alive unlock() started; clips re-preload on the next Start.
+            this.audio.teardown();
+        }
     }
 
     // Fetch the audio manifest and preload its clips behind a brief loading state.
