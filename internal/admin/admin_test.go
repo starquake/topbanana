@@ -2486,8 +2486,7 @@ func TestHandleQuizDelete(t *testing.T) {
 	})
 }
 
-// TestHandleQuizDelete_RemovesMediaFiles pins the #1174 fix: deleting a quiz
-// unlinks its on-disk media directory, not just the cascaded media rows.
+// TestHandleQuizDelete_RemovesMediaFiles: deleting a quiz unlinks its media dir (#1174).
 func TestHandleQuizDelete_RemovesMediaFiles(t *testing.T) {
 	t.Parallel()
 

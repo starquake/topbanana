@@ -497,8 +497,7 @@ type adminGameDeps struct {
 	// uploadLimits are the media caps the quiz view shows a host and feeds to
 	// the client-side pre-upload size guard (#1139).
 	uploadLimits admin.MediaUploadLimits
-	// mediaSvc lets the quiz-delete handler unlink a deleted quiz's on-disk
-	// media directory, which the DB cascade alone leaves orphaned (#1174).
+	// mediaSvc lets the quiz-delete handler unlink a deleted quiz's files (#1174).
 	mediaSvc *media.Service
 }
 

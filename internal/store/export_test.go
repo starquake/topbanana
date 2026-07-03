@@ -7,9 +7,7 @@ import "context"
 // the nil-on-unparseable fall-through without exporting it from the package.
 var ParseSQLiteTimestamp = parseSQLiteTimestamp
 
-// SweepPlayerBatchForTest exposes sweepPlayerBatch so a test can feed a
-// snapshotted id set and exercise the mid-batch anonymity re-filter directly,
-// simulating a guest claimed between snapshot and sweep.
+// SweepPlayerBatchForTest exposes sweepPlayerBatch to drive it with a fixed id set.
 func (s *RetentionStore) SweepPlayerBatchForTest(ctx context.Context, playerIDs []int64) error {
 	return s.sweepPlayerBatch(ctx, playerIDs)
 }

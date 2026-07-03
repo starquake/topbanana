@@ -2640,10 +2640,8 @@ func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
 	}
 }
 
-// TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID pins the #1165
-// fix: an option UPDATE whose id belongs to a different question must not
-// cross the ownership boundary. The store scopes the UPDATE by question_id,
-// so the crafted id affects 0 rows and the victim row is left untouched.
+// TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID: an option UPDATE
+// targeting another question's option id affects no rows (#1165).
 func TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID(t *testing.T) {
 	t.Parallel()
 

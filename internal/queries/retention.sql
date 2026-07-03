@@ -32,11 +32,8 @@ WHERE p.role = 'player'
   );
 
 -- name: FilterAnonymousPlayerIDs :many
--- Returns the subset of the given ids still matching the anonymity predicate.
--- The sweep snapshots stale ids, but a guest can claim their account (register,
--- verify, or rename) before the batch runs; re-filtering here keeps the whole
--- batch atomic so a since-claimed survivor keeps BOTH its player row and its
--- game data, not just the row (#1175).
+-- Returns the subset of the given ids still anonymous, so the sweep spares a
+-- guest claimed after the snapshot (#1175).
 SELECT p.id
 FROM players p
 WHERE p.id IN (sqlc.slice('ids'))
@@ -54,11 +51,9 @@ FROM game_participants gp
 WHERE gp.player_id IN (sqlc.slice('player_ids'));
 
 -- name: DeletePlayersByIDs :exec
--- Hard-deletes the given player rows. Run last in the anonymous-player
--- sweep, after every game_* row that references them has been removed.
--- Re-asserts the anonymity predicate so the delete is a no-op for any id
--- that was claimed (registered, verified, or renamed) between the snapshot
--- and this delete (#1175): a guest active in that TOCTOU window survives.
+-- Hard-deletes the given player rows. Run last in the anonymous-player sweep,
+-- after every game_* row that references them has been removed. Re-asserts the
+-- anonymity predicate as defense-in-depth so a since-claimed id survives (#1175).
 DELETE
 FROM players
 WHERE id IN (sqlc.slice('ids'))

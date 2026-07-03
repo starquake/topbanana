@@ -166,7 +166,7 @@ type DeleteOptionParams struct {
 	QuestionID int64
 }
 
-// Scoped by question_id for the same ownership boundary as UpdateOption (#1165).
+// Scoped by question_id to keep the ownership boundary (#1165).
 func (q *Queries) DeleteOption(ctx context.Context, arg DeleteOptionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteOption, arg.ID, arg.QuestionID)
 }
@@ -921,9 +921,7 @@ type UpdateOptionParams struct {
 	QuestionID int64
 }
 
-// Scoped by question_id so a crafted option id from another owner's quiz
-// cannot cross the ownership boundary (#1165). A mismatched question_id
-// affects 0 rows, which callers treat as an error.
+// Scoped by question_id to keep the ownership boundary (#1165).
 func (q *Queries) UpdateOption(ctx context.Context, arg UpdateOptionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updateOption,
 		arg.Text,

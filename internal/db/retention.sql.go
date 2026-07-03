@@ -20,11 +20,9 @@ WHERE id IN (/*SLICE:ids*/?)
   AND display_name_claimed = 0
 `
 
-// Hard-deletes the given player rows. Run last in the anonymous-player
-// sweep, after every game_* row that references them has been removed.
-// Re-asserts the anonymity predicate so the delete is a no-op for any id
-// that was claimed (registered, verified, or renamed) between the snapshot
-// and this delete (#1175): a guest active in that TOCTOU window survives.
+// Hard-deletes the given player rows. Run last in the anonymous-player sweep,
+// after every game_* row that references them has been removed. Re-asserts the
+// anonymity predicate as defense-in-depth so a since-claimed id survives (#1175).
 func (q *Queries) DeletePlayersByIDs(ctx context.Context, ids []int64) error {
 	query := deletePlayersByIDs
 	var queryParams []interface{}
@@ -50,11 +48,8 @@ WHERE p.id IN (/*SLICE:ids*/?)
   AND p.display_name_claimed = 0
 `
 
-// Returns the subset of the given ids still matching the anonymity predicate.
-// The sweep snapshots stale ids, but a guest can claim their account (register,
-// verify, or rename) before the batch runs; re-filtering here keeps the whole
-// batch atomic so a since-claimed survivor keeps BOTH its player row and its
-// game data, not just the row (#1175).
+// Returns the subset of the given ids still anonymous, so the sweep spares a
+// guest claimed after the snapshot (#1175).
 func (q *Queries) FilterAnonymousPlayerIDs(ctx context.Context, ids []int64) ([]int64, error) {
 	query := filterAnonymousPlayerIDs
 	var queryParams []interface{}

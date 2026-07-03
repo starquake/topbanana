@@ -1835,11 +1835,7 @@ func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 	})
 }
 
-// QuizMediaRemover is the slice of the media service the quiz-delete handler
-// needs: drop a quiz's whole on-disk media directory. The quiz-delete cascade
-// removes the media rows, but nothing unlinks their files, so the handler calls
-// this to leave no orphaned files behind (#1174). Defined consumer-side; the
-// concrete *media.Service satisfies it.
+// QuizMediaRemover drops a quiz's on-disk media directory (#1174).
 type QuizMediaRemover interface {
 	RemoveQuizDir(quizID int64) error
 }
@@ -1872,10 +1868,8 @@ func HandleQuizDelete(
 			return
 		}
 
-		// The media rows cascade off the deleted quiz row, but their files do
-		// not; unlink the quiz's media directory best-effort. A failure here
-		// leaves orphaned files for the cleanup tooling but must not fail the
-		// delete the DB already committed.
+		// The cascade drops the media rows but not their files; unlink them
+		// best-effort without failing the already-committed delete.
 		if err := mediaSvc.RemoveQuizDir(quizID); err != nil {
 			logger.WarnContext(r.Context(), "failed to remove quiz media directory after delete",
 				slog.Int64("quiz_id", quizID), slog.Any("err", err))

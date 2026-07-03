@@ -72,12 +72,8 @@ func TestRetentionSweep(t *testing.T) {
 	assertRetention(ctx, t, db, seed)
 }
 
-// TestDeletePlayersByIDs_SkipsClaimedPlayer pins the #1175 TOCTOU fix: the
-// anonymous-player sweep snapshots ids under the anonymity predicate, but a
-// guest can claim their account (register / verify / rename) before the
-// per-batch delete runs. DeletePlayersByIDs re-asserts the predicate in its
-// WHERE clause, so a since-claimed id survives while a still-anonymous id in
-// the same call is deleted.
+// TestDeletePlayersByIDs_SkipsClaimedPlayer: DeletePlayersByIDs deletes a still-
+// anonymous id but spares a since-claimed one in the same call (#1175).
 func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
 	t.Parallel()
 
@@ -87,8 +83,7 @@ func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
 	claimedID := insertAnonPlayer(ctx, t, conn, "guest-claims", seedOld)
 	stillAnonID := insertAnonPlayer(ctx, t, conn, "guest-stays", seedOld)
 
-	// Simulate the TOCTOU window: both ids were snapshotted as anonymous, but
-	// this one claims its display name before the batch delete lands.
+	// One id claims its name after the snapshot, before the delete.
 	if _, err := conn.ExecContext(ctx,
 		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, claimedID,
 	); err != nil {
@@ -107,10 +102,8 @@ func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
 	}
 }
 
-// TestSweepPlayerBatch_SparesClaimedPlayerGameData pins the #1175 batch-level
-// fix: sweepPlayerBatch re-filters its snapshotted ids to the still-anonymous
-// subset before deleting anything, so a guest claimed in the TOCTOU window
-// keeps BOTH their player row and their game data, not just the row.
+// TestSweepPlayerBatch_SparesClaimedPlayerGameData: a guest claimed after the
+// snapshot keeps both their player row and their game rows (#1175).
 func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 	t.Parallel()
 
@@ -126,8 +119,7 @@ func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 	gq := insertGameQuestion(ctx, t, conn, gameID, q.q1, seedOld)
 	insertGameAnswer(ctx, t, conn, gameID, guestID, gq, q.opt1, seedOld)
 
-	// The guest was snapshotted as anonymous, then claims their name before the
-	// batch delete runs.
+	// The guest claims their name after the snapshot, before the batch runs.
 	if _, err := conn.ExecContext(ctx,
 		`UPDATE players SET display_name_claimed = 1 WHERE id = ?`, guestID,
 	); err != nil {
@@ -152,8 +144,7 @@ func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 	}
 }
 
-// rowExists reports whether the given single-count query returns a positive
-// count for the bound argument.
+// rowExists reports whether the count query returns a positive count.
 func rowExists(ctx context.Context, t *testing.T, conn *sql.DB, query string, arg any) bool {
 	t.Helper()
 
