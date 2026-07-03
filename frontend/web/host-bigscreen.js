@@ -38,13 +38,8 @@ import {
 // the host why the screen looks frozen. Cleared on the next good read.
 const STATE_FAILURE_LIMIT = 3;
 
-// RECONNECT_BASE_DELAY and RECONNECT_MAX_DELAY bound the exponential backoff
-// between automatic SSE re-subscribe attempts after a hard close (#1179).
-// EventSource retries transient drops on its own, but a fatal non-200 (e.g. the
-// server bouncing during a deploy) CLOSES it for good - no more ticks fire, so
-// refresh() never runs again and the big screen freezes on "Reconnecting...".
-// The big screen is typically an unattended display, so it re-subscribes itself
-// on the backoff rather than waiting for a gesture.
+// EventSource gives up for good on a fatal non-200, so the big screen (often an
+// unattended display) re-subscribes itself on a capped backoff (#1179).
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
 
@@ -122,12 +117,8 @@ function hostBigScreen(joinCode, hasQuiz) {
         // Running count of consecutive GET /state failures, reset to 0 on any
         // success.
         stateFailures: 0,
-        // Monotonic id tagging each GET /state read so an out-of-order response
-        // can be dropped (#1178). Every SSE tick fires an un-awaited refresh,
-        // so two overlapping reads can resolve out of order; applying the older
-        // snapshot last would regress the screen (e.g. reveal back to question).
-        // refresh bumps this, captures the value, and ignores its own result
-        // once a newer read has superseded it.
+        // Monotonic id per GET /state read; ignore a superseded response so an
+        // out-of-order read can't regress the screen (e.g. reveal->question) (#1178).
         stateSeq: 0,
         // True once GET /state 404s: the session is gone (terminal), distinct
         // from connectionTrouble's retryable fault, so the footer settles.
@@ -136,10 +127,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         startMessage: '',
         source: null,
         timer: null,
-        // Backoff retry handle + current delay for the SSE hard-close recovery
-        // (#1179). reconnectTimer holds the pending setTimeout so a fresh
-        // connect / teardown can cancel it; reconnectDelay grows per attempt and
-        // resets to the base on a clean open.
+        // Backoff timer + current delay for the SSE hard-close recovery (#1179).
         reconnectTimer: null,
         reconnectDelay: RECONNECT_BASE_DELAY,
 
@@ -200,9 +188,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             // correct even before the first tick arrives, then subscribe.
             this.refresh();
             this.connect();
-            // A big screen on a TV/laptop can sleep or lose focus; on return to
-            // the foreground re-read state and re-open the stream if it dropped,
-            // the same recovery the player surface uses (#751 / #1179).
+            // Recover on foreground return, like the player surface (#751 / #1179).
             this.onVisible = () => this.handleVisible();
             document.addEventListener('visibilitychange', this.onVisible);
             // EventSource keeps retrying on its own, but close it cleanly so
@@ -211,9 +197,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         },
 
         connect() {
-            // A fresh connect supersedes any pending backoff retry and any prior
-            // stream, so a scheduled reconnect and a manual/visibility one can't
-            // both open a socket (or leak a duplicate over a live one).
+            // Supersede any pending retry / prior stream so we never leak a duplicate.
             this.clearReconnectTimer();
             this.disconnect();
             const source = new EventSource(
@@ -222,8 +206,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.source = source;
             source.onopen = () => {
                 this.connected = true;
-                // A clean open resets the backoff so the next hard close starts
-                // retrying from the base delay again.
+                // A clean open resets the backoff.
                 this.reconnectDelay = RECONNECT_BASE_DELAY;
             };
             // Every tick means "re-read state". The payload (version, phase)
@@ -237,10 +220,8 @@ function hostBigScreen(joinCode, hasQuiz) {
             source.onerror = () => {
                 // Reflect the gap in the UI until onopen/onmessage fires again.
                 this.connected = false;
-                // A transient drop leaves readyState CONNECTING and EventSource
-                // retries it itself. A hard close (a fatal non-200) leaves it
-                // CLOSED and it never retries, so schedule our own backoff
-                // re-subscribe or the screen freezes forever (#1179).
+                // EventSource retries a transient drop itself; a hard close
+                // (CLOSED) never retries, so drive our own backoff (#1179).
                 if (source.readyState === EventSource.CLOSED) {
                     this.scheduleReconnect();
                 }
@@ -312,9 +293,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/state`,
                     { headers: { Accept: 'application/json' } },
                 );
-                // Ignore a superseded read (#1178): a newer refresh fired while
-                // this one was in flight, so its result is the current one.
-                if (seq !== this.stateSeq) return;
+                if (seq !== this.stateSeq) return; // superseded read (#1178)
                 if (!response.ok) {
                     // A 404 means the session is gone (terminal), not a
                     // connection fault, so it does not feed the trouble banner.
@@ -326,10 +305,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                     return;
                 }
                 const state = await response.json();
-                // Re-check after the body parse: another refresh could have
-                // resolved in between, and applying this now-stale snapshot last
-                // would regress the screen (e.g. reveal back to question).
-                if (seq !== this.stateSeq) return;
+                if (seq !== this.stateSeq) return; // stale snapshot resolved late (#1178)
                 // A good read clears the failure budget and the banner.
                 this.stateFailures = 0;
                 this.connectionTrouble = false;

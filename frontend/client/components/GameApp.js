@@ -70,17 +70,10 @@ export class GameApp {
         // a submitAnswer POST throws (server 5xx, network drop). Cleared
         // on the next click or when a fresh question loads — see #179.
         this.submitError = false;
-        // Surfaces the "couldn't load the next question" retry banner when
-        // the question-advance fetch throws (server 5xx, network drop). The
-        // advance runs after the feedback pause, past the submit try/catch,
-        // so without this a rejected /next left the player frozen on the
-        // feedback card with every button disabled and no way forward (#1166).
-        // Cleared only when the next item successfully loads, so the banner
-        // stays up (showing its Loading state) while a retry is in flight.
+        // Retry-banner flag for a failed /next advance; cleared only on a
+        // successful advance so the banner's Loading state survives a retry (#1166).
         this.advanceError = false;
-        // Guards the advance-retry banner's Retry button so a double-tap
-        // does not fire two overlapping advances, and drives the button's
-        // in-flight "Loading..." label.
+        // Guards the Retry button against a double-tap and drives its Loading label.
         this.advancing = false;
         this.progress = 100;
         this.timer = null;
@@ -1090,21 +1083,13 @@ export class GameApp {
         await this.advanceToNext();
     }
 
-    // advanceToNext swaps to the next item, surfacing a retry banner on the
-    // feedback card if the /next fetch fails (#1166) instead of letting the
-    // rejection escape unhandled. resolveAndAdvance runs after the feedback
-    // pause, past submitAnswer's try/catch and inside a fire-and-forget
-    // handleTimeout, so an uncaught throw here left the player frozen on the
-    // feedback card with every button disabled and no path forward. The
-    // markRoundSeen-style guard is unnecessary — feedback is still set, so the
-    // feedback card stays on screen to host the banner and its Retry control.
+    // advanceToNext runs the /next swap past submitAnswer's try/catch and the
+    // fire-and-forget handleTimeout, so it must catch or a failed advance froze
+    // the player on the feedback card (#1166).
     async advanceToNext() {
         try {
             await this.nextQuestion();
-            // Only a successful advance clears the banner. Clearing up front
-            // would hide it (and its Retry button) for the whole in-flight
-            // retry, so the "Loading..." + disabled affordance never rendered
-            // and the double-tap guard was moot (#1166).
+            // Clear only on success so the banner's Loading state survives a retry.
             this.advanceError = false;
         } catch (err) {
             console.error('advanceToNext:', err);
@@ -1112,11 +1097,7 @@ export class GameApp {
         }
     }
 
-    // retryAdvance re-attempts a failed question advance from the retry
-    // banner's Retry button (#1166). The feedback pause has already elapsed,
-    // so it advances immediately with no further wait. nextQuestion re-issues
-    // the /next fetch (the prior prefetch already resolved null on failure), so
-    // a recovered network lands the next item and clears the banner.
+    // retryAdvance re-attempts a failed advance from the banner's Retry button (#1166).
     async retryAdvance() {
         if (this.advancing) return;
         this.advancing = true;

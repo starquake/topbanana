@@ -499,8 +499,8 @@
                              pause. The feedback card is still up with every
                              answer button disabled, so this Retry control is
                              the only way forward; without it a mobile network
-                             blip froze the game here. Cleared on the next
-                             advance attempt or when a fresh item loads. -->
+                             blip froze the game here. Cleared only on a
+                             successful advance so it survives an in-flight retry. -->
                         <div x-show="advanceError"
                              role="alert"
                              data-testid="advance-error"
