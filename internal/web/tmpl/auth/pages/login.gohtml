@@ -25,7 +25,7 @@
                 <input id="password" name="password" type="password" required
                        autocomplete="current-password"
                        class="form-input">
-                <p class="mt-2 text-xs text-text-mute"><a href="/forgot-password" class="underline">Forgot your password?</a></p>
+                {{if .ShowForgotPassword}}<p class="mt-2 text-xs text-text-mute"><a href="/forgot-password" class="underline">Forgot your password?</a></p>{{end}}
                 <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">Didn't get the verification email?</a></p>
             </div>
 

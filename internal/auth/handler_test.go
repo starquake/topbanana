@@ -618,6 +618,7 @@ func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 		session.New([]byte("k"), true),
 		false,
 		false,
+		false,
 	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
@@ -640,6 +641,7 @@ func TestHandleLoginForm_RegistrationDisabled_HidesRegisterLink(t *testing.T) {
 		nil,
 		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
 		session.New([]byte("k"), true),
+		false,
 		false,
 		false,
 	)
@@ -666,6 +668,7 @@ func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 		session.New([]byte("k"), true),
 		true,
 		false,
+		false,
 	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
@@ -677,6 +680,60 @@ func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), `href="/register"`; !strings.Contains(got, want) {
 		t.Errorf("body should contain %q when registration is enabled, got %q", want, got)
+	}
+}
+
+// TestHandleLoginForm_SMTPUnconfigured_HidesForgotLink: no forgot-password
+// link when SMTP is unconfigured (the routes are unmounted) (#1170).
+func TestHandleLoginForm_SMTPUnconfigured_HidesForgotLink(t *testing.T) {
+	t.Parallel()
+
+	handler := HandleLoginForm(
+		discardLogger(),
+		nil,
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
+		session.New([]byte("k"), true),
+		false,
+		false,
+		false,
+	)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got := rec.Body.String(); strings.Contains(got, "/forgot-password") {
+		t.Errorf("body should not link to /forgot-password when SMTP is unconfigured, got %q", got)
+	}
+}
+
+// TestHandleLoginForm_SMTPConfigured_ShowsForgotLink: the forgot-password
+// link renders when SMTP is configured (#1170).
+func TestHandleLoginForm_SMTPConfigured_ShowsForgotLink(t *testing.T) {
+	t.Parallel()
+
+	handler := HandleLoginForm(
+		discardLogger(),
+		nil,
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
+		session.New([]byte("k"), true),
+		false,
+		false,
+		true,
+	)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), `href="/forgot-password"`; !strings.Contains(got, want) {
+		t.Errorf("body should link to /forgot-password when SMTP is configured, got %q", got)
 	}
 }
 
@@ -711,7 +768,7 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false)
+	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID, 0)
@@ -743,7 +800,7 @@ func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false)
+	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID, 0)
@@ -1126,14 +1183,9 @@ func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 	}
 }
 
-// TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends pins #492 +
-// #787: valid credentials against a row whose email_verified_at is NULL
-// must re-render the login form (no 303 to landing, no session cookie
-// set) and trigger a fresh verify-email send through the wired-in
-// mailer. The banner is the generic "check your email" message that
-// names no address and does not confirm the password (#787), so an
-// unverified-but-correct attempt is indistinguishable from a
-// wrong-password one.
+// TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends: an unverified
+// account is refused with the generic 401 (no session), and the verify
+// email still resends silently (#492/#787/#1171).
 func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	t.Parallel()
 
@@ -1166,18 +1218,18 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 		"password": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusOK; got != want {
+	if got, want := rec.Code, http.StatusUnauthorized; got != want {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if want := "Check your email to finish signing in."; !strings.Contains(body, want) {
-		t.Errorf("body missing generic check-email banner; body=%.300q", body)
+	if want := "Invalid email or password."; !strings.Contains(body, want) {
+		t.Errorf("body missing generic invalid-credentials banner; body=%.300q", body)
 	}
-	// The banner must NOT echo the address or otherwise confirm the
-	// credentials were correct (#787); doing so would make this an
-	// account-existence + password oracle.
-	if dontWant := "resent the link to"; strings.Contains(body, dontWant) {
-		t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, body)
+	// The response must not confirm the password was correct (#787/#1171).
+	for _, dontWant := range []string{"Check your email", "resent the link to", "finish signing in"} {
+		if strings.Contains(body, dontWant) {
+			t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, body)
+		}
 	}
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == session.CookieName && c.Value != "" {
@@ -1200,6 +1252,68 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	}
 	if got, want := len(tokens.Created()), 1; got != want {
 		t.Errorf("tokens.Created() len = %d, want %d", got, want)
+	}
+}
+
+// TestHandleLoginSubmit_UnverifiedEmail_IndistinguishableFromWrongPassword:
+// correct and wrong passwords against an unverified account yield
+// byte-identical responses, yet only the correct one resends (#1171).
+func TestHandleLoginSubmit_UnverifiedEmail_IndistinguishableFromWrongPassword(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := players.CreatePlayer(t.Context(), "unv", "unv@example.test", hash, RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	tokens := &recordingVerifyTokenStore{}
+	sender := &recordingSender{}
+	tracker := bgtasks.New()
+	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
+		Players:       players,
+		Sessions:      session.New([]byte("k"), true),
+		Limiter:       NewLoginRateLimiter(0, nil),
+		Mailer:        sender,
+		Tokens:        tokens,
+		ResendLimiter: NewVerifyResendLimiter(time.Minute, nil),
+		BaseURL:       "https://topbanana.example",
+		Tasks:         tracker,
+	})
+
+	correct := postForm(t, handler, "/login", url.Values{
+		"email":    {"unv@example.test"},
+		"password": {"correctbattery"},
+	})
+	wrong := postForm(t, handler, "/login", url.Values{
+		"email":    {"unv@example.test"},
+		"password": {"wrong-password-no"},
+	})
+
+	if got, want := correct.Code, wrong.Code; got != want {
+		t.Errorf("status codes differ: correct-password = %d, wrong-password = %d (must match)", got, want)
+	}
+	if got, want := correct.Body.String(), wrong.Body.String(); got != want {
+		t.Errorf("response bodies differ between correct and wrong password (must be byte-identical)\n"+
+			"correct=%.300q\nwrong=%.300q", got, want)
+	}
+
+	// Only the correct-password attempt resends the verification email.
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+	sent := sender.Sent()
+	if got, want := len(sent), 1; got != want {
+		t.Fatalf("sender.Sent() len = %d, want %d (only the correct-password attempt resends)", got, want)
+	}
+	if got, want := sent[0].To, "unv@example.test"; got != want {
+		t.Errorf("sent[0].To = %q, want %q", got, want)
+	}
+	if got, want := sent[0].Kind, mailer.KindVerify; got != want {
+		t.Errorf("sent[0].Kind = %q, want %q", got, want)
 	}
 }
 

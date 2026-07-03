@@ -21,9 +21,7 @@ import (
 func TestResetPassword_HappyPath(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 
 	// First password-bearing registrant is promoted to admin, so the
 	// reset-token holder's role landing is /admin/quizzes. The signed
@@ -119,9 +117,7 @@ func hasSessionCookie(resp *http.Response) bool {
 func TestResetPassword_RejectsConsumedReplay(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
@@ -165,9 +161,7 @@ func TestResetPassword_RejectsConsumedReplay(t *testing.T) {
 func TestResetPassword_PasswordTooShort(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
@@ -206,7 +200,7 @@ func TestResetPassword_PasswordTooShort(t *testing.T) {
 func TestResetForm_DeadTokenRendersInvalid(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
@@ -254,7 +248,7 @@ func TestResetForm_DeadTokenRendersInvalid(t *testing.T) {
 func TestResetForm_LiveTokenRendersForm(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 

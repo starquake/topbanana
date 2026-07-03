@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -326,6 +327,39 @@ func TestGoogleLogin_CallbackRejectsStateMismatch(t *testing.T) {
 
 	if got, want := resp.StatusCode, http.StatusUnauthorized; got != want {
 		t.Errorf("callback status = %d, want %d", got, want)
+	}
+}
+
+// TestGoogleLogin_CallbackError_ShowsForgotLinkWhenSMTPConfigured: the
+// OAuth-error login re-render links to /forgot-password when SMTP is
+// configured, like the plain /login form (#1170).
+func TestGoogleLogin_CallbackError_ShowsForgotLinkWhenSMTPConfigured(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "forgot-link@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, smtpEnabledEnv(t))
+
+	client := authClient(t)
+	// A mismatched state drives the callback to its error re-render.
+	startResp := doGet(ctx, t, client, srv.BaseURL+"/login/google")
+	_ = mustFindStateCookie(t, startResp.Cookies)
+
+	callbackURL := srv.BaseURL + testGoogleRedirectPath + "?code=some-code&state=tampered"
+	resp := getWith(ctx, t, client, callbackURL)
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+
+	if got, want := resp.StatusCode, http.StatusUnauthorized; got != want {
+		t.Fatalf("callback status = %d, want %d", got, want)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if got, want := string(body), `href="/forgot-password"`; !strings.Contains(got, want) {
+		t.Errorf("google error re-render should link to /forgot-password when SMTP is configured; got %.400q", got)
 	}
 }
 

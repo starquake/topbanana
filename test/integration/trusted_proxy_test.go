@@ -17,10 +17,9 @@ import (
 func TestTrustedProxy_XFFHonouredWhenConfigured(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-		"TRUSTED_PROXY_IPS":    "127.0.0.1/32,::1/128",
-	})
+	env := smtpEnabledEnv(t)
+	env["TRUSTED_PROXY_IPS"] = "127.0.0.1/32,::1/128"
+	ctx, srv := startServer(t, env)
 
 	client := authClient(t)
 	first := postForgotWithXFF(ctx, t, client, srv.BaseURL, "1.2.3.4")
@@ -49,9 +48,7 @@ func TestTrustedProxy_XFFHonouredWhenConfigured(t *testing.T) {
 func TestTrustedProxy_XFFIgnoredByDefault(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
 
 	client := authClient(t)
 	first := postForgotWithXFF(ctx, t, client, srv.BaseURL, "1.2.3.4")
