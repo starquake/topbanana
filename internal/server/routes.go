@@ -629,10 +629,12 @@ func addMediaRoutes(
 
 	addQuizImportArchiveRoute(mux, logger, stores, csrfMgr, svc, cfg, requireGameHost)
 
+	// auth outermost so an unauthenticated caller is rejected before the body is
+	// spooled; the parse still precedes CSRF, which reads the token from PostForm.
 	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media",
-		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
+		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
 			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
 		))),
 	)
@@ -644,7 +646,7 @@ func addMediaRoutes(
 	// differ.
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media/audio",
-		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
+		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
 			mediahttp.HandleAudioUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
 		))),
 	)
@@ -689,12 +691,12 @@ func addMediaRoutes(
 // addQuizImportArchiveRoute registers the quiz-archive import POST (#1113): a
 // multipart upload that restores a quiz plus its media from an exported .zip.
 // Split out of addMediaRoutes so that function stays under revive's
-// function-length cap. The multipart middleware caps the body at
-// MEDIA_IMPORT_MAX_BYTES (well above the per-image cap, since the archive bundles
-// a whole library) and parses the form so the CSRF token in PostForm is visible;
-// the importer then bounds zip-bomb expansion via the per-entry and total
-// uncompressed guards. A modest per-host import budget reuses the upload-budget
-// limiter, charged once per import.
+// function-length cap. auth outermost so an unauthenticated caller is rejected
+// before the body is spooled (see the media route). The body is capped at
+// MEDIA_IMPORT_MAX_BYTES (above the per-image cap, since the archive bundles a
+// whole library); the importer then bounds zip-bomb expansion via the per-entry
+// and total uncompressed guards. A per-host import budget is charged once per
+// import.
 func addQuizImportArchiveRoute(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -708,7 +710,7 @@ func addQuizImportArchiveRoute(
 	limits := admin.NewArchiveImportLimits(cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes)
 	mux.Handle(
 		"POST /admin/quizzes/import/archive",
-		mediahttp.MaxMultipartFormMiddlewareWithLimit(cfg.MediaImportMaxBytes, csrfMgr.Middleware(requireGameHost(
+		requireGameHost(mediahttp.MaxMultipartFormMiddlewareWithLimit(cfg.MediaImportMaxBytes, csrfMgr.Middleware(
 			admin.HandleQuizImportArchive(logger, csrfMgr, stores.Quizzes, svc, budget, limits),
 		))),
 	)
