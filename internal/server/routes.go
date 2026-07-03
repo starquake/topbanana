@@ -75,16 +75,10 @@ func addRoutes(
 	if cfg.DemoMode {
 		mux.Handle("POST /demo/enter", demo.HandleEnter(sessions, stores.Players, logger))
 	}
+	mediaSvc := media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger)
+	gameDeps.mediaSvc = mediaSvc
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
-	addMediaRoutes(
-		mux,
-		logger,
-		stores,
-		sessions,
-		csrfMgr,
-		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
-		cfg,
-	)
+	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, mediaSvc, cfg)
 	if cfg.ProfileEnabled {
 		addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	}
@@ -503,6 +497,9 @@ type adminGameDeps struct {
 	// uploadLimits are the media caps the quiz view shows a host and feeds to
 	// the client-side pre-upload size guard (#1139).
 	uploadLimits admin.MediaUploadLimits
+	// mediaSvc lets the quiz-delete handler unlink a deleted quiz's on-disk
+	// media directory, which the DB cascade alone leaves orphaned (#1174).
+	mediaSvc *media.Service
 }
 
 func addAdminRoutes(
@@ -566,7 +563,7 @@ func addAdminRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/delete",
-		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes, gameDeps.mediaSvc))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",

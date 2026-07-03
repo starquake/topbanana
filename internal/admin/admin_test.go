@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 // newGameService wires the env's real stores into a fresh [game.Service]
@@ -2461,7 +2464,7 @@ func TestHandleQuizDelete(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, ownedQuiz("Q", "q"))
 
-		handler := HandleQuizDelete(logger, nil, env.quizzes)
+		handler := HandleQuizDelete(logger, nil, env.quizzes, newMediaServiceOverTemp(t, env))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			fmt.Sprintf("/admin/quizzes/%d/delete", qz.ID), nil,
@@ -2483,6 +2486,51 @@ func TestHandleQuizDelete(t *testing.T) {
 	})
 }
 
+// TestHandleQuizDelete_RemovesMediaFiles pins the #1174 fix: deleting a quiz
+// unlinks its on-disk media directory, not just the cascaded media rows.
+func TestHandleQuizDelete_RemovesMediaFiles(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	env := newAdminEnv(t)
+	qz := env.seedQuiz(t, ownedQuiz("Q", "q"))
+
+	root := t.TempDir()
+	mediaSvc := media.NewService(
+		store.NewMediaStore(env.db, slog.New(slog.DiscardHandler)),
+		root, 10<<20, 20<<20, slog.New(slog.DiscardHandler),
+	)
+	if _, err := mediaSvc.StoreImage(
+		t.Context(), qz.ID, testAdminID, "pic.png", bytes.NewReader(tinyPNG(t)),
+	); err != nil {
+		t.Fatalf("StoreImage err = %v, want nil", err)
+	}
+
+	quizDir := filepath.Join(root, strconv.FormatInt(qz.ID, 10))
+	if _, statErr := os.Stat(quizDir); statErr != nil {
+		t.Fatalf("quiz media dir not present before delete: %v", statErr)
+	}
+
+	handler := HandleQuizDelete(logger, nil, env.quizzes, mediaSvc)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost,
+		fmt.Sprintf("/admin/quizzes/%d/delete", qz.ID), nil,
+	)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+	}
+	if _, statErr := os.Stat(quizDir); !os.IsNotExist(statErr) {
+		t.Fatalf("quiz media dir still present after delete: err = %v, want not-exist", statErr)
+	}
+}
+
 func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
@@ -2494,7 +2542,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizDelete(logger, nil, env.quizzes)
+		handler := HandleQuizDelete(logger, nil, env.quizzes, newMediaServiceOverTemp(t, env))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost, "/admin/quizzes/not-an-int/delete", nil,
 		)
@@ -2518,7 +2566,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 
 		// requireQuizOwner runs first now (#281); a missing quiz
 		// surfaces from GetQuiz, not from the DeleteQuiz return path.
-		handler := HandleQuizDelete(logger, nil, env.quizzes)
+		handler := HandleQuizDelete(logger, nil, env.quizzes, newMediaServiceOverTemp(t, env))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost, "/admin/quizzes/999/delete", nil,
 		)
@@ -2542,7 +2590,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		qz := env.seedQuiz(t, ownedQuiz("Q", "q"))
 		env.closeStore(t)
 
-		handler := HandleQuizDelete(logger, nil, env.quizzes)
+		handler := HandleQuizDelete(logger, nil, env.quizzes, newMediaServiceOverTemp(t, env))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			fmt.Sprintf("/admin/quizzes/%d/delete", qz.ID), nil,
