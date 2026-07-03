@@ -200,6 +200,13 @@ export class JoinApp {
         // Running count of consecutive non-404 GET /state failures, reset to 0
         // on any success.
         this.stateFailures = 0;
+        // Monotonic id tagging each GET /state read so an out-of-order response
+        // can be dropped (#1178). Every SSE tick fires an un-awaited refreshState,
+        // so two overlapping reads can resolve out of order; applying the older
+        // snapshot last would regress the surface (e.g. reveal back to question).
+        // refreshState bumps this, captures the value, and ignores its own result
+        // once a newer read has superseded it.
+        this.stateSeq = 0;
         // Guards the connection-trouble banner's "Reconnect now" control (#1121)
         // so a double-tap does not fire two overlapping recoveries, and drives
         // the button's in-flight "Reconnecting..." label.
@@ -541,10 +548,14 @@ export class JoinApp {
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
     async refreshState() {
+        const seq = ++this.stateSeq;
         let state;
         try {
             state = await sessionService.getState(this.code);
         } catch {
+            // Ignore a superseded read (#1178): a newer refreshState fired
+            // while this one was in flight, so its result is the current one.
+            if (seq !== this.stateSeq) return;
             // A transient read failure leaves the prior roster on screen; the
             // next tick (or a reconnect) retries. Don't tear the lobby down on
             // a single blip, but after several in a row tell the player why the
@@ -555,6 +566,10 @@ export class JoinApp {
             }
             return;
         }
+        // Ignore a stale snapshot that resolved after a newer read (#1178) so an
+        // older phase can't overwrite the latest one (e.g. regress reveal back
+        // to question).
+        if (seq !== this.stateSeq) return;
         if (state === null) {
             this.sessionClosed = true;
             this.releaseWakeLock();
