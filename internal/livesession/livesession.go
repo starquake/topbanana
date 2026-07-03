@@ -75,6 +75,12 @@ var (
 	// game). A mid-game call, or a call on a terminally finished room, is
 	// rejected. Handlers treat it as an idempotent no-op (a stale tab re-posted).
 	ErrGameInFlight = errors.New("room already has a game running")
+
+	// ErrNoQuizToStart is returned by [Service.Start] and [Service.ArmStart]
+	// when the room has no quiz assigned: starting one would wedge it in a
+	// phantom game (started but stuck in the lobby with no plan to run).
+	// Handlers map it to 409.
+	ErrNoQuizToStart = errors.New("session has no quiz to start")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
@@ -327,23 +333,29 @@ type Store interface {
 	// left the lobby.
 	CancelStart(ctx context.Context, sessionID string) error
 	// EnterRoundIntro moves the session into the round_intro phase for the
-	// given round, clearing the per-question runner columns.
-	EnterRoundIntro(ctx context.Context, sessionID string, roundID int64) error
+	// given round, clearing the per-question runner columns. Optimistic write
+	// against expected (the phase the caller loaded): reports false when no row
+	// was written because the session moved on, so the caller skips the rest.
+	EnterRoundIntro(ctx context.Context, sessionID string, expected Phase, roundID int64) (bool, error)
 	// EnterQuestion issues a question: records the current round + question
 	// and the server answer window, and moves into the question phase.
+	// Optimistic write; see EnterRoundIntro.
 	EnterQuestion(
 		ctx context.Context,
 		sessionID string,
+		expected Phase,
 		roundID, questionID int64,
 		startedAt, expiresAt time.Time,
-	) error
+	) (bool, error)
 	// EnterReveal moves the session into the reveal phase, leaving the
-	// current question and window in place.
-	EnterReveal(ctx context.Context, sessionID string) error
+	// current question and window in place. Optimistic write; see
+	// EnterRoundIntro. questionID pins the reveal to the scored question.
+	EnterReveal(ctx context.Context, sessionID string, expected Phase, questionID int64) (bool, error)
 	// EnterRoundResults moves the session into the round_results phase shown
 	// after the last question of a round, leaving current_round_id in place so
-	// a reader knows which round just finished.
-	EnterRoundResults(ctx context.Context, sessionID string) error
+	// a reader knows which round just finished. Optimistic write; see
+	// EnterRoundIntro.
+	EnterRoundResults(ctx context.Context, sessionID string, expected Phase) (bool, error)
 	// Finish ends the session terminally: marks it finished and clears the
 	// per-question runner columns. Used when the room is actually closed (idle
 	// auto-close, or an explicit host End session).
@@ -670,13 +682,10 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 	return nil
 }
 
-// Start begins the game immediately (the host "Start now" control). Only the
-// host may call it. Marks the session started and hands it to the runner to
-// enter the first round at once, so it also skips (overrides) any armed
-// last-call countdown. Returns [ErrSessionNotFound] for an unknown code,
-// [ErrNotHost] when the caller is not the host, and [ErrSessionAlreadyStarted]
-// when the session has already left the lobby (treated as an idempotent no-op
-// by the handler).
+// Start begins the game immediately (the host "Start now" control), marking the
+// session started and driving it into the first round, overriding any armed
+// countdown. Host-gated. Errors: [ErrSessionNotFound], [ErrNotHost],
+// [ErrNoQuizToStart], [ErrSessionAlreadyStarted] (an idempotent no-op).
 func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64) error {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
@@ -686,6 +695,9 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 		s.logNonHostAttempt(ctx, "start", sess.JoinCode, hostPlayerID)
 
 		return ErrNotHost
+	}
+	if sess.QuizID == nil {
+		return ErrNoQuizToStart
 	}
 
 	won, err := s.store.MarkStarted(ctx, sess.ID)
@@ -758,13 +770,10 @@ func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, 
 }
 
 // ArmStart arms the host's last-call countdown (the "Start in 60s" control):
-// it stamps the absolute deadline at now + the configured countdown, so every
-// surface renders the same server-clock countdown and the runner starts the
-// game once it elapses. Host-gated and lobby-phase only. Joins during the
-// countdown do not reset it (the deadline is absolute). Re-arming while in the
-// lobby overwrites the deadline. Returns [ErrSessionNotFound] for an unknown
-// code, [ErrNotHost] when the caller is not the host, and [ErrNotInLobby] when
-// the session has already left the lobby.
+// it stamps the absolute deadline at now + the configured countdown, which the
+// runner starts the game on once it elapses. Host-gated and lobby-phase only; an
+// absolute deadline that joins do not reset and a re-arm overwrites. Errors:
+// [ErrSessionNotFound], [ErrNotHost], [ErrNoQuizToStart], [ErrNotInLobby].
 func (s *Service) ArmStart(ctx context.Context, joinCode string, hostPlayerID int64, now time.Time) error {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
@@ -774,6 +783,9 @@ func (s *Service) ArmStart(ctx context.Context, joinCode string, hostPlayerID in
 		s.logNonHostAttempt(ctx, "armStart", sess.JoinCode, hostPlayerID)
 
 		return ErrNotHost
+	}
+	if sess.QuizID == nil {
+		return ErrNoQuizToStart
 	}
 
 	countdown := s.startCountdown

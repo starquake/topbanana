@@ -171,35 +171,43 @@ SET start_at = NULL
 WHERE id = ?
   AND started_at IS NULL;
 
--- name: SetSessionRoundIntro :exec
--- Moves the session into the round_intro phase for the given round and clears
--- the per-question runner columns (the intro screen runs before any question
--- is issued).
+-- name: SetSessionRoundIntro :execresult
+-- Moves the session into the round_intro phase for the given round.
+-- Optimistic write: the expected_phase guard writes only from the phase the
+-- runner loaded, so a stale beat cannot resurrect a room ended in between; zero
+-- rows affected means the runner lost the race.
 UPDATE sessions
 SET phase               = 'round_intro',
-    current_round_id    = ?,
+    current_round_id    = sqlc.arg('current_round_id'),
     current_question_id = NULL,
     question_started_at = NULL,
     question_expires_at = NULL
-WHERE id = ?;
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase');
 
--- name: SetSessionQuestion :exec
+-- name: SetSessionQuestion :execresult
 -- Issues a question: records the current round + question and the server
 -- answer window (started_at -> expires_at), and moves into the question phase.
+-- Optimistic write; see SetSessionRoundIntro.
 UPDATE sessions
 SET phase               = 'question',
-    current_round_id    = ?,
-    current_question_id = ?,
-    question_started_at = ?,
-    question_expires_at = ?
-WHERE id = ?;
+    current_round_id    = sqlc.arg('current_round_id'),
+    current_question_id = sqlc.arg('current_question_id'),
+    question_started_at = sqlc.arg('question_started_at'),
+    question_expires_at = sqlc.arg('question_expires_at')
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase');
 
--- name: SetSessionReveal :exec
+-- name: SetSessionReveal :execresult
 -- Moves the session into the reveal phase, leaving the current question and
 -- its window in place so a reader still sees which question is being revealed.
+-- Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
+-- pins the reveal to the question the runner scored.
 UPDATE sessions
 SET phase = 'reveal'
-WHERE id = ?;
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase')
+  AND current_question_id = sqlc.arg('current_question_id');
 
 -- name: SetSessionFinished :exec
 -- Ends the session: marks it finished and clears the per-question runner
@@ -419,17 +427,19 @@ WHERE session_id = sqlc.arg('session_id')
   AND player_id = sqlc.arg('player_id')
   AND game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sqlc.arg('session_id'));
 
--- name: SetSessionRoundResults :exec
+-- name: SetSessionRoundResults :execresult
 -- Moves the session into the round_results phase shown after the last question
 -- of a round (before the next round's intro). current_round_id stays put so the
 -- state read knows which round just finished; the per-question runner columns
 -- are cleared because no question is live in this phase.
+-- Optimistic write; see SetSessionRoundIntro.
 UPDATE sessions
 SET phase               = 'round_results',
     current_question_id = NULL,
     question_started_at = NULL,
     question_expires_at = NULL
-WHERE id = ?;
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase');
 
 -- name: ListSessionStandings :many
 -- Per-player standings for a session: the score the player earned in the given

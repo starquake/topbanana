@@ -375,8 +375,12 @@ func TestLiveSessionStore_PhaseTransitions(t *testing.T) {
 		t.Error("second MarkStarted won = true, want false")
 	}
 
-	if err = sessionStore.EnterRoundIntro(t.Context(), sess.ID, q.RoundID); err != nil {
+	introApplied, err := sessionStore.EnterRoundIntro(t.Context(), sess.ID, livesession.PhaseLobby, q.RoundID)
+	if err != nil {
 		t.Fatalf("EnterRoundIntro err = %v, want nil", err)
+	}
+	if !introApplied {
+		t.Fatal("EnterRoundIntro applied = false, want true")
 	}
 	intro, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
 	if err != nil {
@@ -391,8 +395,14 @@ func TestLiveSessionStore_PhaseTransitions(t *testing.T) {
 
 	started := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
 	expires := started.Add(10 * time.Second)
-	if err = sessionStore.EnterQuestion(t.Context(), sess.ID, q.RoundID, q.ID, started, expires); err != nil {
+	questionApplied, err := sessionStore.EnterQuestion(
+		t.Context(), sess.ID, livesession.PhaseRoundIntro, q.RoundID, q.ID, started, expires,
+	)
+	if err != nil {
 		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+	if !questionApplied {
+		t.Fatal("EnterQuestion applied = false, want true")
 	}
 	question, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
 	if err != nil {
@@ -408,8 +418,12 @@ func TestLiveSessionStore_PhaseTransitions(t *testing.T) {
 		t.Errorf("QuestionExpiresAt = %v, want %v", question.QuestionExpiresAt, expires)
 	}
 
-	if err = sessionStore.EnterReveal(t.Context(), sess.ID); err != nil {
+	revealApplied, err := sessionStore.EnterReveal(t.Context(), sess.ID, livesession.PhaseQuestion, q.ID)
+	if err != nil {
 		t.Fatalf("EnterReveal err = %v, want nil", err)
+	}
+	if !revealApplied {
+		t.Fatal("EnterReveal applied = false, want true")
 	}
 	reveal, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
 	if err != nil {
@@ -1029,14 +1043,20 @@ func TestLiveSessionStore_EnterRoundResults(t *testing.T) {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
 	started := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
-	if err := sessionStore.EnterQuestion(
-		t.Context(), sess.ID, q.RoundID, q.ID, started, started.Add(10*time.Second),
+	if applied, err := sessionStore.EnterQuestion(
+		t.Context(), sess.ID, livesession.PhaseLobby, q.RoundID, q.ID, started, started.Add(10*time.Second),
 	); err != nil {
 		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	} else if !applied {
+		t.Fatal("EnterQuestion applied = false, want true")
 	}
 
-	if err := sessionStore.EnterRoundResults(t.Context(), sess.ID); err != nil {
+	if applied, err := sessionStore.EnterRoundResults(
+		t.Context(), sess.ID, livesession.PhaseQuestion,
+	); err != nil {
 		t.Fatalf("EnterRoundResults err = %v, want nil", err)
+	} else if !applied {
+		t.Fatal("EnterRoundResults applied = false, want true")
 	}
 	got, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
 	if err != nil {
@@ -1050,6 +1070,74 @@ func TestLiveSessionStore_EnterRoundResults(t *testing.T) {
 	}
 	if got.CurrentQuestionID != nil {
 		t.Errorf("round_results CurrentQuestionID = %v, want nil", *got.CurrentQuestionID)
+	}
+}
+
+// TestLiveSessionStore_StaleTransitionDoesNotResurrectFinished pins that a stale
+// transition write (the phase the runner loaded before EndSession finished the
+// room) is a no-op and leaves the session finished (#1176).
+func TestLiveSessionStore_StaleTransitionDoesNotResurrectFinished(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	q := qz.Questions[0]
+
+	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "STAL23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	// Drive the room into the question phase, then finish it under the runner.
+	started := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	if _, err := sessionStore.EnterQuestion(
+		t.Context(), sess.ID, livesession.PhaseLobby, q.RoundID, q.ID, started, started.Add(10*time.Second),
+	); err != nil {
+		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+	if err := sessionStore.Finish(t.Context(), sess.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+
+	// Each stale write (the pre-finish phase) must be a no-op.
+	reveal, err := sessionStore.EnterReveal(t.Context(), sess.ID, livesession.PhaseQuestion, q.ID)
+	if err != nil {
+		t.Fatalf("EnterReveal err = %v, want nil", err)
+	}
+	if reveal {
+		t.Error("stale EnterReveal applied = true, want false (must not resurrect finished room)")
+	}
+	results, err := sessionStore.EnterRoundResults(t.Context(), sess.ID, livesession.PhaseReveal)
+	if err != nil {
+		t.Fatalf("EnterRoundResults err = %v, want nil", err)
+	}
+	if results {
+		t.Error("stale EnterRoundResults applied = true, want false")
+	}
+	intro, err := sessionStore.EnterRoundIntro(t.Context(), sess.ID, livesession.PhaseRoundResults, q.RoundID)
+	if err != nil {
+		t.Fatalf("EnterRoundIntro err = %v, want nil", err)
+	}
+	if intro {
+		t.Error("stale EnterRoundIntro applied = true, want false")
+	}
+	question, err := sessionStore.EnterQuestion(
+		t.Context(), sess.ID, livesession.PhaseRoundIntro, q.RoundID, q.ID, started, started.Add(10*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+	if question {
+		t.Error("stale EnterQuestion applied = true, want false")
+	}
+
+	final, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if got, want := final.Phase, livesession.PhaseFinished; got != want {
+		t.Errorf("phase after stale beats = %q, want %q (room stayed finished)", got, want)
 	}
 }
 
