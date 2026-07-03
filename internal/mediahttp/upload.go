@@ -566,7 +566,12 @@ func MaxMultipartFormMiddlewareWithLimit(maxBytes int64, next http.Handler) http
 		// deadline here. If the underlying ResponseWriter does not support a
 		// deadline (unlikely under net/http) the call is a silent no-op and
 		// the request still uses the global ReadTimeout.
-		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(uploadReadDeadline))
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(uploadReadDeadline))
+		// WriteTimeout counts from accept; extend it alongside the read deadline
+		// so a slow upload's response still lands instead of resetting (which
+		// triggers a duplicate-producing retry).
+		_ = rc.SetWriteDeadline(time.Now().Add(uploadReadDeadline))
 		// MaxBytesReader above bounds the body, so the parse cannot exhaust
 		// memory despite gosec's G120 flag on the bare ParseMultipartForm call.
 		if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil { //nolint:gosec // body capped above
