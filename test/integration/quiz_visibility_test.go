@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
-	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// TestQuizVisibility_Integration pins #103 end-to-end: a private quiz
-// disappears from /api/quizzes for everyone, is reachable on its
-// direct endpoints only by an authenticated player, and rejects a
-// start-game POST from an anonymous visitor. Unlisted is not on the
-// public list but stays reachable on its direct endpoints.
+// TestQuizVisibility_Integration pins #103: a private quiz is hidden from
+// the list and its gated leaderboard is reachable only by an authed player;
+// unlisted is off the list but reachable by link.
 func TestQuizVisibility_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -103,13 +100,13 @@ func TestQuizVisibility_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("anonymous can fetch unlisted by direct link", func(t *testing.T) {
+	t.Run("anonymous can reach unlisted leaderboard by direct link", func(t *testing.T) {
 		t.Parallel()
 		resp := httpGet(
 			ctx,
 			t,
 			anonClient,
-			fmt.Sprintf("%s/api/quizzes/%s-%d", baseURL, unlistedQz.Slug, unlistedQz.ID),
+			fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", baseURL, unlistedQz.Slug, unlistedQz.ID),
 		)
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -117,9 +114,12 @@ func TestQuizVisibility_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("anonymous gets 404 fetching private quiz directly", func(t *testing.T) {
+	t.Run("anonymous gets 404 reaching private quiz leaderboard directly", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, anonClient, fmt.Sprintf("%s/api/quizzes/%s-%d", baseURL, privateQz.Slug, privateQz.ID))
+		resp := httpGet(
+			ctx, t, anonClient,
+			fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", baseURL, privateQz.Slug, privateQz.ID),
+		)
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -153,21 +153,15 @@ func TestQuizVisibility_Integration(t *testing.T) {
 	// redirects normally (the login handler 303s on success).
 	authClient.CheckRedirect = nil
 
-	t.Run("logged-in player can fetch private quiz directly", func(t *testing.T) {
+	t.Run("logged-in player can reach private quiz leaderboard directly", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, authClient, fmt.Sprintf("%s/api/quizzes/%s-%d", baseURL, privateQz.Slug, privateQz.ID))
+		resp := httpGet(
+			ctx, t, authClient,
+			fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", baseURL, privateQz.Slug, privateQz.ID),
+		)
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Errorf("status = %d, want %d", got, want)
-		}
-		var body struct {
-			Title string `json:"title"`
-		}
-		if derr := json.NewDecoder(resp.Body).Decode(&body); derr != nil {
-			t.Fatalf("decode: %v", derr)
-		}
-		if got, want := body.Title, "Private Quiz"; !strings.Contains(got, want) {
-			t.Errorf("title = %q, should contain %q", got, want)
 		}
 	})
 }

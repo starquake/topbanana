@@ -51,6 +51,11 @@ var (
 	// the option being submitted does not belong to the supplied question.
 	ErrOptionNotInQuestion = errors.New("option does not belong to question")
 
+	// ErrAnswerWindowClosed is returned by [Service.SubmitAnswer] for an
+	// answer arriving past ExpiredAt plus the latency grace; it scores
+	// nothing, so it is rejected not recorded (#1163). Handlers map it to 409.
+	ErrAnswerWindowClosed = errors.New("answer window closed")
+
 	// ErrStartingGameNoRowsAffected is returned by [GameStore.StartGame]
 	// when the UPDATE matched no rows - i.e. the game does not exist.
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")

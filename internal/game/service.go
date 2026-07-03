@@ -24,6 +24,10 @@ const (
 	// mobile network jitter.
 	defaultStalePeriod = 30 * time.Second
 
+	// lateAnswerGrace is how far past ExpiredAt an answer may still land,
+	// covering a last-instant tap delayed in flight (#1163).
+	lateAnswerGrace = 2 * time.Second
+
 	// errGetGameFmt is the wrap format for store.GetGame errors. Every
 	// entry-point gate (GetNextQuestion, GetNext, MarkRoundSeen,
 	// SubmitAnswer, GetResults) wraps the failure with the same
@@ -435,11 +439,11 @@ func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, ro
 	return nil
 }
 
-// SubmitAnswer records a player's answer. tappedAt is clamped to
-// [question.StartedAt, serverNow] so an honest player on a slow link
-// gets their network latency refunded while a clock-skewed client
-// cannot claim a moment outside the answer window. The clamp is
-// one-sided: claims can only pull the recorded time earlier (#237).
+// SubmitAnswer records a player's answer. Answers past the window
+// (ExpiredAt plus the latency grace) are rejected with
+// ErrAnswerWindowClosed; otherwise tappedAt is refunded up to
+// maxLatencyRefund so a slow link is not penalised but a client cannot
+// claim the window start (#237, #1163).
 func (s *Service) SubmitAnswer(
 	ctx context.Context,
 	gameID string,
@@ -464,6 +468,12 @@ func (s *Service) SubmitAnswer(
 		return nil, err
 	}
 
+	// Reject an answer that lands past the window; it scores nothing (#1163).
+	now := time.Now()
+	if now.After(question.ExpiredAt.Add(lateAnswerGrace)) {
+		return nil, ErrAnswerWindowClosed
+	}
+
 	a := &Answer{
 		GameID:     gameID,
 		PlayerID:   playerID,
@@ -471,7 +481,7 @@ func (s *Service) SubmitAnswer(
 		Question:   question,
 		OptionID:   optionID,
 		Option:     option,
-		AnsweredAt: clampTappedAt(tappedAt, question.StartedAt, time.Now()),
+		AnsweredAt: clampTappedAt(tappedAt, now, maxLatencyRefund),
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
@@ -583,6 +593,14 @@ func (s *Service) resolveAnswerTarget(
 
 	quizQuestion, err := s.quizStore.GetQuestion(ctx, question.QuestionID)
 	if err != nil {
+		// A host can delete the question mid-game; treat it as
+		// no-longer-in-game so the submit path 404s instead of 500ing (#1180).
+		if errors.Is(err, quiz.ErrQuestionNotFound) {
+			return nil, nil, fmt.Errorf(
+				"question %d deleted from game %s: %w", question.QuestionID, gameID, ErrQuestionNotInGame,
+			)
+		}
+
 		return nil, nil, fmt.Errorf("failed to get question: %w", err)
 	}
 	question.QuizQuestion = quizQuestion

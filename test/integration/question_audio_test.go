@@ -12,14 +12,8 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// quizGetAudioRes decodes only the per-question audio field off the solo data
-// endpoint (GET /api/quizzes/{slugID}).
-type quizGetAudioRes struct {
-	Questions []questionAudioRes `json:"questions"`
-}
-
-// questionAudioRes is one question's text + audio field, shared by the solo
-// data and /next decode targets.
+// questionAudioRes is one question's text + audio field, shared by the /next
+// and live-session decode targets.
 type questionAudioRes struct {
 	Text     string `json:"text"`
 	AudioURL string `json:"audioUrl"`
@@ -70,10 +64,8 @@ func attachAudioToQuestion(
 	return row.ID
 }
 
-// TestQuestionAudio_SoloWire pins that the solo play endpoints surface a
-// question's attached sound as audioUrl = /media/<id> and omit the field when
-// the question has none. Covers both the bulk data endpoint
-// (GET /api/quizzes/{slugID}) and the per-question /next endpoint.
+// TestQuestionAudio_SoloWire pins that the per-question /next endpoint
+// surfaces a question's attached sound as audioUrl = /media/<id>.
 func TestQuestionAudio_SoloWire(t *testing.T) {
 	t.Parallel()
 
@@ -99,29 +91,6 @@ func TestQuestionAudio_SoloWire(t *testing.T) {
 
 	mediaID := attachAudioToQuestion(ctx, t, stores, qz.ID, qz.Questions[0].ID)
 	wantURL := fmt.Sprintf("/media/%d", mediaID)
-	slugID := fmt.Sprintf("%s-%d", qz.Slug, qz.ID)
-
-	t.Run("data endpoint carries audioUrl", func(t *testing.T) {
-		t.Parallel()
-		resp := httpGet(ctx, t, newAnonClient(t), fmt.Sprintf("%s/api/quizzes/%s", baseURL, slugID))
-		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusOK; got != want {
-			t.Fatalf("quiz get status = %d, want %d", got, want)
-		}
-		var body quizGetAudioRes
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			t.Fatalf("decode quiz get: %v", err)
-		}
-		if got, want := len(body.Questions), 2; got != want {
-			t.Fatalf("questions = %d, want %d", got, want)
-		}
-		if got, want := body.Questions[0].AudioURL, wantURL; got != want {
-			t.Errorf("question[0].audioUrl = %q, want %q", got, want)
-		}
-		if got := body.Questions[1].AudioURL; got != "" {
-			t.Errorf("question[1].audioUrl = %q, want empty (no sound attached)", got)
-		}
-	})
 
 	t.Run("next endpoint carries audioUrl", func(t *testing.T) {
 		t.Parallel()

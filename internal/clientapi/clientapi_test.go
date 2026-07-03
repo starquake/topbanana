@@ -72,97 +72,6 @@ func TestHandleQuizList(t *testing.T) {
 	})
 }
 
-func TestHandleQuizGet(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns full quiz with questions and options", func(t *testing.T) {
-		t.Parallel()
-
-		env := newTestEnv(t)
-		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
-
-		handler := HandleQuizGet(env.logger, env.quizzes)
-
-		req := httptest.NewRequestWithContext(
-			t.Context(), http.MethodGet, fmt.Sprintf("/api/quizzes/quiz-one-%d", qz.ID), nil,
-		)
-		req.SetPathValue("slugID", fmt.Sprintf("quiz-one-%d", qz.ID))
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if got, want := rec.Code, http.StatusOK; got != want {
-			t.Fatalf("status code = %v, want %v", got, want)
-		}
-
-		var result map[string]any
-		if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		if got, want := result["title"], "Quiz One"; got != want {
-			t.Errorf("title = %v, want %v", got, want)
-		}
-
-		questions, ok := result["questions"].([]any)
-		if !ok {
-			t.Fatal("questions field missing or wrong type")
-		}
-
-		if got, want := len(questions), 2; got != want {
-			t.Fatalf("len(questions) = %v, want %v", got, want)
-		}
-
-		q, ok := questions[0].(map[string]any)
-		if !ok {
-			t.Fatal("question is not a map")
-		}
-
-		opts, ok := q["options"].([]any)
-		if !ok {
-			t.Fatal("options field missing or wrong type")
-		}
-
-		if got, want := len(opts), 2; got != want {
-			t.Errorf("len(options) = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("returns 404 when quiz not found", func(t *testing.T) {
-		t.Parallel()
-
-		env := newTestEnv(t)
-
-		handler := HandleQuizGet(env.logger, env.quizzes)
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-99", nil)
-		req.SetPathValue("slugID", "quiz-one-99")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if got, want := rec.Code, http.StatusNotFound; got != want {
-			t.Errorf("status code = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("returns 500 on store error", func(t *testing.T) {
-		t.Parallel()
-
-		env := newTestEnv(t)
-		env.closeStore(t)
-
-		handler := HandleQuizGet(env.logger, env.quizzes)
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-1", nil)
-		req.SetPathValue("slugID", "quiz-one-1")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-
-		if got, want := rec.Code, http.StatusInternalServerError; got != want {
-			t.Errorf("status code = %v, want %v", got, want)
-		}
-	})
-}
-
 func TestHandleCreateGame(t *testing.T) {
 	t.Parallel()
 
@@ -983,6 +892,84 @@ func TestHandleAnswerPost(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 409 when the answer window has closed", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "answer-late")
+
+		// Negative reveal delay issues the question already expired (#1163).
+		svc := game.NewService(env.games, env.quizzes, env.logger)
+		svc.SetRevealDelay(-time.Hour)
+
+		g, err := svc.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if _, err := svc.GetNext(t.Context(), g.ID, playerID); err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		questionID, optionID := correctOptionID(t, qz, 0)
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(env.logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodPost,
+			fmt.Sprintf("/api/games/%s/questions/%d/answers", g.ID, questionID),
+			strings.NewReader(fmt.Sprintf(`{"optionId": %d}`, optionID)),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusConflict; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when the question was deleted mid-game", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "answer-qdeleted")
+
+		// Issue the question for real, then submit through a store that
+		// reports it deleted - the mid-game race must 404, not 500 (#1180).
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if _, err := env.service.GetNext(t.Context(), g.ID, playerID); err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		questionID, optionID := correctOptionID(t, qz, 0)
+
+		svc := game.NewService(env.games, deletedQuestionQuizStore{Store: env.quizzes}, env.logger)
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(env.logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodPost,
+			fmt.Sprintf("/api/games/%s/questions/%d/answers", g.ID, questionID),
+			strings.NewReader(fmt.Sprintf(`{"optionId": %d}`, optionID)),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})

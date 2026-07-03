@@ -1,6 +1,7 @@
 package clientapi_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,16 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+// deletedQuestionQuizStore reports every question as deleted, faking the
+// #1180 mid-game delete race a real FK makes otherwise unreachable.
+type deletedQuestionQuizStore struct {
+	quiz.Store
+}
+
+func (deletedQuestionQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, error) {
+	return nil, quiz.ErrQuestionNotFound
+}
 
 // seededAdminID is the id of the admin row inserted by migration
 // 20260111110308_add_admin_player.sql. Quiz fixtures attribute themselves
