@@ -109,6 +109,19 @@ func TestLocale_Integration(t *testing.T) {
 		assertContains(t, body, `window.__I18N__ = {locale: "nl", messages:`)
 		// The merged catalog is injected so the SPA has every key.
 		assertContains(t, body, `"login.submit"`)
+		// Server-rendered static shell text is localized through {{t}}, and the
+		// footer switcher marks the active locale.
+		assertContains(t, body, `Doe mee met een spel`)
+		assertContains(t, body, `data-testid="lang-switcher"`)
+		assertContains(t, body, `href="/lang/en"`)
+	})
+
+	t.Run("solo SPA shell localizes static text to English by default", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/client/", "", nil)
+		assertContains(t, body, `<html lang="en">`)
+		assertContains(t, body, `Browse all quizzes`)
+		assertContains(t, body, `data-testid="lang-switcher"`)
 	})
 
 	t.Run("GET /lang with an invalid locale sets no cookie", func(t *testing.T) {
