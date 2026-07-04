@@ -475,40 +475,32 @@ export class GameApp {
             return;
         }
         this.quizSlugId = this.deepLinkSlugId();
-        this.score = 0;
-        this.roundItem = null;
-        this.roundContinueError = false;
-        this.lastQuestionPosition = 0;
-        try {
-            const data = await gameService.startGame(quizId, true);
-            this.gameId = data.id;
-        } catch (err) {
-            if (err && (err.status === 403 || err.status === 404)) {
-                this.deepLinkUnavailable = true;
-                this.startStateResolved = true;
+        // No Start gesture fires on a preview auto-start, so bootstrapGame
+        // preloads without the loading screen and doesn't tear down audio on a
+        // first-question failure (there is no iOS keep-alive to stop).
+        await this.bootstrapGame({
+            create: async () => {
+                try {
+                    const data = await gameService.startGame(quizId, true);
+                    this.startStateResolved = true;
 
-                return;
-            }
-            console.error('startPreviewGame failed', err);
-            this.startError = "Couldn't start the preview - please refresh and try again.";
-            this.startStateResolved = true;
+                    return data.id;
+                } catch (err) {
+                    if (err && (err.status === 403 || err.status === 404)) {
+                        this.deepLinkUnavailable = true;
+                    } else {
+                        console.error('startPreviewGame failed', err);
+                        this.startError = "Couldn't start the preview - please refresh and try again.";
+                    }
+                    this.startStateResolved = true;
 
-            return;
-        }
-        this.startStateResolved = true;
-        // No Start gesture fires on a preview auto-start, so preload without
-        // the loading screen; the manual play control covers a blocked clip,
-        // as on a mid-game resume.
-        void this.preloadGameAudio({ showLoading: false });
-        try {
-            await this.nextQuestion();
-        } catch (err) {
-            console.error('startPreviewGame: first question fetch failed', err);
-            this.gameId = null;
-            this.question = null;
-            this.roundItem = null;
-            this.startError = "Couldn't start the preview - please refresh and try again.";
-        }
+                    return null;
+                }
+            },
+            failureCopy: "Couldn't start the preview - please refresh and try again.",
+            showAudioLoading: false,
+            tearDownAudioOnFailure: false,
+        });
     }
 
     // slugIdFor returns the `${slug}-${id}` form for the selected quiz, or
@@ -671,6 +663,58 @@ export class GameApp {
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return;
         this.quizSlugId = slugId;
+        // The Start gesture armed the iOS keep-alive, so bootstrapGame preloads
+        // behind the "Loading sounds" state and tears audio down on a
+        // first-question failure; clips re-preload on the next Start.
+        await this.bootstrapGame({
+            create: async () => {
+                if (existing) return existing.gameId;
+                try {
+                    const data = await gameService.startGame(this.selectedQuizId);
+
+                    return data.id;
+                } catch (err) {
+                    // #287: 409 means a game already exists for this
+                    // (player, quiz) pair — usually a two-tab race past
+                    // the checkAlreadyPlayed gate above. Recover by
+                    // re-fetching the existing game so the player still
+                    // gets through; any other error (500, network) gives
+                    // up with a visible startError.
+                    if (err && err.status === 409) {
+                        const recovered = await gameService.getMyGameForQuiz(slugId);
+                        if (!recovered) {
+                            console.error('startGame: 409 with no recoverable game', err);
+                            this.startError = "Couldn't start the quiz — please refresh and try again.";
+
+                            return null;
+                        }
+
+                        return recovered.gameId;
+                    }
+                    console.error('startGame failed', err);
+                    this.startError = "Couldn't start the quiz — please refresh and try again.";
+
+                    return null;
+                }
+            },
+            failureCopy: "Couldn't start the quiz — please refresh and try again.",
+            showAudioLoading: true,
+            tearDownAudioOnFailure: true,
+        });
+    }
+
+    // bootstrapGame runs the shared game-start tail for the normal start and the
+    // owner preview (#1192): reset the per-game state, create the game via the
+    // caller's `create` closure, preload audio, then load the first question.
+    // `create` returns the new game id, or null when it handled its own failure
+    // (a 409 with no recoverable game, or the preview owner/existence gate) and
+    // already set the right UI state -- bootstrap then just aborts. A failed
+    // first /next rolls back to the start screen with `failureCopy` so it can't
+    // freeze the player on "Loading question..." (#1188). `showAudioLoading`
+    // gates the "Loading sounds" screen (and blocks the first question on the
+    // preload); `tearDownAudioOnFailure` stops the iOS keep-alive the Start
+    // gesture armed (the preview auto-start arms none).
+    async bootstrapGame({ create, failureCopy, showAudioLoading, tearDownAudioOnFailure }) {
         this.score = 0;
         // Clear any leftover round-card state from a prior session in
         // the same tab so the gameplay view doesn't render the old
@@ -678,50 +722,31 @@ export class GameApp {
         this.roundItem = null;
         this.roundContinueError = false;
         this.lastQuestionPosition = 0;
-        if (existing) {
-            this.gameId = existing.gameId;
-        } else {
-            try {
-                const data = await gameService.startGame(this.selectedQuizId);
-                this.gameId = data.id;
-            } catch (err) {
-                // #287: 409 means a game already exists for this
-                // (player, quiz) pair — usually a two-tab race past
-                // the checkAlreadyPlayed gate above. Recover by
-                // re-fetching the existing game so the player still
-                // gets through; any other error (500, network) gives
-                // up with a visible startError.
-                if (err && err.status === 409) {
-                    const recovered = await gameService.getMyGameForQuiz(slugId);
-                    if (!recovered) {
-                        console.error('startGame: 409 with no recoverable game', err);
-                        this.startError = "Couldn't start the quiz — please refresh and try again.";
-                        return;
-                    }
-                    this.gameId = recovered.gameId;
-                } else {
-                    console.error('startGame failed', err);
-                    this.startError = "Couldn't start the quiz — please refresh and try again.";
-                    return;
-                }
-            }
-        }
-        // Preload every clip up front (#1088) behind the "Loading sounds" state so
-        // each question plays an already-decoded Howl; the engine's budget keeps a
+
+        const gameId = await create();
+        if (!gameId) return;
+        this.gameId = gameId;
+
+        // Preload every clip up front (#1088). With the loading screen the start
+        // blocks on it so each question plays an already-decoded Howl; without
+        // it (preview / resume) preload runs in the background and the manual
+        // play control covers a blocked clip. The engine's budget keeps a
         // slow/failed clip from hanging the start.
-        await this.preloadGameAudio();
+        if (showAudioLoading) {
+            await this.preloadGameAudio();
+        } else {
+            void this.preloadGameAudio({ showLoading: false });
+        }
+
         try {
             await this.nextQuestion();
         } catch (err) {
-            // Roll back to the start screen with a retry banner so a first-question
-            // /next failure can't freeze the player on "Loading question..." (#1188).
-            console.error('startGame: first question fetch failed', err);
+            console.error('bootstrapGame: first question fetch failed', err);
             this.gameId = null;
             this.question = null;
             this.roundItem = null;
-            this.startError = "Couldn't start the quiz — please refresh and try again.";
-            // Stop the iOS silent keep-alive unlock() started; clips re-preload on the next Start.
-            this.audio.teardown();
+            this.startError = failureCopy;
+            if (tearDownAudioOnFailure) this.audio.teardown();
         }
     }
 
