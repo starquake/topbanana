@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/quiz"
 )
 
 func publishRequest(t *testing.T, method, path string, quizID int64) *http.Request {
@@ -120,8 +122,8 @@ func TestHandleQuizPublishConfirm(t *testing.T) {
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}
-		if got := rr.Body.String(); !strings.Contains(got, "locked from edits") {
-			t.Error("confirm page missing the edit-lock warning")
+		if got, want := rr.Body.String(), "locked from edits"; !strings.Contains(got, want) {
+			t.Errorf("confirm page body = %q, should contain %q", got, want)
 		}
 	})
 
@@ -166,7 +168,7 @@ func TestPublishedQuiz_EditLock(t *testing.T) {
 		}
 	})
 
-	t.Run("delete of a published quiz is blocked", func(t *testing.T) {
+	t.Run("delete of a published quiz is allowed", func(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
@@ -176,17 +178,17 @@ func TestPublishedQuiz_EditLock(t *testing.T) {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, publishRequest(t, http.MethodPost, "/admin/quizzes/1/delete", qz.ID))
 
-		if got, want := rr.Code, http.StatusConflict; got != want {
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Errorf("delete status = %d, want %d", got, want)
 		}
-		if _, err := env.quizzes.GetQuiz(t.Context(), qz.ID); err != nil {
-			t.Errorf("quiz missing after blocked delete: %v", err)
+		_, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("GetQuiz after delete err = %v, want %v", got, want)
 		}
 	})
 }
 
-// noopMediaRemover satisfies admin.QuizMediaRemover for the delete handler;
-// the edit-lock rejects the request before any media removal runs.
+// noopMediaRemover satisfies admin.QuizMediaRemover for the delete handler.
 type noopMediaRemover struct{}
 
 func (noopMediaRemover) RemoveQuizDir(_ int64) error { return nil }

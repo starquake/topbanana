@@ -1223,11 +1223,11 @@ func TestGameplay_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("published quiz delete is blocked by the edit lock", func(t *testing.T) {
-		// #1192: a published quiz that has been played by a real player can no
-		// longer be deleted (delete is a locked content mutation). The route
-		// returns 409 and the quiz stays in the listing. (The FK-cascade delete
-		// path is covered by the store-layer TestQuizStore_DeleteQuiz tests.)
+	t.Run("published quiz delete is allowed", func(t *testing.T) {
+		// #1192: deleting a quiz is removal, not a content edit, so the publish
+		// edit-lock does not apply - an owner/admin can delete a published quiz
+		// even after real plays. The route returns 303 and the quiz drops from
+		// the listing.
 		quizDetailURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID)
 		deleteToken := fetchCSRFToken(ctx, t, adminClient, quizDetailURL)
 
@@ -1246,14 +1246,14 @@ func TestGameplay_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to POST admin delete: %v", err)
 		}
-		if got, want := deleteResp.StatusCode, http.StatusConflict; got != want {
-			t.Fatalf("published quiz delete status = %d, want %d (edit lock)", got, want)
+		if got, want := deleteResp.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("published quiz delete status = %d, want %d", got, want)
 		}
 		if cerr := deleteResp.Body.Close(); cerr != nil {
 			t.Errorf("delete body close err = %v", cerr)
 		}
 
-		// The quiz is still listed: the delete was refused, not performed.
+		// The quiz is gone: the delete was performed.
 		resp := httpGet(ctx, t, client, baseURL+"/api/quizzes")
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("post-delete /api/quizzes status = %d, want %d", got, want)
@@ -1268,8 +1268,8 @@ func TestGameplay_Integration(t *testing.T) {
 		if cerr := resp.Body.Close(); cerr != nil {
 			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
 		}
-		if got, want := len(afterDelete), 1; got != want {
-			t.Errorf("quizzes after refused delete len = %d, want %d (still listed)", got, want)
+		if got, want := len(afterDelete), 0; got != want {
+			t.Errorf("quizzes after delete len = %d, want %d (removed)", got, want)
 		}
 	})
 }

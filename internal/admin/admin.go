@@ -1925,7 +1925,9 @@ func HandleQuizDelete(
 			return
 		}
 
-		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		// Deleting a quiz is removal, not a content edit, so the publish
+		// edit-lock does not apply: an owner/admin can delete a published quiz.
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
