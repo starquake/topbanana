@@ -921,7 +921,7 @@ func validateRegisterInput(loc, displayName, email, password, passwordConfirm st
 	if len(password) < MinPasswordLength {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: localizeCount(loc, "validation.passwordTooShort", MinPasswordLength),
+			ErrMsg: locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength),
 			OK:     false,
 		}
 	}
@@ -931,7 +931,7 @@ func validateRegisterInput(loc, displayName, email, password, passwordConfirm st
 		// user-friendly message.
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: localizeCount(loc, "validation.passwordTooLong", MaxPasswordLength),
+			ErrMsg: locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength),
 			OK:     false,
 		}
 	}
@@ -943,13 +943,6 @@ func validateRegisterInput(loc, displayName, email, password, passwordConfirm st
 	}
 
 	return registerInput{CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail, OK: true}
-}
-
-// localizeCount translates key for loc and fills the {n} placeholder with n.
-// Substituting a token keeps the format string constant, avoiding a
-// non-constant format string that vet flags.
-func localizeCount(loc, key string, n int) string {
-	return strings.ReplaceAll(locale.Translate(loc, key), "{n}", strconv.Itoa(n))
 }
 
 // renderInvalidCredentials re-renders the login form with the generic
@@ -996,9 +989,10 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// Parse-time placeholders; render.Renderer rebinds t/lang per request.
-		"t":    func(string) string { return "" },
-		"lang": func() string { return locale.LocaleEN },
+		// Parse-time placeholders; render.Renderer rebinds t/tCount/lang per request.
+		"t":      func(string) string { return "" },
+		"tCount": func(string, int) string { return "" },
+		"lang":   func() string { return locale.LocaleEN },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
@@ -1034,18 +1028,15 @@ func authPerRequestFuncs(r *http.Request) template.FuncMap {
 	loc := locale.Resolve(r)
 
 	return template.FuncMap{
-		"ogImage":      func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
-		"viewerName":   func() string { return displayName },
-		"isSignedIn":   func() bool { return signedIn },
-		"passwordHelp": func() string { return localizedPasswordHelp(loc) },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
+		"viewerName": func() string { return displayName },
+		"isSignedIn": func() bool { return signedIn },
+		// passwordHelp keeps the {min}/{max} help text bound to the constants.
+		"passwordHelp": func() string {
+			return locale.TranslateWith(loc, "common.passwordHelp", map[string]string{
+				"min": strconv.Itoa(MinPasswordLength),
+				"max": strconv.Itoa(MaxPasswordLength),
+			})
+		},
 	}
-}
-
-// localizedPasswordHelp renders the password length help text for loc,
-// filling the {min}/{max} placeholders so it stays bound to the constants.
-func localizedPasswordHelp(loc string) string {
-	help := locale.Translate(loc, "common.passwordHelp")
-	help = strings.ReplaceAll(help, "{min}", strconv.Itoa(MinPasswordLength))
-
-	return strings.ReplaceAll(help, "{max}", strconv.Itoa(MaxPasswordLength))
 }

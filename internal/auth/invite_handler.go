@@ -250,10 +250,10 @@ func validateAcceptInviteInput(loc, displayName, password, confirm string) (stri
 		return locale.Translate(loc, "validation.displayNameRequired"), false
 	}
 	if len(password) < MinPasswordLength {
-		return localizeCount(loc, "validation.passwordTooShort", MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength), false
 	}
 	if len(password) > MaxPasswordLength {
-		return localizeCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
 	}
 	if password != confirm {
 		return locale.Translate(loc, "validation.passwordsNoMatch"), false

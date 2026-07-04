@@ -176,10 +176,10 @@ func autoLoginAfterReset(
 // text (localized for loc) and false when the input is rejected.
 func validateResetInput(loc, password, confirm string) (string, bool) {
 	if len(password) < MinPasswordLength {
-		return localizeCount(loc, "validation.passwordTooShort", MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength), false
 	}
 	if len(password) > MaxPasswordLength {
-		return localizeCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
 	}
 	if password != confirm {
 		return locale.Translate(loc, "validation.passwordsNoMatch"), false

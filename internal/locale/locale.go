@@ -159,6 +159,23 @@ func Translate(loc, key string) string {
 	return key
 }
 
+// TranslateWith translates key for loc and replaces each {token} placeholder in
+// the message with its value from tokens, so a message can carry dynamic values
+// without a non-constant format string that vet would flag.
+func TranslateWith(loc, key string, tokens map[string]string) string {
+	msg := Translate(loc, key)
+	for token, value := range tokens {
+		msg = strings.ReplaceAll(msg, "{"+token+"}", value)
+	}
+
+	return msg
+}
+
+// TranslateCount translates key for loc and fills its {n} placeholder with n.
+func TranslateCount(loc, key string, n int) string {
+	return TranslateWith(loc, key, map[string]string{"n": strconv.Itoa(n)})
+}
+
 // Messages returns a fresh full message map for loc (English overlaid with the
 // locale's own entries) so every key resolves. The SPA shell path uses the
 // precomputed [MessagesJSON]; this is for callers that need the map itself.

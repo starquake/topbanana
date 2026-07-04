@@ -322,24 +322,15 @@ func profilePerRequestFuncs(r *http.Request) template.FuncMap {
 	loc := locale.Resolve(r)
 
 	return template.FuncMap{
-		"ogImage":      func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
-		"viewerName":   func() string { return displayName },
-		"isSignedIn":   func() bool { return signedIn },
-		"passwordHelp": func() string { return localizedPasswordHelp(loc) },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
+		"viewerName": func() string { return displayName },
+		"isSignedIn": func() bool { return signedIn },
+		// passwordHelp keeps the {min}/{max} help text bound to the constants.
+		"passwordHelp": func() string {
+			return locale.TranslateWith(loc, "common.passwordHelp", map[string]string{
+				"min": strconv.Itoa(auth.MinPasswordLength),
+				"max": strconv.Itoa(auth.MaxPasswordLength),
+			})
+		},
 	}
-}
-
-// localizedPasswordHelp renders the password length help text for loc,
-// filling the {min}/{max} placeholders so it stays bound to the constants.
-func localizedPasswordHelp(loc string) string {
-	help := locale.Translate(loc, "common.passwordHelp")
-	help = strings.ReplaceAll(help, "{min}", strconv.Itoa(auth.MinPasswordLength))
-
-	return strings.ReplaceAll(help, "{max}", strconv.Itoa(auth.MaxPasswordLength))
-}
-
-// localizeCount translates key for loc and fills the {n} placeholder with n,
-// keeping the format string constant so vet does not flag it.
-func localizeCount(loc, key string, n int) string {
-	return strings.ReplaceAll(locale.Translate(loc, key), "{n}", strconv.Itoa(n))
 }

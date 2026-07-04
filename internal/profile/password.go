@@ -169,10 +169,10 @@ func rotateAndRefresh(
 // is rejected.
 func validatePasswordChangeInput(loc, password, confirm string) (string, bool) {
 	if len(password) < auth.MinPasswordLength {
-		return localizeCount(loc, "validation.passwordTooShort", auth.MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", auth.MinPasswordLength), false
 	}
 	if len(password) > auth.MaxPasswordLength {
-		return localizeCount(loc, "validation.passwordTooLong", auth.MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", auth.MaxPasswordLength), false
 	}
 	if password != confirm {
 		return locale.Translate(loc, "validation.passwordsNoMatch"), false
