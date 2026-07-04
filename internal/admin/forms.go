@@ -52,6 +52,10 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	if q.Mode != "" && !quiz.IsValidMode(q.Mode) {
 		problems["mode"] = "Mode must be one of: solo, live"
 	}
+	// Empty is treated as "en" by the store; only flag unrecognised values (#1115).
+	if q.Language != "" && !quiz.IsValidLanguage(q.Language) {
+		problems["language"] = "Language must be one of: en, nl"
+	}
 	addQuestionProblems(ctx, problems, q.Questions)
 	addRoundProblems(ctx, problems, q.Rounds)
 

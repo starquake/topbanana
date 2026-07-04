@@ -2,12 +2,12 @@
 {{if demoMode}}
 <div class="mb-8 rounded-lg border border-accent-line bg-surface px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div class="flex flex-col gap-1">
-        <p class="m-0 text-sm text-text-dim">This is the Top Banana! demo - everything resets daily.</p>
-        <p class="m-0 text-sm text-text-dim">The button signs you in to a shared host account - no sign-up - so you can build and host a quiz.</p>
+        <p class="m-0 text-sm text-text-dim">{{t "home.demoLine1"}}</p>
+        <p class="m-0 text-sm text-text-dim">{{t "home.demoLine2"}}</p>
     </div>
     <form method="POST" action="/demo/enter" class="m-0 shrink-0">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-        <button type="submit" class="btn-primary">Sign in and host a quiz</button>
+        <button type="submit" class="btn-primary">{{t "home.demoButton"}}</button>
     </form>
 </div>
 {{end}}
@@ -19,7 +19,7 @@
             Top<span class="text-accent font-extrabold">Banana</span>!
         </h1>
         <p class="mt-2 max-w-[55ch] text-text-dim text-[0.95rem]">
-            Pick a quiz, race the clock, see who comes out on top.
+            {{t "home.tagline"}}
         </p>
         {{/* Joining a hosted live game needs the /join enter-code screen.
              Surfaced here because the installed PWA opens at this page with
@@ -40,17 +40,17 @@
         <div x-data="resumeSessionCta()" class="flex flex-col items-center gap-2 mt-1">
             <a href="/join" class="btn-primary gap-2" data-testid="home-join-live" x-show="!resumeCode">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
-                <span>Join a live game</span>
+                <span>{{t "home.joinLive"}}</span>
             </a>
             <div x-show="resumeCode" x-cloak class="flex flex-col items-center gap-2">
                 <a :href="'/join/' + resumeCode" class="btn-primary gap-2" data-testid="home-resume-session">
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
-                    <span>Resume session</span>
+                    <span>{{t "home.resumeSession"}}</span>
                 </a>
                 <button type="button"
                         class="bg-transparent border-0 p-0 text-sm text-text-dim underline-offset-2 hover:text-text hover:underline cursor-pointer"
                         data-testid="home-exit-session"
-                        @click="exit()">or exit session</button>
+                        @click="exit()">{{t "home.exitSession"}}</button>
             </div>
         </div>
     </header>
@@ -73,7 +73,7 @@
              and the Newest list stays hidden by its x-cloak rule -
              progressive enhancement, no blank section. */}}
         <section class="md:col-span-2" aria-labelledby="quizzes-heading" x-data="{ tab: 'popular' }">
-            <h2 id="quizzes-heading" class="sr-only">Quizzes</h2>
+            <h2 id="quizzes-heading" class="sr-only">{{t "home.quizzesHeading"}}</h2>
             <div role="tablist" aria-label="Quiz lists" class="flex items-center gap-5 mb-4">
                 {{/* Tabs reuse the old section-heading look (font-display,
                      uppercase, tracked) so the control reads as the section
@@ -84,14 +84,14 @@
                         :aria-selected="tab==='popular' ? 'true' : 'false'"
                         :class="tab==='popular' ? 'text-text border-accent' : 'text-text-dim border-transparent hover:text-text'"
                         class="font-display text-sm font-semibold uppercase tracking-[0.16em] pb-1 border-b-2 transition-colors cursor-pointer">
-                    Popular
+                    {{t "home.tabPopular"}}
                 </button>
                 <button type="button" role="tab" id="tab-newest" aria-controls="panel-newest"
                         @click="tab='newest'"
                         :aria-selected="tab==='newest' ? 'true' : 'false'"
                         :class="tab==='newest' ? 'text-text border-accent' : 'text-text-dim border-transparent hover:text-text'"
                         class="font-display text-sm font-semibold uppercase tracking-[0.16em] pb-1 border-b-2 transition-colors cursor-pointer">
-                    Newest
+                    {{t "home.tabNewest"}}
                 </button>
             </div>
 
@@ -104,7 +104,7 @@
                     </ul>
                 {{else}}
                     <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
-                        <p class="m-0 text-sm">No quizzes have been played yet. Check back soon.</p>
+                        <p class="m-0 text-sm">{{t "home.noPopularQuizzes"}}</p>
                     </div>
                 {{end}}
             </div>
@@ -122,7 +122,7 @@
                     </ul>
                 {{else}}
                     <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
-                        <p class="m-0 text-sm">No quizzes yet.</p>
+                        <p class="m-0 text-sm">{{t "home.noNewestQuizzes"}}</p>
                     </div>
                 {{end}}
             </div>
@@ -133,13 +133,13 @@
                  /quizzes can still list freshly-authored ones that the
                  30-day window hides. */}}
             <div class="mt-6 text-center">
-                <a href="/quizzes" class="inline-block text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Browse all quizzes</a>
+                <a href="/quizzes" class="inline-block text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "home.browseAll"}}</a>
             </div>
         </section>
 
         <aside aria-labelledby="players-heading">
             <h2 id="players-heading" class="font-display text-sm font-semibold uppercase tracking-[0.16em] text-text-dim mb-4">
-                Most active players
+                {{t "home.activePlayers"}}
             </h2>
             {{if .ActivePlayers}}
                 <ol class="bg-surface border border-border-soft rounded-lg divide-y divide-border-soft">
@@ -154,14 +154,14 @@
                                 <span class="font-medium truncate min-w-0">{{$p.DisplayName}}</span>
                             </div>
                             <span class="text-xs text-text-dim shrink-0">
-                                {{$p.FinishedCount}} {{if eq $p.FinishedCount 1}}quiz{{else}}quizzes{{end}}
+                                {{$p.FinishedCount}} {{if eq $p.FinishedCount 1}}{{t "home.quizCountOne"}}{{else}}{{t "home.quizCountMany"}}{{end}}
                             </span>
                         </li>
                     {{end}}
                 </ol>
             {{else}}
                 <div class="border border-dashed border-border rounded-lg p-6 text-center text-text-dim">
-                    <p class="m-0 text-sm">No finishers yet.</p>
+                    <p class="m-0 text-sm">{{t "home.noFinishers"}}</p>
                 </div>
             {{end}}
         </aside>

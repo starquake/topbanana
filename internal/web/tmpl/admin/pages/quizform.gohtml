@@ -144,6 +144,24 @@
             {{end}}
         </div>
 
+        {{$languageErr := index .FieldErrors "language"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="language">
+                Language
+                <span class="label-hint">The language the questions are written in. A label only - it does not translate the quiz or change the player's interface language.</span>
+            </label>
+            <select id="language" name="language"
+                    class="form-input max-w-[260px]{{if $languageErr}} form-input-error{{end}}"
+                    {{if $languageErr}}aria-invalid="true" aria-describedby="language-error"{{end}}>
+                {{range .Quiz.LanguageOptions}}
+                    <option value="{{.}}" {{if eq . $.Quiz.Language}}selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+            {{if $languageErr}}
+                <p id="language-error" class="form-help-error" role="alert">{{$languageErr}}</p>
+            {{end}}
+        </div>
+
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">Save quiz</button>
             <a href="{{if .Quiz.ID}}/admin/quizzes/{{.Quiz.ID}}{{else}}/admin/quizzes{{end}}" class="btn-ghost">Cancel</a>

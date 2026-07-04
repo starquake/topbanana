@@ -207,12 +207,14 @@ func quizFromArchiveManifest(
 		timeLimit = *m.TimeLimitSeconds
 	}
 	qz := &quiz.Quiz{
-		Title:             m.Title,
-		Slug:              slug.Make(m.Title),
-		Description:       m.Description,
-		TimeLimitSeconds:  timeLimit,
-		Visibility:        visibility,
-		Mode:              mode,
+		Title:            m.Title,
+		Slug:             slug.Make(m.Title),
+		Description:      m.Description,
+		TimeLimitSeconds: timeLimit,
+		Visibility:       visibility,
+		Mode:             mode,
+		// Empty (a pre-#1115 archive) maps to LanguageEN in the store.
+		Language:          m.Language,
 		CreatedByPlayerID: creatorID,
 	}
 

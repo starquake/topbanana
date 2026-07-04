@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 )
 
 // Parse parses the shared layout/partial globs (with funcs registered as
@@ -114,7 +115,14 @@ func (re *Renderer) prepare(w http.ResponseWriter, r *http.Request) (*template.T
 	if re.csrf != nil {
 		csrfToken = re.csrf.Token(w, r)
 	}
-	funcs := template.FuncMap{"csrfToken": func() string { return csrfToken }}
+	// t and lang are bound here so every server-rendered surface can localize
+	// text and set <html lang> without wiring the locale itself (#1115).
+	loc := locale.Resolve(r)
+	funcs := template.FuncMap{
+		"csrfToken": func() string { return csrfToken },
+		"t":         func(key string) string { return locale.Translate(loc, key) },
+		"lang":      func() string { return loc },
+	}
 	if re.funcs != nil {
 		maps.Copy(funcs, re.funcs(r))
 	}

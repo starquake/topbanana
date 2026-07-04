@@ -303,6 +303,43 @@ func IsValidMode(m string) bool {
 	return slices.Contains(ModeValues(), m)
 }
 
+// Content languages (#1115): an advisory label recording which language a
+// quiz's questions are written in. It never changes the player's UI language
+// and never filters any list. The DB CHECK on quizzes.language enforces this set.
+const (
+	LanguageEN = "en"
+	LanguageNL = "nl"
+)
+
+// LanguageValues lists the content languages in the admin selector's display
+// order, as a fresh slice callers can range over without sharing a backing array.
+func LanguageValues() []string {
+	return []string{LanguageEN, LanguageNL}
+}
+
+// IsValidLanguage reports whether l is one of the recognised content languages.
+func IsValidLanguage(l string) bool {
+	return slices.Contains(LanguageValues(), l)
+}
+
+// NormalizedFields resolves a quiz's visibility, mode, and language defaults: an
+// empty value maps to public / solo / English. Shared by the store write path
+// and the admin view-model so the defaulting lives in one place.
+func NormalizedFields(qz *Quiz) (visibility, mode, language string) {
+	visibility, mode, language = qz.Visibility, qz.Mode, qz.Language
+	if visibility == "" {
+		visibility = VisibilityPublic
+	}
+	if mode == "" {
+		mode = ModeSolo
+	}
+	if language == "" {
+		language = LanguageEN
+	}
+
+	return visibility, mode, language
+}
+
 // Quiz represents a quiz. CreatedByPlayerID + CreatedByDisplayName were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
@@ -337,6 +374,10 @@ type Quiz struct {
 	// ModeSolo by the store layer so existing fixtures and the
 	// JSON-import path don't need to repeat the default.
 	Mode string
+	// Language is the advisory content-language label (#1115): LanguageEN or
+	// LanguageNL. A zero value (empty string) is treated as LanguageEN by the
+	// store layer so existing fixtures and the JSON-import path skip the default.
+	Language string
 	// PlayCount is the durable hit counter on the quiz row (#891): bumped
 	// once when a play of the quiz completes (the solo path bumps when the
 	// final game_questions row is issued, since that is the moment

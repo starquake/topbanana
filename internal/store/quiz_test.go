@@ -54,6 +54,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 			Visibility:       quiz.VisibilityPublic,
 			Mode:             quiz.ModeSolo,
+			Language:         quiz.LanguageEN,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1-1",
@@ -86,6 +87,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
 			Mode:                 quiz.ModeSolo,
+			Language:             quiz.LanguageEN,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -129,6 +131,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 			Visibility:       quiz.VisibilityPublic,
 			Mode:             quiz.ModeSolo,
+			Language:         quiz.LanguageEN,
 			Questions: []*quiz.Question{
 				{
 					ID:       1,
@@ -163,6 +166,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
 			Mode:                 quiz.ModeSolo,
+			Language:             quiz.LanguageEN,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -283,6 +287,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 			TimeLimitSeconds:     qz.TimeLimitSeconds,
 			Visibility:           qz.Visibility,
 			Mode:                 qz.Mode,
+			Language:             qz.Language,
 		})
 	}
 
@@ -1041,6 +1046,7 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 		TimeLimitSeconds:     originalQuiz.TimeLimitSeconds,
 		Visibility:           originalQuiz.Visibility,
 		Mode:                 originalQuiz.Mode,
+		Language:             originalQuiz.Language,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,
@@ -1104,6 +1110,79 @@ func modeOf(t *testing.T, s *QuizStore, id int64) string {
 	}
 
 	return qz.Mode
+}
+
+func TestQuizStore_QuizLanguage(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("create stores and reads back the language", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		qz.Language = quiz.LanguageNL
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		got, err := quizStore.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := got.Language, quiz.LanguageNL; got != want {
+			t.Errorf("Language = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty language defaults to English", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		qz.Language = ""
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		got, err := quizStore.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := got.Language, quiz.LanguageEN; got != want {
+			t.Errorf("Language = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("update changes the language", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		qz.Language = quiz.LanguageNL
+		if err := quizStore.UpdateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("UpdateQuiz err = %v, want nil", err)
+		}
+
+		got, err := quizStore.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := got.Language, quiz.LanguageNL; got != want {
+			t.Errorf("Language after update = %q, want %q", got, want)
+		}
+	})
 }
 
 func TestQuizStore_SetQuizMode(t *testing.T) {

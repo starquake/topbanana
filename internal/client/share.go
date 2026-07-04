@@ -13,6 +13,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -46,10 +47,16 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 // shellData feeds the index.html template. One title value drives both
 // <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
+//
+// Locale sets <html lang> and window.__I18N__.locale; MessagesJSON is the
+// merged catalog injected as window.__I18N__.messages so the SPA needs no
+// fetch. Both are set by render from the request, not by the per-URL callers.
 type shellData struct {
 	Title               string
 	Description         string
 	RegistrationEnabled bool
+	Locale              string
+	MessagesJSON        template.JS
 }
 
 // Index handles GET /client/{$} - the SPA root with no quiz context. Uses
@@ -123,17 +130,24 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 // without a rebuild. Page loads are infrequent compared to /api/* traffic, so
 // the extra allocation is in the noise.
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name string, data shellData) {
+	loc := locale.Resolve(r)
+	data.Locale = loc
+	data.MessagesJSON = locale.MessagesJSON(loc)
 	funcs := template.FuncMap{
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"envTitleTag": envtag.Get,
+		"t":           func(key string) string { return locale.Translate(loc, key) },
+		"lang":        func() string { return loc },
 	}
 	// partials/ holds the {{define}} blocks shared between index.html (solo) and
 	// join.html (live): round_intro.html ("round-intro-card"), standings_bars.html
-	// ("standings-bars"), and brand_mark.html ("brand-mark"). Parsing them alongside
-	// every shell keeps both able to invoke the partials; a missing or renamed file
-	// fails loudly here rather than rendering a blank surface.
+	// ("standings-bars"), brand_mark.html ("brand-mark"), and lang_switcher.html
+	// ("lang-switcher"). Parsing them alongside every shell keeps both able to
+	// invoke the partials; a missing or renamed file fails loudly here rather than
+	// rendering a blank surface.
 	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name,
-		"partials/round_intro.html", "partials/standings_bars.html", "partials/brand_mark.html")
+		"partials/round_intro.html", "partials/standings_bars.html", "partials/brand_mark.html",
+		"partials/lang_switcher.html")
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "parse shell template", slog.Any("err", err), slog.String("template", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)

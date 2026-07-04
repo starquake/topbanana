@@ -159,6 +159,7 @@ type Quiz struct {
 	Mode              string
 	PlayCount         int64
 	Published         int64
+	Language          string
 }
 
 type Round struct {

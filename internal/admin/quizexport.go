@@ -136,6 +136,7 @@ func (b *manifestBuilder) build(
 		TimeLimitSeconds: timeLimitPtr(qz.TimeLimitSeconds),
 		Visibility:       qz.Visibility,
 		Mode:             qz.Mode,
+		Language:         qz.Language,
 	}
 
 	byRound := make(map[int64][]*quiz.Question, len(rounds))

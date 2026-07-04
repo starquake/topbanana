@@ -112,9 +112,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, published, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode, play_count, published
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, language, published, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode, play_count, published, language
 `
 
 type CreateQuizParams struct {
@@ -125,6 +125,7 @@ type CreateQuizParams struct {
 	TimeLimitSeconds  int64
 	Visibility        string
 	Mode              string
+	Language          string
 	Published         int64
 }
 
@@ -141,6 +142,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		arg.TimeLimitSeconds,
 		arg.Visibility,
 		arg.Mode,
+		arg.Language,
 		arg.Published,
 	)
 	var i Quiz
@@ -157,6 +159,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.Mode,
 		&i.PlayCount,
 		&i.Published,
+		&i.Language,
 	)
 	return i, err
 }
@@ -294,6 +297,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -314,6 +318,7 @@ type GetQuizRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	Language             string
 	PlayCount            int64
 	Published            int64
 	CreatedByDisplayName string
@@ -336,6 +341,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.TimeLimitSeconds,
 		&i.Visibility,
 		&i.Mode,
+		&i.Language,
 		&i.PlayCount,
 		&i.Published,
 		&i.CreatedByDisplayName,
@@ -371,6 +377,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -392,6 +399,7 @@ type ListLiveQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	Language             string
 	PlayCount            int64
 	Published            int64
 	CreatedByDisplayName string
@@ -421,6 +429,7 @@ func (q *Queries) ListLiveQuizzes(ctx context.Context) ([]ListLiveQuizzesRow, er
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.Language,
 			&i.PlayCount,
 			&i.Published,
 			&i.CreatedByDisplayName,
@@ -550,6 +559,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -572,6 +582,7 @@ type ListPublicQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	Language             string
 	PlayCount            int64
 	Published            int64
 	CreatedByDisplayName string
@@ -603,6 +614,7 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.Language,
 			&i.PlayCount,
 			&i.Published,
 			&i.CreatedByDisplayName,
@@ -736,6 +748,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -755,6 +768,7 @@ type ListQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	Language             string
 	PlayCount            int64
 	Published            int64
 	CreatedByDisplayName string
@@ -793,6 +807,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.Language,
 			&i.PlayCount,
 			&i.Published,
 			&i.CreatedByDisplayName,
@@ -1059,6 +1074,7 @@ SET title              = ?,
     time_limit_seconds = ?,
     visibility         = ?,
     mode               = ?,
+    language           = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?
 `
@@ -1070,6 +1086,7 @@ type UpdateQuizParams struct {
 	TimeLimitSeconds int64
 	Visibility       string
 	Mode             string
+	Language         string
 	ID               int64
 }
 
@@ -1081,6 +1098,7 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Res
 		arg.TimeLimitSeconds,
 		arg.Visibility,
 		arg.Mode,
+		arg.Language,
 		arg.ID,
 	)
 }

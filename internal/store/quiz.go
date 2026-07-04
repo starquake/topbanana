@@ -62,6 +62,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			Language:          r.Language,
 			PlayCount:         r.PlayCount,
 			Published:         r.Published != 0,
 			// INNER JOIN on players makes this a plain string (#359);
@@ -98,6 +99,7 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			Language:          r.Language,
 			PlayCount:         r.PlayCount,
 			Published:         r.Published != 0,
 			// INNER JOIN, see ListQuizzes (#359).
@@ -134,6 +136,7 @@ func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			Language:          r.Language,
 			PlayCount:         r.PlayCount,
 			Published:         r.Published != 0,
 			// INNER JOIN, see ListQuizzes (#359).
@@ -199,6 +202,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 		Visibility:        row.Visibility,
 		Mode:              row.Mode,
+		Language:          row.Language,
 		PlayCount:         row.PlayCount,
 		Published:         row.Published != 0,
 		// INNER JOIN, see ListQuizzes (#359).
@@ -794,14 +798,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if timeLimit == 0 {
 		timeLimit = quiz.DefaultTimeLimitSeconds
 	}
-	visibility := qz.Visibility
-	if visibility == "" {
-		visibility = quiz.VisibilityPublic
-	}
-	mode := qz.Mode
-	if mode == "" {
-		mode = quiz.ModeSolo
-	}
+	visibility, mode, language := quiz.NormalizedFields(qz)
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
 		Title:             qz.Title,
 		Slug:              qz.Slug,
@@ -810,6 +807,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		TimeLimitSeconds:  int64(timeLimit),
 		Visibility:        visibility,
 		Mode:              mode,
+		Language:          language,
 		// New quizzes default to draft; seed callers (fixtures, importers) set Published explicitly (#1192).
 		Published: boolToInt64(qz.Published),
 	})
@@ -823,6 +821,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 	qz.Visibility = row.Visibility
 	qz.Mode = row.Mode
+	qz.Language = row.Language
 	qz.PlayCount = row.PlayCount
 	qz.Published = row.Published != 0
 
@@ -915,14 +914,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		return quiz.ErrCannotUpdateQuizWithIDZero
 	}
 
-	visibility := qz.Visibility
-	if visibility == "" {
-		visibility = quiz.VisibilityPublic
-	}
-	mode := qz.Mode
-	if mode == "" {
-		mode = quiz.ModeSolo
-	}
+	visibility, mode, language := quiz.NormalizedFields(qz)
 	var err error
 	timeLimit := qz.TimeLimitSeconds
 	if timeLimit == 0 {
@@ -935,6 +927,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		TimeLimitSeconds: int64(timeLimit),
 		Visibility:       visibility,
 		Mode:             mode,
+		Language:         language,
 		ID:               qz.ID,
 	})
 	if err != nil {

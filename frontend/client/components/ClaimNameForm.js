@@ -17,6 +17,8 @@
 // into a single shared <template>) avoids the awkwardness of sharing
 // reactive input/error state across three separate form instances on
 // the page at once.
+import { t } from '../util/i18n.js';
+
 export function claimNameForm({ initialValue = '', cancelLabel = 'Cancel', submitLabel = 'Save', onSubmit, onCancel } = {}) {
     return {
         displayName: initialValue,
@@ -28,7 +30,7 @@ export function claimNameForm({ initialValue = '', cancelLabel = 'Cancel', submi
             if (this.submitting) return;
             const trimmed = (this.displayName || '').trim();
             if (trimmed === '') {
-                this.error = 'Please enter a name.';
+                this.error = t('claim.enterName');
                 return;
             }
             this.submitting = true;
@@ -36,7 +38,7 @@ export function claimNameForm({ initialValue = '', cancelLabel = 'Cancel', submi
             try {
                 const result = await onSubmit(trimmed);
                 if (!result || !result.ok) {
-                    this.error = (result && result.message) || "Couldn't save your name — try again later.";
+                    this.error = (result && result.message) || t('claim.saveError');
                     return;
                 }
                 // On success the parent component swaps the surrounding

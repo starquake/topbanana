@@ -4,6 +4,8 @@
 // stable, so the component can re-fetch /me any time it wants the
 // latest displayName/isAnonymous/hasCustomName triple.
 
+import { t } from '../util/i18n.js';
+
 // readClaimNameError parses a PATCH /api/players/me error body. The
 // server emits `{code, message}` JSON for the documented error paths
 // (#289). Older / unexpected bodies (plain text from a proxy, an empty
@@ -53,7 +55,7 @@ export class PlayerService {
     async claimName(rawDisplayName) {
         const displayName = (rawDisplayName || '').trim();
         if (displayName === '') {
-            return { ok: false, status: 400, kind: 'empty', message: 'Please enter a name.' };
+            return { ok: false, status: 400, kind: 'empty', message: t('claim.enterName') };
         }
         let response;
         try {
@@ -63,7 +65,7 @@ export class PlayerService {
                 body: JSON.stringify({ displayName })
             });
         } catch {
-            return { ok: false, status: 0, kind: 'error', message: "Couldn't save your name — try again later." };
+            return { ok: false, status: 0, kind: 'error', message: t('claim.saveError') };
         }
         if (response.status === 200) {
             const player = await response.json();
@@ -74,15 +76,15 @@ export class PlayerService {
             if (code === 'already_claimed') {
                 return {
                     ok: false, status: 409, kind: 'already_claimed',
-                    message: message || 'This account already has a name.',
+                    message: message || t('claim.alreadyNamed'),
                 };
             }
-            return { ok: false, status: 409, kind: 'taken', message: 'That name is taken.' };
+            return { ok: false, status: 409, kind: 'taken', message: t('claim.nameTaken') };
         }
         if (response.status === 400) {
-            return { ok: false, status: 400, kind: 'empty', message: 'Please enter a name.' };
+            return { ok: false, status: 400, kind: 'empty', message: t('claim.enterName') };
         }
-        return { ok: false, status: response.status, kind: 'error', message: "Couldn't save your name — try again later." };
+        return { ok: false, status: response.status, kind: 'error', message: t('claim.saveError') };
     }
 }
 

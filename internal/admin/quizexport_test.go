@@ -32,6 +32,7 @@ type exportManifest struct {
 	TimeLimitSeconds *int             `json:"timeLimitSeconds"`
 	Visibility       string           `json:"visibility"`
 	Mode             string           `json:"mode"`
+	Language         string           `json:"language"`
 	Questions        []exportQuestion `json:"questions"`
 	Rounds           []exportRound    `json:"rounds"`
 }
@@ -134,6 +135,7 @@ func roundedQuiz() *quiz.Quiz {
 	qz.Description = "A tour of capitals."
 	qz.TimeLimitSeconds = 12
 	qz.Mode = quiz.ModeLive
+	qz.Language = quiz.LanguageNL
 	qz.Rounds = []*quiz.Round{
 		{
 			Title:   "Warm-up",
@@ -473,6 +475,9 @@ func assertManifestHeader(t *testing.T, manifest exportManifest) {
 	}
 	if got, want := manifest.Mode, quiz.ModeLive; got != want {
 		t.Errorf("Mode = %q, want %q", got, want)
+	}
+	if got, want := manifest.Language, quiz.LanguageNL; got != want {
+		t.Errorf("Language = %q, want %q", got, want)
 	}
 	// A multi-round quiz exports rounds[], not a flat questions[].
 	if len(manifest.Questions) != 0 {

@@ -7,6 +7,7 @@ import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '@shared/share.js';
 import { preloadImage } from '@shared/preloadImage.js';
 import { createAudioEngine, initialMuted, SFX } from '@shared/audioEngine.js';
+import { t } from '../util/i18n.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -471,14 +472,14 @@ export class GameApp {
                         this.deepLinkUnavailable = true;
                     } else {
                         console.error('startPreviewGame failed', err);
-                        this.startError = "Couldn't start the preview - please refresh and try again.";
+                        this.startError = t('play.startPreviewError');
                     }
                     this.startStateResolved = true;
 
                     return null;
                 }
             },
-            failureCopy: "Couldn't start the preview - please refresh and try again.",
+            failureCopy: t('play.startPreviewError'),
             showAudioLoading: false,
             tearDownAudioOnFailure: false,
         });
@@ -511,7 +512,7 @@ export class GameApp {
         const url = new URL(`/play/${quiz.slug}-${quiz.id}`, window.location.origin).href;
         openShareDialog({
             title: quiz.title,
-            text: `Play this quiz: ${quiz.title}`,
+            text: t('play.shareQuizText', { title: quiz.title }),
             url,
         });
     }
@@ -530,7 +531,7 @@ export class GameApp {
         const score = this.scoreFromLeaderboard();
         openShareDialog({
             title,
-            text: `I scored ${score} on ${title} — think you can beat me?`,
+            text: t('play.shareResultText', { score, title }),
             url,
         });
     }
@@ -618,7 +619,7 @@ export class GameApp {
 
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
-            this.startError = "You've already completed this quiz.";
+            this.startError = t('play.alreadyCompleted');
             this.finished = true;
         }
 
@@ -658,7 +659,7 @@ export class GameApp {
                         const recovered = await gameService.getMyGameForQuiz(slugId);
                         if (!recovered) {
                             console.error('startGame: 409 with no recoverable game', err);
-                            this.startError = "Couldn't start the quiz — please refresh and try again.";
+                            this.startError = t('play.startError');
 
                             return null;
                         }
@@ -666,12 +667,12 @@ export class GameApp {
                         return recovered.gameId;
                     }
                     console.error('startGame failed', err);
-                    this.startError = "Couldn't start the quiz — please refresh and try again.";
+                    this.startError = t('play.startError');
 
                     return null;
                 }
             },
-            failureCopy: "Couldn't start the quiz — please refresh and try again.",
+            failureCopy: t('play.startError'),
             showAudioLoading: true,
             tearDownAudioOnFailure: true,
         });

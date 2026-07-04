@@ -1,8 +1,8 @@
 {{define "content"}}
     <div class="auth-shell">
         <header class="mb-8 text-center">
-            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Register</h1>
-            <p class="mt-2 text-text-dim text-[0.95rem]">Sign up with your email and a password to get started.</p>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "register.heading"}}</h1>
+            <p class="mt-2 text-text-dim text-[0.95rem]">{{t "register.subtitle"}}</p>
         </header>
 
         {{if .Message}}
@@ -13,23 +13,23 @@
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
             <div class="form-field">
-                <label for="email" class="label-eyebrow">Email</label>
+                <label for="email" class="label-eyebrow">{{t "common.email"}}</label>
                 <input id="email" name="email" type="email" required
                        autocomplete="email"
                        value="{{.Email}}" class="form-input">
-                <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">Didn't get the verification email?</a></p>
+                <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">{{t "common.noVerificationEmail"}}</a></p>
             </div>
 
             <div class="form-field">
-                <label for="display_name" class="label-eyebrow">Name</label>
+                <label for="display_name" class="label-eyebrow">{{t "register.name"}}</label>
                 <input id="display_name" name="display_name" type="text"
                        autocomplete="nickname"
                        value="{{.DisplayName}}" class="form-input">
-                <p class="mt-2 text-xs text-text-mute">Leave blank to use a generated name.</p>
+                <p class="mt-2 text-xs text-text-mute">{{t "register.nameHint"}}</p>
             </div>
 
             <div class="form-field">
-                <label for="password" class="label-eyebrow">Password</label>
+                <label for="password" class="label-eyebrow">{{t "common.password"}}</label>
                 <input id="password" name="password" type="password" required
                        autocomplete="new-password" minlength="{{passwordMinLength}}"
                        data-password-length="password-length-hint"
@@ -39,7 +39,7 @@
             </div>
 
             <div class="form-field">
-                <label for="password_confirm" class="label-eyebrow">Confirm password</label>
+                <label for="password_confirm" class="label-eyebrow">{{t "register.confirmPassword"}}</label>
                 <input id="password_confirm" name="password_confirm" type="password" required
                        autocomplete="new-password"
                        class="form-input">
@@ -51,8 +51,8 @@
                  the secondary login link. justify-between spreads the
                  pair to the row's edges. */}}
             <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
-                <button type="submit" class="btn-primary">Register</button>
-                <a href="/login" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Have an account? Log in</a>
+                <button type="submit" class="btn-primary">{{t "register.submit"}}</button>
+                <a href="/login" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "register.haveAccount"}}</a>
             </div>
         </form>
 
@@ -64,12 +64,12 @@
                  find-or-link decision tree. */}}
             <div class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.18em] text-text-dim" aria-hidden="true">
                 <span class="h-px flex-1 bg-border-soft"></span>
-                <span>or</span>
+                <span>{{t "common.or"}}</span>
                 <span class="h-px flex-1 bg-border-soft"></span>
             </div>
             <a href="/login/google" class="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-sm bg-surface border border-border-soft text-text hover:bg-surface-alt no-underline">
                 {{template "googleIcon"}}
-                <span class="text-sm font-medium">Sign up with Google</span>
+                <span class="text-sm font-medium">{{t "register.google"}}</span>
             </a>
         {{end}}
     </div>
