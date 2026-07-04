@@ -96,13 +96,14 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 
 // applyQuizOG overrides the share card's title/description with the named
 // quiz's own values, leaving the sitewide defaults in place when the quiz
-// is missing, is a live quiz, or is private. A live quiz is hosted-only
-// (MP-0 / #677): injecting its title/description would leak them into link
-// previews before the hosted game runs, defeating the no-spoiler guarantee.
-// A private quiz is reachable only by signed-in players (#103); the share
-// card is an unauthenticated preview surface with no viewer context, so it
+// is missing, is a live quiz, is private, or is an unpublished draft. A live
+// quiz is hosted-only (MP-0 / #677): injecting its title/description would leak
+// them into link previews before the hosted game runs, defeating the no-spoiler
+// guarantee. A private quiz is reachable only by signed-in players (#103); the
+// share card is an unauthenticated preview surface with no viewer context, so it
 // must not surface a private quiz's title/description to anonymous scrapers
-// (#783). Both keep the default card - a degraded preview, not a 404
+// (#783). A draft is not yet playable (#1192), so it gets the same no-spoiler
+// treatment. All keep the default card - a degraded preview, not a 404
 // (#678), mirroring the missing-quiz fallback.
 func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) {
 	q, err := s.quizStore.GetQuiz(r.Context(), id)
@@ -113,7 +114,7 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 
 		return
 	}
-	if q == nil || q.Mode == quiz.ModeLive || q.Visibility == quiz.VisibilityPrivate {
+	if q == nil || q.Mode == quiz.ModeLive || q.Visibility == quiz.VisibilityPrivate || !q.Published {
 		return
 	}
 
