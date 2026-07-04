@@ -2,6 +2,35 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.7.1 — 2026-07-04
+
+This release fixes scoring, connection recovery, uploads, and account safety, and adds host-facing details on the quiz and upload screens.
+
+### Players
+- A solo answer that arrives after a question's time is up now scores zero.
+- A solo game that cannot load the next question now shows a Retry option instead of freezing, including on the first question.
+- In a live game, the player screen recovers on its own after the connection drops, and shows a connection warning while it is out.
+- The full list of a quiz's questions is no longer available before a timed game starts.
+
+### Hosts
+- The big screen reconnects on its own after its connection drops, instead of staying on "Reconnecting...".
+- Starting a live room before a quiz is assigned is now rejected instead of leaving the room stuck.
+- Once a live game is ended it stays ended; an in-flight update can no longer restart it.
+- A large or slow image or audio upload now finishes and saves once, instead of failing partway and creating a duplicate.
+- A host can no longer change the answer options on another host's quiz.
+- The quiz view shows a media icon and the answer count on each question.
+- The image and audio upload screens show the size and count limits.
+- The admin media library shows each file's original uploaded name as a caption.
+- The sample and field notes on the import screen now match what the importer accepts.
+
+### Behind the scenes
+- New sites keep public registration off unless an operator turns it on.
+- On an instance with no email configured, the password-reset form is no longer offered.
+- Signing in to an account that has not confirmed its email no longer reveals whether the password was correct.
+- Claiming a guest account no longer risks its removal by the inactive-account cleanup.
+- Deleting a quiz now removes its uploaded images and audio from storage.
+- Only trusted pushes to the project can trigger a deployment.
+
 ## v2026.7.0 — 2026-07-02
 
 This release adds recovery controls for interrupted live games and clearer handling of failed images and quiz-list load errors.
