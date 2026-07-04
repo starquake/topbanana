@@ -174,6 +174,21 @@ WHERE gp.player_id = ?
 ORDER BY g.created_at DESC
 LIMIT 1;
 
+-- name: GetRealGameByPlayerAndQuiz :one
+-- Returns the most-recent NON-preview game for the given (player, quiz) pair.
+-- Used by the player-side resume flow (GET /api/quizzes/{slugID}/my-game) so a
+-- stale owner-preview game never surfaces as a resumable real attempt: after an
+-- owner previews a draft and publishes it, the resume probe must skip the
+-- is_preview game so the owner can still record a real scoring run (#1192).
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+  AND g.is_preview = 0
+ORDER BY g.created_at DESC
+LIMIT 1;
+
 -- name: ListQuizIDsForPlayer :many
 -- Lists distinct quiz IDs the given player has joined. The claim-name
 -- flow uses this to know which leaderboard SSE streams to repaint

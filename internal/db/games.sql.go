@@ -387,6 +387,40 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 	return i, err
 }
 
+const getRealGameByPlayerAndQuiz = `-- name: GetRealGameByPlayerAndQuiz :one
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+  AND g.is_preview = 0
+ORDER BY g.created_at DESC
+LIMIT 1
+`
+
+type GetRealGameByPlayerAndQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Returns the most-recent NON-preview game for the given (player, quiz) pair.
+// Used by the player-side resume flow (GET /api/quizzes/{slugID}/my-game) so a
+// stale owner-preview game never surfaces as a resumable real attempt: after an
+// owner previews a draft and publishes it, the resume probe must skip the
+// is_preview game so the owner can still record a real scoring run (#1192).
+func (q *Queries) GetRealGameByPlayerAndQuiz(ctx context.Context, arg GetRealGameByPlayerAndQuizParams) (Game, error) {
+	row := q.db.QueryRowContext(ctx, getRealGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.IsPreview,
+	)
+	return i, err
+}
+
 const listAnswersByGameID = `-- name: ListAnswersByGameID :many
 SELECT id, game_id, player_id, game_question_id, option_id, answered_at
 FROM game_answers

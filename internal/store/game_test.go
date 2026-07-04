@@ -557,6 +557,95 @@ func TestGameStore_GetGameByPlayerAndQuiz(t *testing.T) {
 	})
 }
 
+func TestGameStore_GetRealGameByPlayerAndQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrGameNotFound when player has no game", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		_, err := gameStore.GetRealGameByPlayerAndQuiz(t.Context(), 99, testQuiz.ID)
+		if got, want := err, game.ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("skips a preview game and returns ErrGameNotFound", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-real-preview")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		preview := &game.Game{QuizID: testQuiz.ID, Preview: true}
+		if err = gameStore.CreateGame(t.Context(), preview); err != nil {
+			t.Fatalf("failed to create preview game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: preview.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		_, err = gameStore.GetRealGameByPlayerAndQuiz(t.Context(), player.ID, testQuiz.ID)
+		if got, want := err, game.ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v (preview game must be skipped)", got, want)
+		}
+	})
+
+	t.Run("returns the real game", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-real-game")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		existing, err := gameStore.GetRealGameByPlayerAndQuiz(t.Context(), player.ID, testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := existing.ID, g.ID; got != want {
+			t.Errorf("existing.ID = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 	t.Parallel()
 

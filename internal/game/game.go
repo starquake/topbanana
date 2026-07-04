@@ -313,6 +313,12 @@ type Store interface {
 	// callers can call [Game.IsCompleted]. Returns [ErrGameNotFound] if
 	// the player has no game for the quiz.
 	GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
+	// GetRealGameByPlayerAndQuiz returns the most-recent NON-preview game
+	// played by the given player on the given quiz, with [Game.Questions]
+	// populated so callers can call [Game.IsCompleted]. A stale owner-preview
+	// game is skipped so the resume flow never surfaces it (#1192). Returns
+	// [ErrGameNotFound] if the player has no real game for the quiz.
+	GetRealGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
 	// CreateGame creates a new game.
 	CreateGame(ctx context.Context, g *Game) error
 	// CreateGameAndParticipant inserts a games row + matching

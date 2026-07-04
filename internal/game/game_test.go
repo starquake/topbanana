@@ -26,6 +26,7 @@ type stubStore struct {
 	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
 	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*LeaderboardParticipant, error)
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
+	getRealGameByPlayerAndQuiz         func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
 	markRoundSeen                      func(ctx context.Context, gameID string, roundID int64, phase RoundPhase) error
@@ -50,6 +51,16 @@ func (s stubStore) GetGameByPlayerAndQuiz(
 	}
 
 	return s.getGameByPlayerAndQuiz(ctx, playerID, quizID)
+}
+
+func (s stubStore) GetRealGameByPlayerAndQuiz(
+	ctx context.Context, playerID, quizID int64,
+) (*Game, error) {
+	if s.getRealGameByPlayerAndQuiz == nil {
+		return nil, ErrGameNotFound
+	}
+
+	return s.getRealGameByPlayerAndQuiz(ctx, playerID, quizID)
 }
 func (stubStore) CreateGame(_ context.Context, _ *Game) error { return errStub }
 func (stubStore) CreateGameAndParticipant(_ context.Context, _ *Game, _ *Participant) error {
@@ -205,6 +216,10 @@ func (stubQuizStore) SetQuizPublished(_ context.Context, _ int64, _ bool) error 
 }
 
 func (stubQuizStore) QuizHasRealPlays(_ context.Context, _ int64) (bool, error) {
+	return false, errStub
+}
+
+func (stubQuizStore) UnpublishQuizIfUnplayed(_ context.Context, _ int64) (bool, error) {
 	return false, errStub
 }
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }

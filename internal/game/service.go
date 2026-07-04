@@ -229,7 +229,11 @@ func (s *Service) GetGameForPlayerOnQuiz(ctx context.Context, playerID, quizID i
 		return nil, fmt.Errorf("failed to load quiz for player resume: %w", err)
 	}
 
-	g, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, quizID)
+	// Resume the player's real (non-preview) game only: an owner-preview game
+	// occupies the same UNIQUE(player_id, quiz_id) slot but must never surface
+	// as a resumable attempt, so a player who only previewed a draft gets
+	// ErrGameNotFound and can still start a real run once it is published (#1192).
+	g, err := s.store.GetRealGameByPlayerAndQuiz(ctx, playerID, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load game for player resume: %w", err)
 	}

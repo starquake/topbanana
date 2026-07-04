@@ -155,6 +155,36 @@ func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 		}
 	})
 
+	t.Run("returns ErrGameNotFound when only a preview game exists", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		const playerID = int64(1)
+		if _, err := svc.CreateGame(ctx, draft.ID, playerID, true); err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+
+		// The resume probe must skip the owner-preview game so the owner can
+		// still start a real run once the quiz is published (#1192).
+		_, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, draft.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("returns ErrQuizNotFound when quiz missing", func(t *testing.T) {
 		t.Parallel()
 
