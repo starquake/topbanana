@@ -41,8 +41,8 @@ func redirectTarget(r *http.Request) string {
 	dest := u.EscapedPath()
 	// Require a single-slash-rooted path. A "//host/..." path would be emitted
 	// as a protocol-relative Location and redirect off-site, so reject it (and
-	// any non-rooted value) back to the home page.
-	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+	// any non-rooted value, including an empty path) back to the home page.
+	if !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
 		return rootPath
 	}
 	if u.RawQuery != "" {
