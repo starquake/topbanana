@@ -16,6 +16,7 @@ import (
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
@@ -988,6 +989,10 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
+		// t and lang are rebound per request by render.Renderer; these
+		// parse-time placeholders keep the templates parseable.
+		"t":    func(string) string { return "" },
+		"lang": func() string { return locale.LocaleEN },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},

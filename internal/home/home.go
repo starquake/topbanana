@@ -16,6 +16,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/version"
@@ -265,11 +266,14 @@ func executeTemplate(
 	if rc.viewer != nil {
 		viewerName = rc.viewer.DisplayName
 	}
+	loc := locale.Resolve(r)
 	funcs := template.FuncMap{
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return viewerName },
 		"isSignedIn": func() bool { return rc.viewer != nil },
 		"demoMode":   func() bool { return rc.demoMode },
+		"t":          func(key string) string { return locale.Translate(loc, key) },
+		"lang":       func() string { return loc },
 	}
 	if rc.csrfToken != nil {
 		funcs["csrfToken"] = func() string { return rc.csrfToken(w, r) }
@@ -322,6 +326,10 @@ func parseTemplate(page string) *template.Template {
 		// Rebound per request by executeTemplate from cfg.DemoMode; this
 		// parse-time placeholder keeps the template parseable.
 		"demoMode": func() bool { return false },
+		// t and lang are rebound per request by executeTemplate; these
+		// parse-time placeholders keep the templates parseable.
+		"t":    func(string) string { return "" },
+		"lang": func() string { return locale.LocaleEN },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

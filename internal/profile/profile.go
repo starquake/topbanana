@@ -21,6 +21,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -284,6 +285,12 @@ func parseTemplate(page string) *template.Template {
 		// Placeholder so the shared components glob parses; this surface
 		// does not render quiz_card, which is the only user (#889).
 		"humanizeTime": func(time.Time) string { return "" },
+		// The shared client_footer component uses t/lang (#1115); the profile
+		// surface stays English but parses the components glob, so these
+		// placeholders keep it parseable. render.Renderer rebinds them per
+		// request.
+		"t":    func(string) string { return "" },
+		"lang": func() string { return locale.LocaleEN },
 	}
 
 	return render.Parse(tmpl.FS, funcs, page, "components/*.gohtml", "auth/layouts/*.gohtml")

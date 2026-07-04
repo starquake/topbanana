@@ -20,6 +20,7 @@ import (
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/host"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/mediahttp"
@@ -142,6 +143,11 @@ func addClientAndPublicRoutes(
 	// Public quizzes list (#284). Lists every visible quiz so players
 	// can find ones outside the home page's top-six popular slice.
 	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))
+
+	// UI language switcher (#1115). A plain GET link so the footer switcher
+	// needs no CSRF token; it sets the lang cookie and redirects back. An
+	// invalid locale is ignored.
+	mux.Handle("GET /lang/{locale}", locale.HandleSetLocale())
 }
 
 // addEmailFlowRoutes registers the verify-email and forgot-password
