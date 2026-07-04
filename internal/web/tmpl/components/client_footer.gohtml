@@ -9,6 +9,7 @@
      left-aligned list. From sm: up the three regions split into a
      classic wordmark | account | version row. */}}
 {{define "client_footer"}}
+    {{$loc := lang}}
     <footer class="max-w-shell mx-auto px-5 pt-5 pb-[max(theme(spacing.5),env(safe-area-inset-bottom))] w-full
                    flex flex-col items-center gap-3 text-center text-sm text-text-dim
                    sm:flex-row sm:items-center sm:justify-between sm:text-left sm:py-6 sm:gap-4
@@ -45,6 +46,11 @@
                 <a href="/login" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">{{t "footer.logIn"}}</a>
             {{end}}
             <a href="/admin" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">{{t "footer.manageQuizzes"}}</a>
+            <span class="inline-flex items-center gap-1" aria-label="{{t "lang.switcherLabel"}}" data-testid="lang-switcher">
+                <a href="/lang/en" data-testid="lang-en" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "en"}} text-accent font-semibold{{end}}" {{if eq $loc "en"}}aria-current="true"{{end}}>EN</a>
+                <span aria-hidden="true">/</span>
+                <a href="/lang/nl" data-testid="lang-nl" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "nl"}} text-accent font-semibold{{end}}" {{if eq $loc "nl"}}aria-current="true"{{end}}>NL</a>
+            </span>
         </div>
 
         <span class="text-xs text-text-mute whitespace-nowrap">{{versionLabel}}</span>

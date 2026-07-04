@@ -1,0 +1,18 @@
+{{define "lang-switcher"}}
+<!-- Footer language switcher (#1115) shared by the solo (index.html) and live
+     (join.html) SPA shells. Plain links to /lang/{locale}: the endpoint sets the
+     lang cookie and 303s back to the referring page, so no JS is involved. The
+     active locale is marked aria-current and given the accent treatment; .Locale
+     is the shellData field render resolves per request. -->
+<nav class="mt-10 mb-[max(theme(spacing.5),env(safe-area-inset-bottom))] flex items-center justify-center gap-2 text-sm text-text-dim"
+     aria-label="{{t "lang.switcherLabel"}}"
+     data-testid="lang-switcher">
+    <a href="/lang/en" data-testid="lang-en"
+       class="px-2 py-1 rounded underline-offset-2 hover:text-text hover:underline{{if eq .Locale "en"}} text-accent font-semibold{{end}}"
+       {{if eq .Locale "en"}}aria-current="true"{{end}}>EN</a>
+    <span aria-hidden="true">/</span>
+    <a href="/lang/nl" data-testid="lang-nl"
+       class="px-2 py-1 rounded underline-offset-2 hover:text-text hover:underline{{if eq .Locale "nl"}} text-accent font-semibold{{end}}"
+       {{if eq .Locale "nl"}}aria-current="true"{{end}}>NL</a>
+</nav>
+{{end}}

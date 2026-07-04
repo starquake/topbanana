@@ -122,7 +122,7 @@
                      assertion still holds. -->
                 <template x-if="isAuthenticated()">
                     <p class="m-0 text-sm text-text-dim text-right">
-                        Signed in as
+                        {{t "footer.signedInAs"}}
                         <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
                     </p>
                 </template>
@@ -150,26 +150,26 @@
                          single link covers every enabled method. */}}
                     <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                         <div class="min-w-0">
-                            <p class="label-eyebrow">Playing as</p>
+                            <p class="label-eyebrow">{{t "play.playingAs"}}</p>
                             <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] break-all" x-text="player ? player.displayName : ''"></p>
                         </div>
                         <button class="btn-primary ml-auto" @click="openClaimModal()">
-                            <span x-show="!hasCustomName()">Set your name</span>
-                            <span x-show="hasCustomName()">Change your name</span>
+                            <span x-show="!hasCustomName()">{{t "play.setName"}}</span>
+                            <span x-show="hasCustomName()">{{t "play.changeName"}}</span>
                         </button>
                     </div>
                     {{if .RegistrationEnabled}}
                     <p class="mt-3 text-text-dim text-sm text-right">
-                        Want this name on your other devices?
-                        <a href="/register" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-register">Register</a>
-                        to save it, or
-                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">log in</a>
-                        to an existing account.
+                        {{t "play.claimSyncPrompt"}}
+                        <a href="/register" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-register">{{t "play.register"}}</a>
+                        {{t "play.claimSyncMid"}}
+                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">{{t "play.logInInline"}}</a>
+                        {{t "play.claimSyncEnd"}}
                     </p>
                     {{else}}
                     <p class="mt-3 text-text-dim text-sm text-right">
-                        Already have an account?
-                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">Log in</a>.
+                        {{t "play.haveAccount"}}
+                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">{{t "play.logIn"}}</a>.
                     </p>
                     {{end}}
                 </article>
@@ -182,7 +182,7 @@
                  the start-screen leaderboard hoist (#234). -->
             <template x-if="finished && startStateResolved">
                 <div class="mb-6 flex items-center justify-between gap-3">
-                    <h2 class="m-0 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
+                    <h2 class="m-0 font-display text-2xl font-semibold text-text-dim">{{t "play.gameFinished"}}</h2>
                     {{/* Share button for #176 — opens the dialog with
                          the player's score baked into the message text.
                          Visible only while `finished` is true so the
@@ -193,7 +193,7 @@
                             x-show="quizSlugId"
                             @click="shareCurrentResult()">
                         <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                        <span>Share result</span>
+                        <span>{{t "play.shareResult"}}</span>
                     </button>
                 </div>
             </template>
@@ -215,14 +215,14 @@
                      is up. */}}
                 <template x-if="quizzesError">
                     <div class="feedback-banner feedback-danger mb-6" role="alert" data-testid="quizzes-error">
-                        <p>Couldn't load the quiz list.</p>
+                        <p>{{t "play.quizzesLoadError"}}</p>
                         <button type="button"
                                 class="btn-primary mt-3"
                                 data-testid="quizzes-retry"
                                 :disabled="quizzesRetrying"
                                 @click="retryLoadQuizzes()">
-                            <span x-show="!quizzesRetrying">Retry</span>
-                            <span x-show="quizzesRetrying">Loading...</span>
+                            <span x-show="!quizzesRetrying">{{t "common.retry"}}</span>
+                            <span x-show="quizzesRetrying">{{t "common.loading"}}</span>
                         </button>
                     </div>
                 </template>
@@ -232,7 +232,7 @@
                      the player onto the generic picker with no explanation. */}}
                 <template x-if="deepLinkUnavailable">
                     <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="deep-link-unavailable">
-                        That quiz isn't available.
+                        {{t "play.deepLinkUnavailable"}}
                     </div>
                 </template>
                 {{/* No quiz pre-selected (the bare /client/ entry,
@@ -242,8 +242,8 @@
                      pre-#284 as a placeholder for this dedicated
                      listing page. */}}
                 <div x-show="!deepLinkedQuiz && startStateResolved" class="mb-6 flex flex-col gap-3">
-                    <p class="text-text-dim">Pick a quiz to play:</p>
-                    <a href="/quizzes" class="btn-primary self-start">Browse all quizzes</a>
+                    <p class="text-text-dim">{{t "play.pickQuiz"}}</p>
+                    <a href="/quizzes" class="btn-primary self-start">{{t "play.browseAll"}}</a>
                 </div>
                 <!-- Deep-link title/description, the "already completed"
                      lockout banner, and the Start button all hide on
@@ -271,7 +271,7 @@
                      start which, under row-reverse, is the visual right
                      edge — exactly the cluster we want. */}}
                 <div x-show="!finished && startStateResolved" class="flex flex-row-reverse flex-wrap items-center gap-3">
-                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">{{t "play.startGame"}}</button>
                     {{/* Share button for #176 — invitation form ("Play
                          this quiz: <title>"). Hidden while no quiz is
                          selected (e.g. the empty-quiz-list edge case)
@@ -282,7 +282,7 @@
                             x-show="!!selectedQuizId"
                             @click="shareCurrentQuiz()">
                         <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                        <span>Share</span>
+                        <span>{{t "play.share"}}</span>
                     </button>
                 </div>
 
@@ -298,8 +298,8 @@
                      drops the Start button entirely). */}}
                 <template x-if="deepLinkedQuiz && !finished && startStateResolved">
                     <p class="mt-4 text-sm text-text-dim">
-                        or
-                        <a href="/quizzes" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="browse-quizzes-link">browse all quizzes</a>
+                        {{t "common.or"}}
+                        <a href="/quizzes" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="browse-quizzes-link">{{t "play.browseAllInline"}}</a>
                     </p>
                 </template>
 
@@ -324,14 +324,14 @@
                  navigating away first. */}}
             <template x-if="(!gameId || finished) && leaderboard && startStateResolved">
                 <div class="mb-6" data-testid="leaderboard-section">
-                    <h3 class="label-eyebrow mb-3">Leaderboard</h3>
+                    <h3 class="label-eyebrow mb-3">{{t "leaderboard.heading"}}</h3>
                     <template x-if="leaderboard.entries.length > 0">
                         <table class="player-table">
                             <thead>
                                 <tr>
-                                    <th>Rank</th>
-                                    <th>Player</th>
-                                    <th>Score</th>
+                                    <th>{{t "leaderboard.rank"}}</th>
+                                    <th>{{t "leaderboard.player"}}</th>
+                                    <th>{{t "leaderboard.score"}}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -341,7 +341,7 @@
                                         <td>
                                             <span x-text="entry.displayName"></span>
                                             <template x-if="entry.inProgress">
-                                                <span class="leaderboard-in-progress" role="img" aria-label="Still answering" title="Still answering"></span>
+                                                <span class="leaderboard-in-progress" role="img" aria-label="{{t "leaderboard.stillAnswering"}}" title="{{t "leaderboard.stillAnswering"}}"></span>
                                             </template>
                                         </td>
                                         <td x-text="entry.score"></td>
@@ -351,7 +351,7 @@
                         </table>
                     </template>
                     <template x-if="leaderboard.entries.length === 0">
-                        <p class="text-text-dim">No finishers yet — be the first.</p>
+                        <p class="text-text-dim">{{t "leaderboard.beFirst"}}</p>
                     </template>
                 </div>
             </template>
@@ -363,7 +363,7 @@
                  leaderboard template's so the fresh-finish state
                  (gameId set, finished=true) also gets the fallback. -->
             <template x-if="(!gameId || finished) && quizSlugId && !leaderboard && startStateResolved">
-                <p class="mb-6 text-text-dim">Loading leaderboard...</p>
+                <p class="mb-6 text-text-dim">{{t "leaderboard.loading"}}</p>
             </template>
 
             <!-- Off-leaderboard standing: when the player has a row
@@ -374,13 +374,13 @@
                  screen with nothing to show. See #181. -->
             <template x-if="finished && hasOffLeaderboardStanding() && startStateResolved">
                 <article class="standing-card mb-6">
-                    <p class="label-eyebrow">Your score</p>
+                    <p class="label-eyebrow">{{t "play.yourScoreLabel"}}</p>
                     <p class="text-text text-[1.05rem] leading-relaxed">
-                        Rank
+                        {{t "leaderboard.rank"}}
                         <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.rank"></span>
                         ·
                         <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.score"></span>
-                         points
+                         {{t "play.points"}}
                     </p>
                 </article>
             </template>
@@ -407,16 +407,16 @@
                                  previewing a draft so it is clear the game is
                                  not recording a score. -->
                             <span class="hud-chip text-cyan" x-show="preview" data-testid="preview-banner">
-                                Preview
+                                {{t "play.preview"}}
                             </span>
                             <span class="hud-chip" x-show="question.roundTotal > 0" data-testid="hud-round">
-                                Round <span class="hud-chip-value" x-text="question.roundNumber"></span>/<span class="hud-chip-value" x-text="question.roundTotal"></span>
+                                {{t "hud.round"}} <span class="hud-chip-value" x-text="question.roundNumber"></span>/<span class="hud-chip-value" x-text="question.roundTotal"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-question">
-                                Q <span class="hud-chip-value" x-text="question.roundQuestions > 0 ? question.roundPosition : question.position"></span>/<span class="hud-chip-value" x-text="question.roundQuestions > 0 ? question.roundQuestions : question.total"></span>
+                                {{t "hud.question"}} <span class="hud-chip-value" x-text="question.roundQuestions > 0 ? question.roundPosition : question.position"></span>/<span class="hud-chip-value" x-text="question.roundQuestions > 0 ? question.roundQuestions : question.total"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-score">
-                                Score <span class="hud-chip-value" x-text="score"></span>
+                                {{t "hud.score"}} <span class="hud-chip-value" x-text="score"></span>
                             </span>
                         </div>
                         <!-- The progress bar carries TWO phases for each
@@ -445,7 +445,7 @@
                         <p class="sr-only" role="status" aria-live="assertive"
                            data-testid="reveal-verdict"
                            x-show="!!feedback"
-                           x-text="feedback ? (feedback.correct ? 'Correct!' : (feedback.timedOut ? 'Time up' : 'Not quite')) : ''"></p>
+                           x-text="feedback ? (feedback.correct ? $t('verdict.correct') : (feedback.timedOut ? $t('verdict.timeUp') : $t('verdict.notQuite'))) : ''"></p>
 
                         <!-- The attached image sits centered in the flexible space
                              between the question and the buttons. The flex-1 spacer
@@ -465,7 +465,7 @@
                                     <div x-show="imageError"
                                          data-testid="question-image-placeholder"
                                          class="flex items-center justify-center px-6 py-8 rounded-lg border border-dashed border-border bg-surface text-text-dim text-sm">
-                                        Image unavailable
+                                        {{t "play.imageUnavailable"}}
                                     </div>
                                 </div>
                             </template>
@@ -481,15 +481,15 @@
                                         class="btn-ghost gap-2"
                                         data-testid="audio-mute"
                                         :aria-pressed="audioMuted ? 'true' : 'false'"
-                                        :aria-label="audioMuted ? 'Unmute audio' : 'Mute audio'"
+                                        :aria-label="audioMuted ? $t('audio.unmuteLabel') : $t('audio.muteLabel')"
                                         @click="toggleMute()"
-                                        x-text="audioMuted ? 'Unmute' : 'Mute'"></button>
+                                        x-text="audioMuted ? $t('audio.unmute') : $t('audio.mute')"></button>
                                 <button type="button"
                                         class="btn-ghost gap-2"
                                         data-testid="audio-replay"
-                                        aria-label="Replay audio"
+                                        :aria-label="$t('audio.replay')"
                                         @click="replayAudio()"
-                                        x-text="audioBlocked ? 'Play audio' : 'Replay audio'"></button>
+                                        x-text="audioBlocked ? $t('audio.play') : $t('audio.replay')"></button>
                             </div>
                         </template>
 
@@ -500,7 +500,7 @@
                         <div x-show="submitError && !feedback"
                              role="alert"
                              class="feedback-banner feedback-danger mb-3">
-                            Couldn't submit your answer — please try again.
+                            {{t "play.submitError"}}
                         </div>
 
                         <!-- Advance-retry banner (#1166): shown when the
@@ -514,13 +514,13 @@
                              role="alert"
                              data-testid="advance-error"
                              class="feedback-banner feedback-danger mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <span>Couldn't load the next question — please try again.</span>
+                            <span>{{t "play.advanceError"}}</span>
                             <button type="button"
                                     class="btn-ghost shrink-0 self-start sm:self-auto"
                                     data-testid="advance-retry"
                                     :disabled="advancing"
                                     @click="retryAdvance()"
-                                    x-text="advancing ? 'Loading...' : 'Retry'"></button>
+                                    x-text="advancing ? $t('common.loading') : $t('common.retry')"></button>
                         </div>
 
                         <!-- 2x2 grid that matches the live answer pad and the
@@ -560,11 +560,11 @@
                         <div class="flex justify-end gap-2 mb-2 lg:mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
-                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
+                                    {{t "hud.question"}} <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
                                 </span>
                             </template>
                             <span class="hud-chip">
-                                Score <span class="hud-chip-value" x-text="score"></span>
+                                {{t "hud.score"}} <span class="hud-chip-value" x-text="score"></span>
                             </span>
                         </div>
 
@@ -594,7 +594,7 @@
                         <div x-show="roundContinueError"
                              role="alert"
                              class="feedback-banner feedback-danger mb-3 mt-auto">
-                            Couldn't continue — please try again.
+                            {{t "play.continueError"}}
                         </div>
 
                         <!-- The round card auto-advances when its countdown
@@ -609,8 +609,8 @@
                                 :disabled="continuingRound"
                                 data-testid="round-continue"
                                 @click="continueRound()">
-                            <span x-show="!continuingRound">Continue</span>
-                            <span x-show="continuingRound">Loading...</span>
+                            <span x-show="!continuingRound">{{t "common.continue"}}</span>
+                            <span x-show="continuingRound">{{t "common.loading"}}</span>
                         </button>
                     </div>
                 </template>
@@ -629,11 +629,11 @@
                         <div class="flex justify-end gap-2 mb-2 lg:mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
-                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
+                                    {{t "hud.question"}} <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
                                 </span>
                             </template>
                             <span class="hud-chip">
-                                Score <span class="hud-chip-value" x-text="score"></span>
+                                {{t "hud.score"}} <span class="hud-chip-value" x-text="score"></span>
                             </span>
                         </div>
 
@@ -660,24 +660,21 @@
                         <p class="mb-2 text-center font-display font-semibold text-accent
                                   text-[clamp(1.6rem,4vw,2.6rem)]"
                            data-testid="round-recap-score"
-                           data-recap-figure>
-                            You scored <span x-text="roundItem.roundScore"></span> this round
-                        </p>
+                           data-recap-figure
+                           x-text="$t('play.roundScored', { score: roundItem.roundScore })"></p>
                         <p class="mb-8 font-display leading-snug text-text text-center
                                   text-[clamp(1rem,3vw,1.5rem)]
                                   lg:text-[clamp(1.25rem,2.5vw,2rem)]"
                            data-testid="round-recap-correct"
-                           data-recap-figure>
-                            <span x-text="roundItem.roundCorrect"></span> of <span x-text="roundItem.roundQuestions"></span> correct
-                        </p>
+                           data-recap-figure
+                           x-text="$t('play.roundCorrect', { correct: roundItem.roundCorrect, total: roundItem.roundQuestions })"></p>
 
                         <!-- Running game total beneath the round result. -->
                         <p class="mb-8 text-center font-display font-semibold text-text
                                   text-[clamp(1.2rem,3vw,1.8rem)]"
                            data-testid="round-score"
-                           data-recap-figure>
-                            Your score: <span x-text="roundItem.score"></span>
-                        </p>
+                           data-recap-figure
+                           x-text="$t('play.roundTotal', { score: roundItem.score })"></p>
 
                         <!-- Retry banner mirrors the answer-submit one
                              (#179): a transient POST failure leaves the
@@ -686,7 +683,7 @@
                         <div x-show="roundContinueError"
                              role="alert"
                              class="feedback-banner feedback-danger mb-3 mt-auto">
-                            Couldn't continue — please try again.
+                            {{t "play.continueError"}}
                         </div>
 
                         <!-- The round card auto-advances when its countdown
@@ -701,8 +698,8 @@
                                 :disabled="continuingRound"
                                 data-testid="round-continue"
                                 @click="continueRound()">
-                            <span x-show="!continuingRound">Continue</span>
-                            <span x-show="continuingRound">Loading...</span>
+                            <span x-show="!continuingRound">{{t "common.continue"}}</span>
+                            <span x-show="continuingRound">{{t "common.loading"}}</span>
                         </button>
                     </div>
                 </template>
@@ -713,7 +710,7 @@
                 <template x-if="!question && !roundItem">
                     <p class="text-text-dim"
                        data-testid="audio-loading"
-                       x-text="audioLoading ? 'Loading sounds...' : 'Loading question...'"></p>
+                       x-text="audioLoading ? $t('play.loadingSounds') : $t('play.loadingQuestion')"></p>
                 </template>
             </div>
 
@@ -733,21 +730,21 @@
                     <div class="relative w-full max-w-[480px] mx-auto mt-4 sm:mt-0 bg-surface border border-accent-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
                          style="max-height: calc(var(--visual-viewport-height, 100svh) - 2rem)"
                          x-data="claimNameForm({
-                                submitLabel: 'Save',
-                                cancelLabel: 'Cancel',
+                                submitLabel: $t('claim.save'),
+                                cancelLabel: $t('common.cancel'),
                                 initialValue: hasCustomName() ? player.displayName : '',
                                 onSubmit: (name) => claimFromModal(name),
                                 onCancel: () => closeClaimModal(),
                              })">
                         <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                            <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]" id="claim-modal-title">Pick a display name</p>
+                            <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]" id="claim-modal-title">{{t "claim.title"}}</p>
                             <button class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer disabled:opacity-40"
-                                    aria-label="close" @click="cancel()" :disabled="submitting">&times;</button>
+                                    aria-label="{{t "common.close"}}" @click="cancel()" :disabled="submitting">&times;</button>
                         </header>
                         <section class="px-6 py-5 text-[0.95rem] flex-1 overflow-auto">
-                            <p class="mb-3 text-text-dim">This is the name that will appear on the leaderboard.</p>
+                            <p class="mb-3 text-text-dim">{{t "claim.help"}}</p>
                             <div>
-                                <label class="label-eyebrow" for="claim-name-modal">Display name</label>
+                                <label class="label-eyebrow" for="claim-name-modal">{{t "claim.displayName"}}</label>
                                 <input id="claim-name-modal" type="text" class="form-input"
                                        maxlength="64" autocomplete="off"
                                        data-autofocus
@@ -767,11 +764,20 @@
                             <button class="btn-primary"
                                     @click="submit()"
                                     :disabled="submitting"
-                                    x-text="submitting ? 'Saving...' : submitLabel"></button>
+                                    x-text="submitting ? $t('claim.saving') : submitLabel"></button>
                         </footer>
                     </div>
                 </div>
             </template>
+
+            <!-- Footer language switcher (#1115). Hidden during an active solo
+                 question (same gate as the header, #253) so it does not add
+                 height below the viewport-filling game view and push the answer
+                 buttons off screen; still reachable on the start screen, the
+                 leaderboard, and every round-boundary card. -->
+            <div x-show="!(gameId && !finished)">
+                {{template "lang-switcher" .}}
+            </div>
         </div>
     </main>
 </body>

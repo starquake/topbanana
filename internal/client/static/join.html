@@ -99,7 +99,7 @@
                      header already drops it during a live question (#253). -->
                 <template x-if="isAuthenticated()">
                     <p class="m-0 text-sm text-text-dim text-right">
-                        Signed in as
+                        {{t "footer.signedInAs"}}
                         <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
                     </p>
                 </template>
@@ -107,11 +107,11 @@
 
             <!-- Enter-code step: typed-code form for a PC join (no QR). -->
             <div x-show="step === 'code'">
-                <h2 class="mb-2 font-display text-2xl font-semibold text-text">Join a game</h2>
-                <p class="mb-6 text-text-dim">Enter the room code shown on the screen.</p>
+                <h2 class="mb-2 font-display text-2xl font-semibold text-text">{{t "join.heading"}}</h2>
+                <p class="mb-6 text-text-dim">{{t "join.enterCodePrompt"}}</p>
                 <form @submit.prevent="submitCode()" class="flex flex-col gap-4">
                     <div>
-                        <label class="label-eyebrow" for="join-code">Room code</label>
+                        <label class="label-eyebrow" for="join-code">{{t "join.roomCode"}}</label>
                         <!-- maxlength must track the server room-code length
                              (joinCodeLength=6 in internal/livesession/joincode.go).
                              If the server mints longer codes this hard limit
@@ -127,19 +127,19 @@
                     <template x-if="error">
                         <div class="feedback-banner feedback-danger" x-text="error"></div>
                     </template>
-                    <button type="submit" class="btn-primary self-start" data-testid="join-code-submit">Continue</button>
+                    <button type="submit" class="btn-primary self-start" data-testid="join-code-submit">{{t "common.continue"}}</button>
                 </form>
             </div>
 
             <!-- Name step: pick a display name, then join. -->
             <div x-show="step === 'name'">
                 <h2 class="mb-2 font-display text-2xl font-semibold text-text">
-                    Joining <span class="font-mono text-accent" x-text="code"></span>
+                    {{t "join.joiningPrefix"}} <span class="font-mono text-accent" x-text="code"></span>
                 </h2>
-                <p class="mb-6 text-text-dim">Pick a name everyone will see in the lobby.</p>
+                <p class="mb-6 text-text-dim">{{t "join.namePrompt"}}</p>
                 <form @submit.prevent="submitName()" class="flex flex-col gap-4">
                     <div>
-                        <label class="label-eyebrow" for="join-name">Display name</label>
+                        <label class="label-eyebrow" for="join-name">{{t "claim.displayName"}}</label>
                         <input id="join-name" type="text" class="form-input"
                                maxlength="64" autocomplete="off" autofocus
                                data-testid="join-name-input"
@@ -152,7 +152,7 @@
                     <button type="submit" class="btn-primary self-start"
                             data-testid="join-name-submit"
                             :disabled="busy"
-                            x-text="busy ? 'Joining...' : 'Join game'"></button>
+                            x-text="busy ? $t('join.joiningBusy') : $t('join.joinGame')"></button>
                 </form>
                 <!-- Sign-in affordance (#865): the login deep-link return
                      (/login?next=/join/{code} -> 303 back) lands the player back
@@ -161,10 +161,10 @@
                      never reaches the name form. -->
                 <template x-if="!isAuthenticated()">
                     <p class="mt-3 text-sm text-text-dim text-right">
-                        Already have an account?
+                        {{t "join.haveAccount"}}
                         <a :href="'/login?next=' + encodeURIComponent('/join/' + code)"
                            class="text-text hover:text-accent underline-offset-2 hover:underline"
-                           data-testid="join-name-signin">Sign in</a>.
+                           data-testid="join-name-signin">{{t "join.signIn"}}</a>.
                     </p>
                 </template>
             </div>
@@ -177,7 +177,7 @@
                 <template x-if="sessionClosed">
                     <div class="feedback-banner feedback-danger mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                          role="alert" data-testid="lobby-closed">
-                        <span>This game is no longer available.</span>
+                        <span>{{t "join.sessionClosed"}}</span>
                         <!-- The session is gone (host ended it, it expired, or
                              the player was removed), so re-joining the same code
                              would not work; the actionable next step is back to
@@ -186,7 +186,7 @@
                              /join shows a fresh enter-code form. -->
                         <a href="/join"
                            class="btn-primary shrink-0 self-start sm:self-auto"
-                           data-testid="lobby-closed-back">Back to join</a>
+                           data-testid="lobby-closed-back">{{t "join.backToJoin"}}</a>
                     </div>
                 </template>
 
@@ -199,7 +199,7 @@
                 <template x-if="!sessionClosed && connectionTrouble">
                     <div class="feedback-banner feedback-danger mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                          role="status" data-testid="connection-trouble">
-                        <span>Connection problem, retrying...</span>
+                        <span>{{t "join.connectionTrouble"}}</span>
                         <!-- The automatic retry runs off every SSE tick and
                              foreground return, but a wedged connection can sit
                              with no tick; this control forces an immediate
@@ -210,7 +210,7 @@
                                 data-testid="reconnect-now"
                                 :disabled="reconnecting"
                                 @click="reconnectNow()"
-                                x-text="reconnecting ? 'Reconnecting...' : 'Reconnect now'"></button>
+                                x-text="reconnecting ? $t('join.reconnecting') : $t('join.reconnectNow')"></button>
                     </div>
                 </template>
 
@@ -227,14 +227,14 @@
                                 data-testid="lobby-quiz-title"
                                 x-text="lobbyTitle()"></h2>
                             <p class="mt-2 text-text-dim">
-                                Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
+                                {{t "join.room"}} <span class="font-mono text-accent" x-text="state.joinCode"></span>
                                 <span class="mx-1">&middot;</span>
-                                Playing as <span class="text-text" x-text="myDisplayName"></span>
+                                {{t "join.playingAs"}} <span class="text-text" x-text="myDisplayName"></span>
                             </p>
                         </div>
 
                         <h3 class="label-eyebrow mb-3">
-                            Players
+                            {{t "join.players"}}
                             (<span x-text="state.players.length"></span>)
                         </h3>
                         <ul class="mb-6 flex flex-col gap-2" data-testid="lobby-roster">
@@ -246,15 +246,15 @@
                                     <span class="flex items-center gap-2 min-w-0">
                                         <span class="truncate" x-text="player.displayName"></span>
                                         <template x-if="isHost(player)">
-                                            <span class="hud-chip shrink-0">Host</span>
+                                            <span class="hud-chip shrink-0">{{t "join.host"}}</span>
                                         </template>
                                         <template x-if="isMe(player)">
-                                            <span class="hud-chip shrink-0">You</span>
+                                            <span class="hud-chip shrink-0">{{t "join.you"}}</span>
                                         </template>
                                     </span>
                                     <span class="shrink-0 text-sm"
                                           :class="player.isReady ? 'text-cyan' : 'text-text-dim'"
-                                          x-text="player.isReady ? 'Ready' : 'Not ready'"></span>
+                                          x-text="player.isReady ? $t('join.ready') : $t('join.notReady')"></span>
                                 </li>
                             </template>
                         </ul>
@@ -279,7 +279,7 @@
                              the latter on the host to start the queued game. -->
                         <template x-if="!startArmed()">
                             <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint"
-                               x-text="lobbyHasQuiz() ? 'Waiting for the host to start the game...' : 'Waiting for the host to start a quiz...'"></p>
+                               x-text="lobbyHasQuiz() ? $t('join.waitingStartGame') : $t('join.waitingStartQuiz')"></p>
                         </template>
 
                         <button type="button"
@@ -288,8 +288,8 @@
                                 :data-ready="isReady ? 'true' : 'false'"
                                 :disabled="busy"
                                 @click="toggleReady()">
-                            <span x-show="!isReady">I'm ready</span>
-                            <span x-show="isReady">Not ready</span>
+                            <span x-show="!isReady">{{t "join.imReady"}}</span>
+                            <span x-show="isReady">{{t "join.notReady"}}</span>
                         </button>
 
                         <!-- Exit session (#888). Quiet text link so it doesn't
@@ -300,7 +300,7 @@
                             <button type="button"
                                     class="bg-transparent border-0 p-0 text-sm text-text-dim underline-offset-2 hover:text-text hover:underline cursor-pointer"
                                     data-testid="exit-session-open"
-                                    @click="exitConfirmOpen = true">Exit session</button>
+                                    @click="exitConfirmOpen = true">{{t "join.exitSession"}}</button>
                         </div>
                     </div>
                 </template>
@@ -328,13 +328,13 @@
                              state.self.score. -->
                         <div class="flex justify-end gap-2 mb-4">
                             <span class="hud-chip" x-show="state.question.roundTotal > 0" data-testid="hud-round">
-                                Round <span class="hud-chip-value" x-text="state.question.roundNumber"></span>/<span class="hud-chip-value" x-text="state.question.roundTotal"></span>
+                                {{t "hud.round"}} <span class="hud-chip-value" x-text="state.question.roundNumber"></span>/<span class="hud-chip-value" x-text="state.question.roundTotal"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-question">
-                                Q <span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundPosition : state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundQuestions : state.question.total"></span>
+                                {{t "hud.question"}} <span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundPosition : state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundQuestions : state.question.total"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-score">
-                                Score <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
+                                {{t "hud.score"}} <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
                             </span>
                         </div>
 
@@ -349,12 +349,12 @@
                         <!-- The live phone is an answer pad; the question text
                              and any media live on the shared big screen. -->
                         <p class="text-center text-text-dim" data-testid="big-screen-hint">
-                            Look at the big screen for the question.
+                            {{t "join.bigScreenHint"}}
                         </p>
 
                         <template x-if="answerError">
                             <div class="feedback-banner feedback-danger mb-4" role="alert" data-testid="answer-error">
-                                Couldn't submit your answer - tap again to retry.
+                                {{t "join.answerError"}}
                             </div>
                         </template>
 
@@ -367,7 +367,7 @@
                                  the big screen) before the answer window opens.
                                  JoinApp flips `revealing` off when it elapses. -->
                             <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
-                                Get ready
+                                {{t "join.getReady"}}
                             </p>
 
                             <div x-show="!revealing" class="answer-pad" data-testid="question-options">
@@ -386,7 +386,7 @@
                                  answered state visually. -->
                             <template x-if="hasAnswered()">
                                 <p class="sr-only" role="status" data-testid="answered-waiting">
-                                    Answer locked in - waiting for everyone else...
+                                    {{t "join.answerLocked"}}
                                 </p>
                             </template>
                         </div>
@@ -399,18 +399,18 @@
                     <div data-testid="reveal-view" class="flex flex-col game-fill">
                         <div class="flex justify-end gap-2 mb-4">
                             <span class="hud-chip" x-show="state.question.roundTotal > 0" data-testid="hud-round">
-                                Round <span class="hud-chip-value" x-text="state.question.roundNumber"></span>/<span class="hud-chip-value" x-text="state.question.roundTotal"></span>
+                                {{t "hud.round"}} <span class="hud-chip-value" x-text="state.question.roundNumber"></span>/<span class="hud-chip-value" x-text="state.question.roundTotal"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-question">
-                                Q <span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundPosition : state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundQuestions : state.question.total"></span>
+                                {{t "hud.question"}} <span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundPosition : state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.roundQuestions > 0 ? state.question.roundQuestions : state.question.total"></span>
                             </span>
                             <span class="hud-chip" data-testid="hud-score">
-                                Score <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
+                                {{t "hud.score"}} <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
                             </span>
                         </div>
 
                         <p class="label-eyebrow mb-6" data-testid="reveal-verdict"
-                           x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
+                           x-text="pickWasCorrect() ? $t('verdict.correct') : (hasAnswered() ? $t('verdict.notQuite') : $t('verdict.timeUp'))"></p>
 
                         <div class="answer-pad mt-auto" data-testid="reveal-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">
@@ -448,8 +448,8 @@
                     <!-- round_results: a between-rounds screen, more to come. -->
                     <template x-if="state && state.phase === 'round_results'">
                         <div data-testid="round-results">
-                            <p class="label-eyebrow">Round complete</p>
-                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Scores are in</h2>
+                            <p class="label-eyebrow">{{t "join.roundComplete"}}</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">{{t "join.scoresIn"}}</h2>
                         </div>
                     </template>
 
@@ -463,8 +463,8 @@
                          player into game 2 without re-entering a code. -->
                     <template x-if="state && state.phase === 'intermission'">
                         <div data-testid="intermission-view">
-                            <p class="label-eyebrow">Game over</p>
-                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                            <p class="label-eyebrow">{{t "join.gameOver"}}</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">{{t "join.finalStandings"}}</h2>
                         </div>
                     </template>
 
@@ -475,28 +475,28 @@
                          width straight away (no grow animation). -->
                     <template x-if="state && state.phase === 'finished'">
                         <div data-testid="finished-view">
-                            <p class="label-eyebrow">Game over</p>
-                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                            <p class="label-eyebrow">{{t "join.gameOver"}}</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">{{t "join.finalStandings"}}</h2>
                         </div>
                     </template>
 
                     {{template "standings-bars" .}}
 
                     <template x-if="state && state.phase === 'round_results'">
-                        <p class="mt-6 text-text-dim">The next round is coming up.</p>
+                        <p class="mt-6 text-text-dim">{{t "join.nextRoundComing"}}</p>
                     </template>
                     <template x-if="state && state.phase === 'intermission'">
                         <p class="mt-6 text-text-dim" data-testid="intermission-waiting">
-                            Waiting for the host to start the next quiz...
+                            {{t "join.waitingNextQuiz"}}
                         </p>
                     </template>
                     <template x-if="state && state.phase === 'finished'">
-                        <p class="mt-6 text-text-dim">Thanks for playing!</p>
+                        <p class="mt-6 text-text-dim">{{t "join.thanksForPlaying"}}</p>
                     </template>
                 </div>
 
                 <template x-if="!sessionClosed && !state">
-                    <p class="text-text-dim">Loading lobby...</p>
+                    <p class="text-text-dim">{{t "join.loadingLobby"}}</p>
                 </template>
 
                 <!-- Exit-session confirm modal (#888). Same destructive-confirm
@@ -515,31 +515,39 @@
                     <div class="absolute inset-0" @click="exitConfirmOpen = false"></div>
                     <div class="relative w-full max-w-[420px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                         <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                            <p id="exit-session-title" class="m-0 font-display text-sm font-semibold uppercase tracking-[0.14em]">Exit session?</p>
+                            <p id="exit-session-title" class="m-0 font-display text-sm font-semibold uppercase tracking-[0.14em]">{{t "join.exitConfirmTitle"}}</p>
                             <button type="button"
-                                    aria-label="close"
+                                    aria-label="{{t "common.close"}}"
                                     class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer"
                                     @click="exitConfirmOpen = false">&times;</button>
                         </header>
                         <section class="px-6 py-5 text-[0.95rem]">
-                            You will drop out of the lobby and your roster row will be removed. You can rejoin with the same code.
+                            {{t "join.exitConfirmBody"}}
                         </section>
                         <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                             <button type="button"
                                     class="btn-ghost"
                                     data-autofocus
-                                    @click="exitConfirmOpen = false">Cancel</button>
+                                    @click="exitConfirmOpen = false">{{t "common.cancel"}}</button>
                             <button type="button"
                                     class="btn-danger"
                                     data-testid="exit-session-confirm"
                                     :disabled="exiting"
                                     @click="exitSession()">
-                                <span x-show="!exiting">Exit session</span>
-                                <span x-show="exiting">Exiting...</span>
+                                <span x-show="!exiting">{{t "join.exitSession"}}</span>
+                                <span x-show="exiting">{{t "join.exiting"}}</span>
                             </button>
                         </footer>
                     </div>
                 </div>
+            </div>
+
+            <!-- Footer language switcher (#1115). Hidden during an active live
+                 question / reveal (same gate as the header, #253) so it does not
+                 add height below the viewport-filling answer pad; still reachable
+                 on the enter-code, name, lobby, round, and standings screens. -->
+            <div x-show="!inActiveQuestion()">
+                {{template "lang-switcher" .}}
             </div>
         </div>
     </main>
