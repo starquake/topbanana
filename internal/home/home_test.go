@@ -61,6 +61,7 @@ func createQuiz(t *testing.T, quizzes quiz.Store, title, slug, desc string, ques
 		Description:       desc,
 		CreatedByPlayerID: seededAdminID,
 		Visibility:        quiz.VisibilityPublic,
+		Published:         true,
 		Questions:         questions,
 	}
 	if err := quizzes.CreateQuiz(t.Context(), qz); err != nil {

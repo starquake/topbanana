@@ -87,6 +87,7 @@ FROM quizzes q
 JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
 ORDER BY q.created_at DESC, q.id DESC
 `
@@ -112,6 +113,7 @@ type ListNewestQuizzesRow struct {
 // the start page. Unlisted is link-only; private requires a logged-in
 // player, neither of which fits this anonymous list. Mode gate (MP-0 /
 // #677): live quizzes are hosted-only, so they are excluded here too.
+// Published gate (#1192): a draft is not yet playable, so it is excluded.
 //
 // The EXISTS gate on questions excludes quizzes with zero questions:
 // they cannot be played, so they have no business on a "pick a quiz"
@@ -170,6 +172,7 @@ JOIN games g ON g.quiz_id = q.id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
   AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
@@ -215,7 +218,8 @@ type ListPopularQuizzesRow struct {
 // the start page. Unlisted is link-only; private requires a logged-in
 // player, neither of which fits this anonymous list. Mode gate (MP-0 /
 // #677): live quizzes are hosted-only and never solo-playable, so they
-// are excluded from the start page too.
+// are excluded from the start page too. Published gate (#1192): a draft
+// is not yet playable, so it must not surface here either.
 //
 // Two play tallies, deliberately distinct: recent_play_count is the
 // 30-day finished-game count that drives the ranking (what "popular"
