@@ -93,6 +93,11 @@ export class GameApp {
         // instead of silently dropping the player onto the generic picker
         // (#802). Reset whenever a real quiz is picked.
         this.deepLinkUnavailable = false;
+        // True when the page was opened as an owner preview of a draft quiz
+        // via /play/<slug>-<id>?preview=1 (#1192). Drives the "Preview" HUD
+        // chip and marks the created game non-scoring on the server. Set once
+        // in init(); the whole play loop otherwise runs unchanged.
+        this.preview = false;
         // Gates the deep-link title/description so it only paints once
         // checkAlreadyPlayed has resolved the start state. Without it the
         // header renders optimistically on a deep link, then vanishes when
@@ -184,6 +189,17 @@ export class GameApp {
             playerService.getMe(),
         ]);
         this.player = player;
+        // Preview deep link (#1192): an owner reviewing a draft via
+        // /play/<slug>-<id>?preview=1. A draft is absent from the public list
+        // (ListPublicQuizzes filters to published), so the normal
+        // list-membership resolution can't find it — take the id straight from
+        // the path and start a preview game. This bypasses the quiz-list /
+        // resume probe entirely.
+        if (this.isPreviewDeepLink()) {
+            await this.startPreviewGame();
+
+            return;
+        }
         // A list failure leaves the start screen on its error + Retry state
         // (#1120); the deep-link resolution and resume probe both need the
         // loaded list, so defer them until a successful (re)load.
@@ -417,6 +433,82 @@ export class GameApp {
     // /client/ visit (show the picker quietly).
     hasDeepLinkPath() {
         return PLAY_PATH_PATTERN.test(window.location.pathname);
+    }
+
+    // isPreviewDeepLink reports whether the URL is a /play/<slug>-<id> deep
+    // link carrying ?preview=1 (#1192) — the owner preview entry point. The
+    // server owner-gates the create, so a non-owner who forges the param just
+    // gets the "not available" note.
+    isPreviewDeepLink() {
+        if (!this.hasDeepLinkPath()) return false;
+        return new URLSearchParams(window.location.search).get('preview') === '1';
+    }
+
+    // deepLinkQuizId extracts the numeric quiz id from a /play/<slug>-<id>
+    // path, or null when the path is not a deep link.
+    deepLinkQuizId() {
+        const match = window.location.pathname.match(PLAY_PATH_PATTERN);
+        return match ? parseInt(match[1], 10) : null;
+    }
+
+    // deepLinkSlugId returns the `${slug}-${id}` portion of a /play/ deep link
+    // (trailing slash stripped), used as the leaderboard key on the preview
+    // path where the quiz is absent from the loaded list.
+    deepLinkSlugId() {
+        return window.location.pathname
+            .replace(/\/$/, '')
+            .replace(/^\/play\//, '');
+    }
+
+    // startPreviewGame runs the owner preview flow (#1192): create a preview
+    // game straight from the deep-link quiz id (no list membership check, since
+    // drafts are not in the public list) and drop into the normal play loop.
+    // A 403 (not owner / not solo) or 404 (missing / draft) surfaces the same
+    // "not available" note a stale deep link shows.
+    async startPreviewGame() {
+        this.preview = true;
+        const quizId = this.deepLinkQuizId();
+        if (!quizId) {
+            this.deepLinkUnavailable = true;
+            this.startStateResolved = true;
+
+            return;
+        }
+        this.quizSlugId = this.deepLinkSlugId();
+        this.score = 0;
+        this.roundItem = null;
+        this.roundContinueError = false;
+        this.lastQuestionPosition = 0;
+        try {
+            const data = await gameService.startGame(quizId, true);
+            this.gameId = data.id;
+        } catch (err) {
+            if (err && (err.status === 403 || err.status === 404)) {
+                this.deepLinkUnavailable = true;
+                this.startStateResolved = true;
+
+                return;
+            }
+            console.error('startPreviewGame failed', err);
+            this.startError = "Couldn't start the preview - please refresh and try again.";
+            this.startStateResolved = true;
+
+            return;
+        }
+        this.startStateResolved = true;
+        // No Start gesture fires on a preview auto-start, so preload without
+        // the loading screen; the manual play control covers a blocked clip,
+        // as on a mid-game resume.
+        void this.preloadGameAudio({ showLoading: false });
+        try {
+            await this.nextQuestion();
+        } catch (err) {
+            console.error('startPreviewGame: first question fetch failed', err);
+            this.gameId = null;
+            this.question = null;
+            this.roundItem = null;
+            this.startError = "Couldn't start the preview - please refresh and try again.";
+        }
     }
 
     // slugIdFor returns the `${slug}-${id}` form for the selected quiz, or

@@ -400,6 +400,12 @@
                         <!-- HUD chips: Round N/M + Q n/m in this round +
                              running score (#253, #1051). -->
                         <div class="flex justify-end gap-2 mb-2 lg:mb-4">
+                            <!-- Preview chip (#1192): shown when a host is
+                                 previewing a draft so it is clear the game is
+                                 not recording a score. -->
+                            <span class="hud-chip text-cyan" x-show="preview" data-testid="preview-banner">
+                                Preview
+                            </span>
                             <span class="hud-chip" x-show="question.roundTotal > 0" data-testid="hud-round">
                                 Round <span class="hud-chip-value" x-text="question.roundNumber"></span>/<span class="hud-chip-value" x-text="question.roundTotal"></span>
                             </span>

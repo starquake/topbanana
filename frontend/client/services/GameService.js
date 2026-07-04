@@ -7,11 +7,17 @@ import { ApiError, jsonOrThrow } from './api.js';
 // short-circuit before jsonOrThrow so callers keep the existing
 // null return signal.
 export class GameService {
-    async startGame(quizId) {
+    // startGame creates a game for the quiz. preview=true marks it a host
+    // preview (#1192): the server owner-gates it and excludes the game from
+    // the leaderboard and play count, so a host can test a draft without
+    // recording a score.
+    async startGame(quizId, preview = false) {
+        const body = { quizId: parseInt(quizId) };
+        if (preview) body.preview = true;
         const response = await fetch('/api/games', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ quizId: parseInt(quizId) })
+            body: JSON.stringify(body)
         });
         return jsonOrThrow(response);
     }
