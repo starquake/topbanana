@@ -15,6 +15,7 @@ import {
     readRememberedSession,
     forgetRememberedSession,
 } from '@shared/rememberedSession.js';
+import { t } from '../util/i18n.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
@@ -422,7 +423,7 @@ export class JoinApp {
     submitCode() {
         const trimmed = (this.codeInput || '').trim().toUpperCase();
         if (trimmed === '') {
-            this.error = 'Please enter a code.';
+            this.error = t('join.enterCode');
             return;
         }
         this.error = '';
@@ -446,7 +447,7 @@ export class JoinApp {
         if (this.busy) return;
         const trimmed = (this.displayName || '').trim();
         if (trimmed === '') {
-            this.error = 'Please enter a name.';
+            this.error = t('claim.enterName');
             return;
         }
         this.busy = true;
@@ -527,7 +528,7 @@ export class JoinApp {
             await sessionService.setReady(this.code, next);
         } catch {
             this.isReady = !next;
-            this.error = "Couldn't update your ready state - try again.";
+            this.error = t('join.readyError');
             return;
         } finally {
             this.busy = false;
@@ -640,7 +641,7 @@ export class JoinApp {
     // startCountdownLabel is the "Starting in M:SS" text the player lobby shows
     // while the countdown is armed.
     startCountdownLabel() {
-        return `Starting in ${formatCountdown(this.startRemaining)}`;
+        return t('join.startingIn', { time: formatCountdown(this.startRemaining) });
     }
 
     // lobbyTitle is the lobby heading: the room's quiz title once a quiz is
@@ -649,7 +650,7 @@ export class JoinApp {
     // state.quiz.title directly would throw and break the lobby render - this
     // guards that case so the player sees a sane waiting lobby.
     lobbyTitle() {
-        return this.state && this.state.quiz ? this.state.quiz.title : 'Get ready';
+        return this.state && this.state.quiz ? this.state.quiz.title : t('join.getReady');
     }
 
     // lobbyHasQuiz reports whether the room has a quiz armed, so the lobby can
@@ -1105,9 +1106,9 @@ export class JoinApp {
     roundEyebrow() {
         const round = this.currentRound();
         if (round && round.number > 0 && round.total > 0) {
-            return `Round ${round.number} of ${round.total}`;
+            return t('join.roundNof', { number: round.number, total: round.total });
         }
-        return 'Get ready';
+        return t('join.getReady');
     }
 
     // roundTitle is the round_intro heading: the round's own title, or a
@@ -1116,7 +1117,7 @@ export class JoinApp {
     // same words when round metadata is missing.
     roundTitle() {
         const round = this.currentRound();
-        return round && round.title ? round.title : 'Next round';
+        return round && round.title ? round.title : t('join.nextRound');
     }
 
     // roundSummary is the optional copy beneath the round title, empty when the

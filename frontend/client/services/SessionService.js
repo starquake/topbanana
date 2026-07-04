@@ -1,4 +1,5 @@
 import { jsonOrThrow } from './api.js';
+import { t } from '../util/i18n.js';
 
 // SessionService wraps the hosted live-session REST endpoints the player
 // join + lobby surface consumes (MP-4 / #681). The session cookie carries
@@ -31,22 +32,22 @@ export class SessionService {
                 headers: { 'Content-Type': 'application/json' },
             });
         } catch {
-            return { ok: false, kind: 'error', message: "Couldn't join the game - try again." };
+            return { ok: false, kind: 'error', message: t('join.joinError') };
         }
         if (response.status === 200) {
             const body = await response.json();
             return { ok: true, displayName: body.displayName, isReady: body.isReady };
         }
         if (response.status === 404) {
-            return { ok: false, kind: 'notFound', message: 'No game found with that code.' };
+            return { ok: false, kind: 'notFound', message: t('join.noGameFound') };
         }
         if (response.status === 409) {
-            return { ok: false, kind: 'closed', message: 'This game has already started.' };
+            return { ok: false, kind: 'closed', message: t('join.gameStarted') };
         }
         if (response.status === 403) {
-            return { ok: false, kind: 'alreadyPlayed', message: "You've already played this quiz." };
+            return { ok: false, kind: 'alreadyPlayed', message: t('join.alreadyPlayed') };
         }
-        return { ok: false, kind: 'error', message: "Couldn't join the game - try again." };
+        return { ok: false, kind: 'error', message: t('join.joinError') };
     }
 
     // setReady flips the caller's ready flag. The same endpoint marks ready

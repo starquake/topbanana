@@ -1,6 +1,7 @@
 import { GameApp } from './components/GameApp.js';
 import { claimNameForm } from './components/ClaimNameForm.js';
 import { registerFocusTrap } from '@shared/focusTrap.js';
+import { registerI18n } from './util/i18n.js';
 
 document.addEventListener('alpine:init', () => {
     Alpine.data('gameApp', () => new GameApp());
@@ -10,6 +11,7 @@ document.addEventListener('alpine:init', () => {
     // alongside gameApp.
     Alpine.data('claimNameForm', claimNameForm);
     registerFocusTrap(Alpine);
+    registerI18n(Alpine);
 });
 
 // Publish the visual-viewport height as a CSS custom property
