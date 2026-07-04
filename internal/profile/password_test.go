@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/locale"
 	. "github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
@@ -23,7 +24,7 @@ func TestValidatePasswordChangeInput_AcceptsWellFormed(t *testing.T) {
 	t.Parallel()
 
 	password := strings.Repeat("a", auth.MinPasswordLength)
-	msg, ok := ValidatePasswordChangeInput(password, password)
+	msg, ok := ValidatePasswordChangeInput(locale.LocaleEN, password, password)
 	if !ok {
 		t.Errorf("ValidatePasswordChangeInput(<%d a's>, <%d a's>) ok = false, want true (msg=%q)",
 			auth.MinPasswordLength, auth.MinPasswordLength, msg)
@@ -37,7 +38,7 @@ func TestValidatePasswordChangeInput_RejectsTooShort(t *testing.T) {
 	t.Parallel()
 
 	short := strings.Repeat("a", auth.MinPasswordLength-1)
-	msg, ok := ValidatePasswordChangeInput(short, short)
+	msg, ok := ValidatePasswordChangeInput(locale.LocaleEN, short, short)
 	if ok {
 		t.Errorf("ValidatePasswordChangeInput(<%d a's>, <%d a's>) ok = true, want false",
 			auth.MinPasswordLength-1, auth.MinPasswordLength-1)
@@ -52,7 +53,7 @@ func TestValidatePasswordChangeInput_RejectsTooLong(t *testing.T) {
 	t.Parallel()
 
 	long := strings.Repeat("a", auth.MaxPasswordLength+1)
-	msg, ok := ValidatePasswordChangeInput(long, long)
+	msg, ok := ValidatePasswordChangeInput(locale.LocaleEN, long, long)
 	if ok {
 		t.Errorf("ValidatePasswordChangeInput(<%d a's>, <%d a's>) ok = true, want false",
 			auth.MaxPasswordLength+1, auth.MaxPasswordLength+1)
@@ -68,7 +69,7 @@ func TestValidatePasswordChangeInput_RejectsMismatchedConfirm(t *testing.T) {
 
 	password := strings.Repeat("a", auth.MinPasswordLength)
 	confirm := strings.Repeat("b", auth.MinPasswordLength)
-	msg, ok := ValidatePasswordChangeInput(password, confirm)
+	msg, ok := ValidatePasswordChangeInput(locale.LocaleEN, password, confirm)
 	if ok {
 		t.Errorf("ValidatePasswordChangeInput(%q, %q) ok = true, want false", password, confirm)
 	}
@@ -82,7 +83,7 @@ func TestValidatePasswordChangeInput_LengthBeforeMismatch(t *testing.T) {
 
 	short := strings.Repeat("a", auth.MinPasswordLength-1)
 	mismatch := strings.Repeat("b", auth.MinPasswordLength)
-	msg, ok := ValidatePasswordChangeInput(short, mismatch)
+	msg, ok := ValidatePasswordChangeInput(locale.LocaleEN, short, mismatch)
 	if ok {
 		t.Errorf("ValidatePasswordChangeInput(%q, %q) ok = true, want false", short, mismatch)
 	}

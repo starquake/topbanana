@@ -222,6 +222,24 @@ func TestLocaleAuthPages_Integration(t *testing.T) {
 		assertContains(t, body, `<html lang="nl">`)
 		assertNotContains(t, body, "Link is no longer valid")
 	})
+
+	// The password-help text is a Go-side template func (not a {{t}} string);
+	// under lang=nl the /profile/password page must render the Dutch copy.
+	pwURL := baseURL + "/profile/password"
+
+	t.Run("profile password page defaults to English help", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, pwURL, nil)
+		assertContains(t, body, "Must be")
+	})
+
+	t.Run("profile password page renders Dutch help", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, pwURL, &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, "tekens lang zijn")
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, "Must be")
+	})
 }
 
 // getBodyWithClientCookie fetches target with the given (session-carrying)

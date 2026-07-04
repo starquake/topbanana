@@ -257,7 +257,7 @@ type registerRenderers struct {
 func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request, email string) {
 	rr.sessions.Clear(w)
 	rr.pending.Render(w, r, http.StatusOK, registerPendingData{
-		Title: "Verify your email",
+		Title: locale.Translate(locale.Resolve(r), "verifyEmailPending.heading"),
 		Email: email,
 	})
 }

@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ type pageData struct {
 // preserve the return target across a validation error.
 func profileBack(r *http.Request) (href, label, next string) {
 	next = adminNextPath(r.URL.Query().Get("next"))
-	href, label = backFromNext(next)
+	href, label = backFromNext(locale.Resolve(r), next)
 
 	return href, label, next
 }
@@ -94,9 +95,10 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 			return
 		}
 
+		loc := locale.Resolve(r)
 		backHref, backLabel, next := profileBack(r)
 		renderer.render(w, r, http.StatusOK, pageData{
-			Title:       "Profile",
+			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: player.DisplayName,
 			BackHref:    backHref,
 			BackLabel:   backLabel,
@@ -159,9 +161,10 @@ func HandleProfileDisplayName(
 			return
 		}
 
-		backHref, backLabel := backFromNext(next)
+		loc := locale.Resolve(r)
+		backHref, backLabel := backFromNext(loc, next)
 		renderer.render(w, r, http.StatusOK, pageData{
-			Title:       "Profile",
+			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: updated.DisplayName,
 			Saved:       true,
 			BackHref:    backHref,
@@ -172,13 +175,14 @@ func HandleProfileDisplayName(
 }
 
 // backFromNext maps an already-validated next path to the back link's
-// href + label, defaulting to the public home page when next is empty.
-func backFromNext(next string) (href, label string) {
+// href + localized label, defaulting to the public home page when next
+// is empty.
+func backFromNext(loc, next string) (href, label string) {
 	if next != "" {
-		return next, "Back to admin"
+		return next, locale.Translate(loc, "profile.backToAdmin")
 	}
 
-	return "/", "Back to home"
+	return "/", locale.Translate(loc, "profile.backToHome")
 }
 
 // renameAttempt carries the per-request context a failed rename needs
@@ -210,15 +214,16 @@ func renderRenameError(
 	a renameAttempt,
 	err error,
 ) {
-	backHref, backLabel := backFromNext(a.next)
+	loc := locale.Resolve(r)
+	backHref, backLabel := backFromNext(loc, a.next)
 	switch {
 	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
 			slog.Int64("player_id", a.playerID))
 		renderer.render(w, r, http.StatusBadRequest, pageData{
-			Title:       "Profile",
+			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.currentDisplayName,
-			Message:     "Display name is required.",
+			Message:     locale.Translate(loc, "profile.displayNameRequired"),
 			BackHref:    backHref,
 			BackLabel:   backLabel,
 			Next:        a.next,
@@ -227,9 +232,9 @@ func renderRenameError(
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
 			slog.Int64("player_id", a.playerID), slog.String("attempted", a.attempted))
 		renderer.render(w, r, http.StatusConflict, pageData{
-			Title:       "Profile",
+			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.attempted,
-			Message:     "That name is already taken. Pick a different one.",
+			Message:     locale.Translate(loc, "profile.displayNameTaken"),
 			BackHref:    backHref,
 			BackLabel:   backLabel,
 			Next:        a.next,
@@ -314,9 +319,27 @@ func profilePerRequestFuncs(r *http.Request) template.FuncMap {
 		signedIn = true
 	}
 
+	loc := locale.Resolve(r)
+
 	return template.FuncMap{
-		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
-		"viewerName": func() string { return displayName },
-		"isSignedIn": func() bool { return signedIn },
+		"ogImage":      func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
+		"viewerName":   func() string { return displayName },
+		"isSignedIn":   func() bool { return signedIn },
+		"passwordHelp": func() string { return localizedPasswordHelp(loc) },
 	}
+}
+
+// localizedPasswordHelp renders the password length help text for loc,
+// filling the {min}/{max} placeholders so it stays bound to the constants.
+func localizedPasswordHelp(loc string) string {
+	help := locale.Translate(loc, "common.passwordHelp")
+	help = strings.ReplaceAll(help, "{min}", strconv.Itoa(auth.MinPasswordLength))
+
+	return strings.ReplaceAll(help, "{max}", strconv.Itoa(auth.MaxPasswordLength))
+}
+
+// localizeCount translates key for loc and fills the {n} placeholder with n,
+// keeping the format string constant so vet does not flag it.
+func localizeCount(loc, key string, n int) string {
+	return strings.ReplaceAll(locale.Translate(loc, key), "{n}", strconv.Itoa(n))
 }

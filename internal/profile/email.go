@@ -11,6 +11,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -68,7 +69,7 @@ func HandleProfileEmail(
 		}
 
 		data := emailPageData{
-			Title:        "Change email",
+			Title:        locale.Translate(locale.Resolve(r), "profile.changeEmail"),
 			CurrentEmail: player.Email,
 			HasPassword:  player.PasswordHash != "",
 		}
@@ -130,17 +131,18 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		// (#534). Refuse on account type before touching the input - what
 		// was typed is irrelevant - which keeps the session-hijack takeover
 		// surface closed without an OAuth re-auth step-up.
+		loc := locale.Resolve(r)
 		if player.PasswordHash == "" {
 			logger.InfoContext(r.Context(), "profile email change blocked: account has no password",
 				slog.Int64("player_id", player.ID))
-			deps.Flash.SetError(w, "Your email is managed by your sign-in provider and can't be changed here.", 0)
+			deps.Flash.SetError(w, locale.Translate(loc, "profileEmail.providerManaged"), 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
 			return
 		}
 
 		newEmail := strings.ToLower(strings.TrimSpace(r.PostFormValue("new_email")))
-		if msg, ok := validateEmailChange(newEmail, player.Email); !ok {
+		if msg, ok := validateEmailChange(loc, newEmail, player.Email); !ok {
 			deps.Flash.SetError(w, msg, 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
@@ -151,7 +153,7 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		if auth.CheckPassword(player.PasswordHash, current) != nil {
 			logger.InfoContext(r.Context(), "profile email change rejected: current password incorrect",
 				slog.Int64("player_id", player.ID))
-			deps.Flash.SetError(w, "Current password is incorrect.", 0)
+			deps.Flash.SetError(w, locale.Translate(loc, "profile.currentPasswordIncorrect"), 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
 			return
@@ -165,26 +167,25 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		// is free, but the response is identical either way so an
 		// attacker cannot tell which it was. The user knows what they
 		// typed, so the notice can echo the address.
-		deps.Flash.SetNotice(
-			w,
-			"If "+newEmail+" is not already in use, we sent it a verification link. Click the link to switch your email.",
-		)
+		notice := strings.ReplaceAll(locale.Translate(loc, "profileEmail.changeRequested"), "{email}", newEmail)
+		deps.Flash.SetNotice(w, notice)
 		http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 	})
 }
 
 // validateEmailChange runs the form-level rules: non-empty, looks
 // like an email, not equal to the current verified address. Returns
-// the banner text and false when the input is rejected.
-func validateEmailChange(newEmail, currentEmail string) (string, bool) {
+// the banner text (localized for loc) and false when the input is
+// rejected.
+func validateEmailChange(loc, newEmail, currentEmail string) (string, bool) {
 	if newEmail == "" {
-		return "Enter a new email address.", false
+		return locale.Translate(loc, "profileEmail.enterNew"), false
 	}
 	if !auth.LooksLikeEmail(newEmail) {
-		return "Enter a valid email address.", false
+		return locale.Translate(loc, "validation.invalidEmail"), false
 	}
 	if newEmail == strings.ToLower(strings.TrimSpace(currentEmail)) {
-		return "That is already your address.", false
+		return locale.Translate(loc, "profileEmail.sameAsCurrent"), false
 	}
 
 	return "", true

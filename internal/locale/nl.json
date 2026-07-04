@@ -13,6 +13,8 @@
   "common.signOut": "Uitloggen",
   "common.wait": "Wacht",
   "common.rememberedIt": "Weet je het weer?",
+  "common.submissionNotUnderstood": "Je invoer werd niet begrepen. Probeer het opnieuw.",
+  "common.slowDownSubmit": "Rustig aan: wacht even voordat je opnieuw verzendt.",
 
   "footer.signedInAs": "Ingelogd als",
   "footer.logOut": "Uitloggen",
@@ -67,9 +69,11 @@
   "register.haveAccount": "Heb je al een account? Inloggen",
   "register.google": "Registreren met Google",
 
+  "forgotPassword.title": "Wachtwoord vergeten",
   "forgotPassword.heading": "Wachtwoord vergeten?",
   "forgotPassword.subtitle": "Vul je e-mailadres in en we sturen je een resetlink.",
   "forgotPassword.submit": "Resetlink versturen",
+  "forgotPassword.sentNotice": "Als er een account bij past, hebben we een resetlink naar het e-mailadres gestuurd.",
 
   "resetPassword.heading": "Stel een nieuw wachtwoord in",
   "resetPassword.subtitle": "Kies een nieuw wachtwoord.",
@@ -86,12 +90,17 @@
   "verifyEmailPending.sentAfter": "Klik erop om je account af te ronden.",
   "verifyEmailPending.resend": "Verificatie-e-mail opnieuw versturen",
   "verifyEmailPending.noLink": "Geen link ontvangen?",
+  "verifyEmailPending.noEmailOnFile": "Geen e-mailadres bekend. Log uit en registreer opnieuw.",
+  "verifyEmailPending.slowDownResend": "Rustig aan: wacht even voordat je nog een e-mail aanvraagt.",
+  "verifyEmailPending.sendFailed": "De e-mail kon nu niet worden verzonden. Probeer het zo weer.",
+  "verifyEmailPending.sent": "Verificatie-e-mail verzonden. Controleer je inbox.",
 
   "registerPending.alreadyVerified": "Al geverifieerd? Inloggen",
 
   "verifyEmailRequest.heading": "Verificatie-e-mail opnieuw versturen",
   "verifyEmailRequest.subtitle": "Vul je e-mailadres in en we sturen je een nieuwe verificatielink.",
   "verifyEmailRequest.submit": "Verificatielink versturen",
+  "verifyEmailRequest.sentNotice": "Als er een account bij past, hebben we een verificatielink naar het e-mailadres gestuurd.",
 
   "acceptInvite.heading": "Je uitnodiging accepteren",
   "acceptInvite.subtitle": "Kies een weergavenaam en een wachtwoord om je account in te stellen.",
@@ -115,6 +124,11 @@
   "profile.account": "Account",
   "profile.changeEmail": "E-mailadres wijzigen",
   "profile.changePassword": "Wachtwoord wijzigen",
+  "profile.displayNameRequired": "Weergavenaam is verplicht.",
+  "profile.displayNameTaken": "Die naam is al bezet. Kies een andere.",
+  "profile.backToAdmin": "Terug naar beheer",
+  "profile.backToHome": "Terug naar de startpagina",
+  "profile.currentPasswordIncorrect": "Huidig wachtwoord is onjuist.",
 
   "profileEmail.subtitle": "Wijzig het e-mailadres dat aan je account is gekoppeld.",
   "profileEmail.currentEmail": "Huidig e-mailadres",
@@ -122,6 +136,9 @@
   "profileEmail.newEmailHint": "We sturen een verificatielink naar het nieuwe adres. Je account-e-mailadres verandert pas als je op die link klikt.",
   "profileEmail.passwordHint": "Bevestig je huidige wachtwoord om een e-mailwijziging te starten.",
   "profileEmail.providerManaged": "Je e-mailadres wordt beheerd door je aanbieder waarmee je inlogt en kan hier niet worden gewijzigd.",
+  "profileEmail.enterNew": "Voer een nieuw e-mailadres in.",
+  "profileEmail.sameAsCurrent": "Dat is al je adres.",
+  "profileEmail.changeRequested": "Als {email} nog niet in gebruik is, hebben we er een verificatielink naartoe gestuurd. Klik op de link om je e-mailadres te wijzigen.",
 
   "profilePassword.subtitle": "Kies een nieuw wachtwoord. Andere ingelogde sessies worden uitgelogd.",
   "profilePassword.saved": "Wachtwoord bijgewerkt.",

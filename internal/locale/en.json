@@ -13,6 +13,8 @@
   "common.signOut": "Sign out",
   "common.wait": "Wait",
   "common.rememberedIt": "Remembered it?",
+  "common.submissionNotUnderstood": "Your submission was not understood. Try again.",
+  "common.slowDownSubmit": "Slow down: wait a moment before submitting again.",
 
   "footer.signedInAs": "Signed in as",
   "footer.logOut": "Log out",
@@ -67,9 +69,11 @@
   "register.haveAccount": "Have an account? Log in",
   "register.google": "Sign up with Google",
 
+  "forgotPassword.title": "Forgot password",
   "forgotPassword.heading": "Forgot your password?",
   "forgotPassword.subtitle": "Enter your email and we'll send a reset link.",
   "forgotPassword.submit": "Send reset link",
+  "forgotPassword.sentNotice": "If an account matches, we've sent a reset link to its email.",
 
   "resetPassword.heading": "Set a new password",
   "resetPassword.subtitle": "Pick a fresh one.",
@@ -86,12 +90,17 @@
   "verifyEmailPending.sentAfter": "Click it to finish setting up your account.",
   "verifyEmailPending.resend": "Resend verification email",
   "verifyEmailPending.noLink": "Didn't get the link?",
+  "verifyEmailPending.noEmailOnFile": "No email on file. Sign out and register again.",
+  "verifyEmailPending.slowDownResend": "Slow down: wait a moment before requesting another email.",
+  "verifyEmailPending.sendFailed": "Could not send the email right now. Try again in a moment.",
+  "verifyEmailPending.sent": "Verification email sent. Check your inbox.",
 
   "registerPending.alreadyVerified": "Already verified? Sign in",
 
   "verifyEmailRequest.heading": "Resend verification email",
   "verifyEmailRequest.subtitle": "Enter your email address and we'll send a fresh verification link.",
   "verifyEmailRequest.submit": "Send verification link",
+  "verifyEmailRequest.sentNotice": "If an account matches, we've sent a verification link to its email.",
 
   "acceptInvite.heading": "Accept your invite",
   "acceptInvite.subtitle": "Pick a display name and a password to set up your account.",
@@ -115,6 +124,11 @@
   "profile.account": "Account",
   "profile.changeEmail": "Change email",
   "profile.changePassword": "Change password",
+  "profile.displayNameRequired": "Display name is required.",
+  "profile.displayNameTaken": "That name is already taken. Pick a different one.",
+  "profile.backToAdmin": "Back to admin",
+  "profile.backToHome": "Back to home",
+  "profile.currentPasswordIncorrect": "Current password is incorrect.",
 
   "profileEmail.subtitle": "Switch the address tied to your account.",
   "profileEmail.currentEmail": "Current email",
@@ -122,6 +136,9 @@
   "profileEmail.newEmailHint": "We'll send a verification link to the new address. Your account email switches when you click that link, not before.",
   "profileEmail.passwordHint": "Confirm your current password to start an email change.",
   "profileEmail.providerManaged": "Your email is managed by your sign-in provider and can't be changed here.",
+  "profileEmail.enterNew": "Enter a new email address.",
+  "profileEmail.sameAsCurrent": "That is already your address.",
+  "profileEmail.changeRequested": "If {email} is not already in use, we sent it a verification link. Click the link to switch your email.",
 
   "profilePassword.subtitle": "Pick a fresh password. Other signed-in sessions will be signed out.",
   "profilePassword.saved": "Password updated.",

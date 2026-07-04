@@ -11,6 +11,7 @@ import (
 	"github.com/rs/xid"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -161,7 +162,7 @@ func RequireGameHost(
 
 		if !player.CanHost() {
 			render.Render(w, r, http.StatusForbidden, formData{
-				Title:       "Access denied",
+				Title:       locale.Translate(locale.Resolve(r), "accessDenied.heading"),
 				DisplayName: player.DisplayName,
 			})
 
