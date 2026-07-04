@@ -63,6 +63,12 @@ type Store interface {
 	// game (#1192). Once a real player has started a game the quiz can no
 	// longer be unpublished; host preview games do not count.
 	QuizHasRealPlays(ctx context.Context, id int64) (bool, error)
+	// UnpublishQuizIfUnplayed atomically returns a quiz to draft only while it
+	// has no real (non-preview) game (#1192), closing the check-then-act race a
+	// separate QuizHasRealPlays read + SetQuizPublished(false) leaves open. It
+	// reports whether a row was updated: false means the quiz is gone or has
+	// been played (the caller distinguishes those).
+	UnpublishQuizIfUnplayed(ctx context.Context, id int64) (bool, error)
 	// ListQuestions returns all questions for a quiz by its ID.
 	ListQuestions(ctx context.Context, quizID int64) ([]*Question, error)
 	// GetQuestion returns a question with options, by its question ID.

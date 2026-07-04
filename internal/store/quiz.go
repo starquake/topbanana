@@ -290,6 +290,18 @@ func (s *QuizStore) SetQuizPublished(ctx context.Context, id int64, published bo
 	return nil
 }
 
+// UnpublishQuizIfUnplayed atomically returns a quiz to draft only while it has
+// no real (non-preview) game (#1192). Reports whether a row was updated; false
+// means the quiz is gone or has been played.
+func (s *QuizStore) UnpublishQuizIfUnplayed(ctx context.Context, id int64) (bool, error) {
+	res, err := s.q.UnpublishQuizIfUnplayed(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to unpublish quiz if unplayed: %w", err)
+	}
+
+	return database.MustRowsAffected(res) > 0, nil
+}
+
 // QuizHasRealPlays reports whether the quiz has at least one non-preview game
 // (#1192). Host preview games are excluded, so an owner previewing their draft
 // never blocks a later unpublish.

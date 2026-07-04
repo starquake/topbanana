@@ -964,6 +964,26 @@ func (q *Queries) SetQuizPublished(ctx context.Context, arg SetQuizPublishedPara
 	return q.db.ExecContext(ctx, setQuizPublished, arg.Published, arg.ID)
 }
 
+const unpublishQuizIfUnplayed = `-- name: UnpublishQuizIfUnplayed :execresult
+UPDATE quizzes
+SET published  = 0,
+    updated_at = CURRENT_TIMESTAMP
+WHERE quizzes.id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM games WHERE quiz_id = quizzes.id AND is_preview = 0
+  )
+`
+
+// Atomically returns a quiz to draft only while it has no real (non-preview)
+// game (#1192). The NOT EXISTS guard closes the check-then-act race a separate
+// QuizHasRealPlays read + SetQuizPublished(false) leaves open: a game starting
+// between the two calls could leave a played quiz as an editable draft. Zero
+// rows affected means either the quiz is gone or it has been played; the caller
+// distinguishes those (it already loaded the quiz) and renders the 409.
+func (q *Queries) UnpublishQuizIfUnplayed(ctx context.Context, id int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, unpublishQuizIfUnplayed, id)
+}
+
 const updateOption = `-- name: UpdateOption :execresult
 UPDATE options
 SET text = ?,

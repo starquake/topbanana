@@ -108,28 +108,21 @@ func HandleQuizUnpublish(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore q
 			return
 		}
 
-		hasPlays, err := quizStore.QuizHasRealPlays(r.Context(), quizID)
+		// Atomic unpublish-if-unplayed closes the check-then-act race a
+		// QuizHasRealPlays read + SetQuizPublished(false) leaves open: a real
+		// game starting between the two calls could leave a played quiz as an
+		// editable draft (#1192). The quiz already exists (requireQuizOwner
+		// loaded it), so no update means it has been played -> 409.
+		unpublished, err := quizStore.UnpublishQuizIfUnplayed(r.Context(), quizID)
 		if err != nil {
-			logger.ErrorContext(r.Context(), "error checking quiz real plays for unpublish", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
-			return
-		}
-		if hasPlays {
-			render409(w, r, logger, csrfMgr,
-				"This quiz has been played and can no longer be unpublished.")
-
-			return
-		}
-
-		if err = quizStore.SetQuizPublished(r.Context(), quizID, false); err != nil {
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				render404(w, r, logger, csrfMgr)
-
-				return
-			}
 			logger.ErrorContext(r.Context(), "error unpublishing quiz", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+		if !unpublished {
+			render409(w, r, logger, csrfMgr,
+				"This quiz has been played and can no longer be unpublished.")
 
 			return
 		}
