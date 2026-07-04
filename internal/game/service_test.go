@@ -353,8 +353,9 @@ func TestService_CreateGame_Preview(t *testing.T) {
 		if got, want := second.ID, first.ID; got == want {
 			t.Errorf("re-preview game ID = %q, want a fresh id (prior reset)", got)
 		}
-		if _, err = gameStore.GetGame(ctx, first.ID); !errors.Is(err, ErrGameNotFound) {
-			t.Errorf("prior preview game still exists, GetGame err = %v, want ErrGameNotFound", err)
+		_, err = gameStore.GetGame(ctx, first.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("GetGame err = %v, want %v", got, want)
 		}
 	})
 
@@ -420,8 +421,9 @@ func TestService_CreateGame_Preview(t *testing.T) {
 
 		// A preview on the published quiz must be refused, and it must NOT
 		// hard-delete the existing real game (that was a data-loss bug).
-		if _, err = svc.CreateGame(ctx, published.ID, playerID, true); !errors.Is(err, ErrPreviewNotAllowed) {
-			t.Errorf("preview on published err = %v, want %v", err, ErrPreviewNotAllowed)
+		_, err = svc.CreateGame(ctx, published.ID, playerID, true)
+		if got, want := err, ErrPreviewNotAllowed; !errors.Is(got, want) {
+			t.Errorf("CreateGame err = %v, want %v", got, want)
 		}
 		if _, err = gameStore.GetGame(ctx, realGame.ID); err != nil {
 			t.Errorf("real game gone after refused preview: GetGame err = %v, want nil", err)
@@ -460,8 +462,9 @@ func TestService_CreateGame_Preview(t *testing.T) {
 		if realGame.Preview {
 			t.Error("real game Preview = true, want false")
 		}
-		if _, err = gameStore.GetGame(ctx, preview.ID); !errors.Is(err, ErrGameNotFound) {
-			t.Errorf("preview game still exists after real play: GetGame err = %v, want ErrGameNotFound", err)
+		_, err = gameStore.GetGame(ctx, preview.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("GetGame err = %v, want %v", got, want)
 		}
 	})
 
