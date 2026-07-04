@@ -126,6 +126,47 @@
   "profilePassword.subtitle": "Pick a fresh password. Other signed-in sessions will be signed out.",
   "profilePassword.saved": "Password updated.",
 
+  "common.passwordHelp": "Must be {min}-{max} characters.",
+
+  "validation.invalidEmail": "Enter a valid email address.",
+  "validation.passwordTooShort": "Password must be at least {n} characters.",
+  "validation.passwordTooLong": "Password must be at most {n} characters.",
+  "validation.passwordsNoMatch": "Passwords do not match.",
+  "validation.displayNameRequired": "Pick a display name.",
+
+  "login.rateLimited": "Too many attempts. Try again in a moment.",
+  "login.invalidCredentials": "Invalid email or password.",
+
+  "register.displayNameTaken": "That display name is already taken.",
+
+  "acceptInvite.title": "Invite",
+  "acceptInvite.displayNameTaken": "That display name is already taken. Pick another.",
+  "acceptInvite.emailTaken": "An account already exists for this email. Sign in instead.",
+
+  "resetPassword.linkTitle": "Reset link",
+
+  "verifyEmail.title": "Verify email",
+  "verifyEmail.missingHeading": "Link is missing",
+  "verifyEmail.missingMessage": "This verification link is missing its token. Use the link from the email exactly as it was sent.",
+  "verifyEmail.verifiedHeading": "Email verified",
+  "verifyEmail.verifiedMessage": "Your email address is confirmed. You can now use everything Top Banana! has to offer.",
+  "verifyEmail.alreadyHeading": "Already verified",
+  "verifyEmail.alreadyMessage": "This email address was already verified. You can carry on.",
+  "verifyEmail.takenHeading": "Address no longer available",
+  "verifyEmail.takenMessage": "That email is already attached to another account. Submit the change again with a different address.",
+  "verifyEmail.invalidHeading": "Link is no longer valid",
+  "verifyEmail.invalidMessage": "This verification link has expired or was never issued. Sign in to request a fresh one.",
+  "verifyEmail.notFoundMessage": "This verification link can no longer be applied. Sign in to request a fresh one.",
+
+  "google.signInFailed": "Google sign-in failed. Please try again.",
+  "google.verifyFailed": "Could not verify your Google sign-in.",
+  "google.emailNotVerified": "Your Google account email is not verified. Verify it with Google and try again.",
+  "google.signInExpired": "Sign-in expired. Please try again.",
+  "google.signInCancelled": "Google sign-in was cancelled.",
+  "google.registrationDisabled": "Registration is currently disabled. Ask an administrator for an account.",
+  "google.signInFailedGeneric": "Sign-in failed. Please try again.",
+  "google.blocked": "Sign-in blocked: your email is not verified. Try requesting a verification link.",
+
   "common.retry": "Retry",
   "common.loading": "Loading...",
   "common.continue": "Continue",

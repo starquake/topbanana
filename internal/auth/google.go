@@ -18,6 +18,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -229,7 +230,7 @@ func HandleGoogleCallback(
 			logger.WarnContext(r.Context(), "google sign-in blocked: email_verified_at not stamped",
 				slog.Int64("player_id", player.ID))
 			renderGoogleError(renderer, w, r,
-				"Sign-in blocked: your email is not verified. Try requesting a verification link.",
+				"google.blocked",
 				registrationEnabled, forgotPasswordEnabled)
 
 			return
@@ -307,23 +308,23 @@ func finalizeGoogleSignIn(
 // validateCallbackRequest walks the cheap up-front checks on a
 // callback: state validation, Google-reported error, and missing
 // code. Returns ("", true) when the request passes; otherwise returns
-// a user-facing message and false. Splitting this out keeps
+// a catalog message key and false. Splitting this out keeps
 // HandleGoogleCallback under the function-length linter limit and
 // makes the early-exit paths trivially testable.
 func validateCallbackRequest(stateKey []byte, r *http.Request) (string, bool) {
 	if validateState(stateKey, r) != nil {
-		return "Sign-in expired. Please try again.", false
+		return "google.signInExpired", false
 	}
 
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		// Google reports user-side failures (consent declined,
 		// account chooser closed) by redirecting with ?error=...
 		// instead of an error code; keep the message generic.
-		return "Google sign-in was cancelled.", false
+		return "google.signInCancelled", false
 	}
 
 	if r.URL.Query().Get("code") == "" {
-		return "Google sign-in failed. Please try again.", false
+		return "google.signInFailed", false
 	}
 
 	return "", true
@@ -334,8 +335,10 @@ func validateCallbackRequest(stateKey []byte, r *http.Request) (string, bool) {
 // populated on return; the callback handler branches on those three
 // states.
 type callbackResult struct {
-	Subject     string
-	Email       string
+	Subject string
+	Email   string
+	// UserMessage is a catalog key (empty when none); renderGoogleError
+	// translates it for the request locale.
 	UserMessage string
 	Fatal       bool
 }
@@ -370,28 +373,28 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 	if err != nil {
 		logger.ErrorContext(r.Context(), "error exchanging oauth code", slog.Any("err", err))
 
-		return callbackResult{UserMessage: "Google sign-in failed. Please try again."}
+		return callbackResult{UserMessage: "google.signInFailed"}
 	}
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
 		logger.ErrorContext(r.Context(), "missing id_token from google token response")
 
-		return callbackResult{UserMessage: "Google sign-in failed. Please try again."}
+		return callbackResult{UserMessage: "google.signInFailed"}
 	}
 
 	idToken, err := a.verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "id token verification failed", slog.Any("err", err))
 
-		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+		return callbackResult{UserMessage: "google.verifyFailed"}
 	}
 
 	var claims googleClaims
 	if cErr := idToken.Claims(&claims); cErr != nil {
 		logger.ErrorContext(r.Context(), "id token claim parse failed", slog.Any("err", cErr))
 
-		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+		return callbackResult{UserMessage: "google.verifyFailed"}
 	}
 
 	// email_verified is the security boundary for the silent
@@ -400,7 +403,7 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 	// existing Top Banana account with the same address.
 	if !claims.EmailVerified {
 		return callbackResult{
-			UserMessage: "Your Google account email is not verified. Verify it with Google and try again.",
+			UserMessage: "google.emailNotVerified",
 		}
 	}
 
@@ -410,7 +413,7 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 	if idToken.Subject == "" {
 		logger.ErrorContext(r.Context(), "id token has empty subject")
 
-		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+		return callbackResult{UserMessage: "google.verifyFailed"}
 	}
 
 	return callbackResult{Subject: idToken.Subject, Email: claims.Email}
@@ -794,30 +797,30 @@ func googleStateCookie(value string, secure bool, maxAge int) *http.Cookie {
 }
 
 // googleLinkErrorMessage maps a linkOrCreateGooglePlayer failure to the
-// user-facing banner. A refused registration gets its own message; any
-// other failure gets the generic retry copy.
+// catalog key for the user-facing banner. A refused registration gets its
+// own message; any other failure gets the generic retry copy.
 func googleLinkErrorMessage(err error) string {
 	if errors.Is(err, ErrRegistrationDisabled) {
-		return "Registration is currently disabled. Ask an administrator for an account."
+		return "google.registrationDisabled"
 	}
 
-	return "Sign-in failed. Please try again."
+	return "google.signInFailedGeneric"
 }
 
-// renderGoogleError re-renders the login template with a short
-// message. Keeps the failed-OAuth-flow UX consistent with the
-// invalid-credentials flow - a recoverable form, not an HTTP error
-// page.
+// renderGoogleError re-renders the login template with a short message
+// translated from messageKey for the request locale. Keeps the
+// failed-OAuth-flow UX consistent with the invalid-credentials flow: a
+// recoverable form, not an HTTP error page.
 func renderGoogleError(
 	renderer *render.Renderer,
 	w http.ResponseWriter,
 	r *http.Request,
-	message string,
+	messageKey string,
 	registrationEnabled, forgotPasswordEnabled bool,
 ) {
 	renderer.Render(w, r, http.StatusUnauthorized, formData{
 		Title:              "Log in",
-		Message:            message,
+		Message:            locale.Translate(locale.Resolve(r), messageKey),
 		ShowRegister:       registrationEnabled,
 		ShowGoogle:         true,
 		ShowForgotPassword: forgotPasswordEnabled,

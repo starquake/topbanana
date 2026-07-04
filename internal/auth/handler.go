@@ -197,7 +197,7 @@ func HandleRegisterSubmit(
 		password := r.PostFormValue("password")
 		passwordConfirm := r.PostFormValue("password_confirm")
 
-		input := validateRegisterInput(rawDisplayName, rawEmail, password, passwordConfirm)
+		input := validateRegisterInput(locale.Resolve(r), rawDisplayName, rawEmail, password, passwordConfirm)
 		if !input.OK {
 			renderer.Render(w, r, http.StatusBadRequest, formData{
 				Title:       "Register",
@@ -285,7 +285,7 @@ func handleRegisterError(
 			Title:       "Register",
 			DisplayName: input.CleanedDisplayName,
 			Email:       input.CleanedEmail,
-			Message:     "That display name is already taken.",
+			Message:     locale.Translate(locale.Resolve(r), "register.displayNameTaken"),
 			ShowGoogle:  deps.GoogleEnabled,
 		})
 	default:
@@ -856,7 +856,7 @@ func renderLoginRateLimited(
 	cfg.render.Render(w, r, http.StatusTooManyRequests, formData{
 		Title:              "Log in",
 		Email:              email,
-		Message:            "Too many attempts. Try again in a moment.",
+		Message:            locale.Translate(locale.Resolve(r), "login.rateLimited"),
 		ShowRegister:       cfg.registrationEnabled,
 		ShowGoogle:         cfg.googleEnabled,
 		ShowForgotPassword: cfg.forgotPasswordEnabled,
@@ -906,7 +906,7 @@ type registerInput struct {
 // email, and validates the inputs. A blank displayName falls back to
 // [GeneratePetname] so register-with-just-email works after #446 made
 // the display name optional; email is the credential identifier.
-func validateRegisterInput(displayName, email, password, passwordConfirm string) registerInput {
+func validateRegisterInput(loc, displayName, email, password, passwordConfirm string) registerInput {
 	cleanedDisplayName := strings.TrimSpace(displayName)
 	if cleanedDisplayName == "" {
 		cleanedDisplayName = GeneratePetname()
@@ -915,13 +915,13 @@ func validateRegisterInput(displayName, email, password, passwordConfirm string)
 	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: "Enter a valid email address.", OK: false,
+			ErrMsg: locale.Translate(loc, "validation.invalidEmail"), OK: false,
 		}
 	}
 	if len(password) < MinPasswordLength {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
+			ErrMsg: localizeCount(loc, "validation.passwordTooShort", MinPasswordLength),
 			OK:     false,
 		}
 	}
@@ -931,18 +931,25 @@ func validateRegisterInput(displayName, email, password, passwordConfirm string)
 		// user-friendly message.
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
+			ErrMsg: localizeCount(loc, "validation.passwordTooLong", MaxPasswordLength),
 			OK:     false,
 		}
 	}
 	if password != passwordConfirm {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: "Passwords do not match.", OK: false,
+			ErrMsg: locale.Translate(loc, "validation.passwordsNoMatch"), OK: false,
 		}
 	}
 
 	return registerInput{CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail, OK: true}
+}
+
+// localizeCount translates key for loc and fills the {n} placeholder with n.
+// Substituting a token keeps the format string constant, avoiding a
+// non-constant format string that vet flags.
+func localizeCount(loc, key string, n int) string {
+	return strings.ReplaceAll(locale.Translate(loc, key), "{n}", strconv.Itoa(n))
 }
 
 // renderInvalidCredentials re-renders the login form with the generic
@@ -959,7 +966,7 @@ func renderInvalidCredentials(
 	cfg.render.Render(w, r, http.StatusUnauthorized, formData{
 		Title:              "Log in",
 		Email:              email,
-		Message:            "Invalid email or password.",
+		Message:            locale.Translate(locale.Resolve(r), "login.invalidCredentials"),
 		ShowRegister:       cfg.registrationEnabled,
 		ShowGoogle:         cfg.googleEnabled,
 		ShowForgotPassword: cfg.forgotPasswordEnabled,
@@ -1024,9 +1031,21 @@ func authPerRequestFuncs(r *http.Request) template.FuncMap {
 		signedIn = true
 	}
 
+	loc := locale.Resolve(r)
+
 	return template.FuncMap{
-		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
-		"viewerName": func() string { return displayName },
-		"isSignedIn": func() bool { return signedIn },
+		"ogImage":      func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
+		"viewerName":   func() string { return displayName },
+		"isSignedIn":   func() bool { return signedIn },
+		"passwordHelp": func() string { return localizedPasswordHelp(loc) },
 	}
+}
+
+// localizedPasswordHelp renders the password length help text for loc,
+// filling the {min}/{max} placeholders so it stays bound to the constants.
+func localizedPasswordHelp(loc string) string {
+	help := locale.Translate(loc, "common.passwordHelp")
+	help = strings.ReplaceAll(help, "{min}", strconv.Itoa(MinPasswordLength))
+
+	return strings.ReplaceAll(help, "{max}", strconv.Itoa(MaxPasswordLength))
 }

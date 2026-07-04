@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -70,10 +71,11 @@ func HandleVerifyEmail(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := r.URL.Query().Get("token")
 		if raw == "" {
+			loc := locale.Resolve(r)
 			renderer.Render(w, r, http.StatusBadRequest, verifyEmailPageData{
-				Title:   "Verify email",
-				Heading: "Link is missing",
-				Message: "This verification link is missing its token. Use the link from the email exactly as it was sent.",
+				Title:   locale.Translate(loc, "verifyEmail.title"),
+				Heading: locale.Translate(loc, "verifyEmail.missingHeading"),
+				Message: locale.Translate(loc, "verifyEmail.missingMessage"),
 			})
 
 			return
@@ -158,13 +160,14 @@ func renderVerifyOutcome(
 	renderer *render.Renderer,
 	out verifyOutcome,
 ) {
+	loc := locale.Resolve(r)
 	switch {
 	case out.err == nil:
 		refreshSessionAfterVerify(w, r, out.logger, out.players, out.sessions, out.ownerID)
 		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
-			Title:        "Email verified",
-			Heading:      "Email verified",
-			Message:      "Your email address is confirmed. You can now use everything Top Banana! has to offer.",
+			Title:        locale.Translate(loc, "verifyEmail.verifiedHeading"),
+			Heading:      locale.Translate(loc, "verifyEmail.verifiedHeading"),
+			Message:      locale.Translate(loc, "verifyEmail.verifiedMessage"),
 			ShowContinue: true,
 			ContinueHref: out.landing,
 		})
@@ -173,9 +176,9 @@ func renderVerifyOutcome(
 		// click (mail-client prefetch, browser reload) should not
 		// look like an error.
 		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
-			Title:        "Email verified",
-			Heading:      "Already verified",
-			Message:      "This email address was already verified. You can carry on.",
+			Title:        locale.Translate(loc, "verifyEmail.verifiedHeading"),
+			Heading:      locale.Translate(loc, "verifyEmail.alreadyHeading"),
+			Message:      locale.Translate(loc, "verifyEmail.alreadyMessage"),
 			ShowContinue: true,
 			ContinueHref: out.landing,
 		})
@@ -184,15 +187,15 @@ func renderVerifyOutcome(
 		// new address between send and click. Render a distinct page
 		// so the visitor sees why the swap did not apply.
 		renderer.Render(w, r, http.StatusConflict, verifyEmailPageData{
-			Title:   "Verify email",
-			Heading: "Address no longer available",
-			Message: "That email is already attached to another account. Submit the change again with a different address.",
+			Title:   locale.Translate(loc, "verifyEmail.title"),
+			Heading: locale.Translate(loc, "verifyEmail.takenHeading"),
+			Message: locale.Translate(loc, "verifyEmail.takenMessage"),
 		})
 	case errors.Is(out.err, ErrVerifyTokenInvalid):
 		renderer.Render(w, r, http.StatusGone, verifyEmailPageData{
-			Title:   "Verify email",
-			Heading: "Link is no longer valid",
-			Message: "This verification link has expired or was never issued. Sign in to request a fresh one.",
+			Title:   locale.Translate(loc, "verifyEmail.title"),
+			Heading: locale.Translate(loc, "verifyEmail.invalidHeading"),
+			Message: locale.Translate(loc, "verifyEmail.invalidMessage"),
 		})
 	case errors.Is(out.err, ErrPlayerNotFound):
 		// Token's owning row disappeared between insert and consume
@@ -201,9 +204,9 @@ func renderVerifyOutcome(
 		// consume side already wrote consumed_at so the link cannot
 		// be replayed.
 		renderer.Render(w, r, http.StatusGone, verifyEmailPageData{
-			Title:   "Verify email",
-			Heading: "Link is no longer valid",
-			Message: "This verification link can no longer be applied. Sign in to request a fresh one.",
+			Title:   locale.Translate(loc, "verifyEmail.title"),
+			Heading: locale.Translate(loc, "verifyEmail.invalidHeading"),
+			Message: locale.Translate(loc, "verifyEmail.notFoundMessage"),
 		})
 	default:
 		logger.ErrorContext(r.Context(), "verify email consume failed", slog.Any("err", out.err))

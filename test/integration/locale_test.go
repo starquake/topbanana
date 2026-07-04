@@ -203,6 +203,25 @@ func TestLocaleAuthPages_Integration(t *testing.T) {
 		assertContains(t, body, `<html lang="nl">`)
 		assertNotContains(t, body, profileSubEN)
 	})
+
+	// A handler-supplied Heading/Message (not a {{t}} template string) must
+	// also localize: an unknown verify token renders the invalid-link page.
+	badToken := baseURL + "/verify-email?token=nonexistent-token"
+
+	t.Run("verify-email invalid state defaults to English", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, badToken, "", nil)
+		assertContains(t, body, "Link is no longer valid")
+		assertContains(t, body, `<html lang="en">`)
+	})
+
+	t.Run("verify-email invalid state renders Dutch handler message", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, badToken, "", &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, "Link is niet meer geldig")
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, "Link is no longer valid")
+	})
 }
 
 // getBodyWithClientCookie fetches target with the given (session-carrying)

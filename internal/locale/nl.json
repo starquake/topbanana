@@ -126,6 +126,47 @@
   "profilePassword.subtitle": "Kies een nieuw wachtwoord. Andere ingelogde sessies worden uitgelogd.",
   "profilePassword.saved": "Wachtwoord bijgewerkt.",
 
+  "common.passwordHelp": "Moet {min}-{max} tekens lang zijn.",
+
+  "validation.invalidEmail": "Voer een geldig e-mailadres in.",
+  "validation.passwordTooShort": "Wachtwoord moet minstens {n} tekens bevatten.",
+  "validation.passwordTooLong": "Wachtwoord mag hoogstens {n} tekens bevatten.",
+  "validation.passwordsNoMatch": "De wachtwoorden komen niet overeen.",
+  "validation.displayNameRequired": "Kies een weergavenaam.",
+
+  "login.rateLimited": "Te veel pogingen. Probeer het zo weer.",
+  "login.invalidCredentials": "Onjuist e-mailadres of wachtwoord.",
+
+  "register.displayNameTaken": "Die weergavenaam is al bezet.",
+
+  "acceptInvite.title": "Uitnodiging",
+  "acceptInvite.displayNameTaken": "Die weergavenaam is al bezet. Kies een andere.",
+  "acceptInvite.emailTaken": "Er bestaat al een account voor dit e-mailadres. Log in plaats daarvan in.",
+
+  "resetPassword.linkTitle": "Resetlink",
+
+  "verifyEmail.title": "E-mailadres bevestigen",
+  "verifyEmail.missingHeading": "Link ontbreekt",
+  "verifyEmail.missingMessage": "Deze verificatielink mist de token. Gebruik de link uit de e-mail precies zoals die is verzonden.",
+  "verifyEmail.verifiedHeading": "E-mailadres bevestigd",
+  "verifyEmail.verifiedMessage": "Je e-mailadres is bevestigd. Je kunt nu alles van Top Banana! gebruiken.",
+  "verifyEmail.alreadyHeading": "Al bevestigd",
+  "verifyEmail.alreadyMessage": "Dit e-mailadres was al bevestigd. Je kunt verdergaan.",
+  "verifyEmail.takenHeading": "Adres niet meer beschikbaar",
+  "verifyEmail.takenMessage": "Dat e-mailadres is al aan een ander account gekoppeld. Dien de wijziging opnieuw in met een ander adres.",
+  "verifyEmail.invalidHeading": "Link is niet meer geldig",
+  "verifyEmail.invalidMessage": "Deze verificatielink is verlopen of is nooit uitgegeven. Log in om een nieuwe aan te vragen.",
+  "verifyEmail.notFoundMessage": "Deze verificatielink kan niet meer worden toegepast. Log in om een nieuwe aan te vragen.",
+
+  "google.signInFailed": "Inloggen met Google is mislukt. Probeer het opnieuw.",
+  "google.verifyFailed": "We konden je Google-login niet controleren.",
+  "google.emailNotVerified": "Het e-mailadres van je Google-account is niet geverifieerd. Controleer dit bij Google en probeer het opnieuw.",
+  "google.signInExpired": "De inlogsessie is verlopen. Probeer het opnieuw.",
+  "google.signInCancelled": "Inloggen met Google is geannuleerd.",
+  "google.registrationDisabled": "Registratie is momenteel uitgeschakeld. Vraag een beheerder om een account.",
+  "google.signInFailedGeneric": "Inloggen is mislukt. Probeer het opnieuw.",
+  "google.blocked": "Inloggen geblokkeerd: je e-mailadres is niet geverifieerd. Vraag een verificatielink aan.",
+
   "common.retry": "Opnieuw",
   "common.loading": "Laden...",
   "common.continue": "Doorgaan",
