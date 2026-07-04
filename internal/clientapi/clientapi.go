@@ -179,6 +179,35 @@ func gateQuizRead(
 	return canReadQuiz(w, r, visibility)
 }
 
+// gatePreviewOwner enforces the preview & play ownership rule (#1192): only the
+// quiz's creator or an admin may open a preview game. It loads the quiz for its
+// creator id (a missing quiz 404s) and 403s a non-owner. The service enforces
+// the solo-only rule separately, so this handler concern is ownership alone.
+func gatePreviewOwner(
+	w http.ResponseWriter, r *http.Request,
+	logger *slog.Logger, service *game.Service, quizID int64, player *auth.Player,
+) bool {
+	qz, err := service.GetQuiz(r.Context(), quizID)
+	if err != nil {
+		if errors.Is(err, quiz.ErrQuizNotFound) {
+			http.NotFound(w, r)
+
+			return false
+		}
+		writeInternalError(w, r, logger, "error loading quiz for preview gate", err)
+
+		return false
+	}
+
+	if !player.IsAdmin() && player.ID != qz.CreatedByPlayerID {
+		http.Error(w, "only the quiz owner can preview this quiz", http.StatusForbidden)
+
+		return false
+	}
+
+	return true
+}
+
 // decimalBase is the radix used when formatting ids as strings.
 const decimalBase = 10
 
@@ -548,6 +577,10 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	type createGameRequest struct {
 		QuizID int64 `json:"quizId"`
+		// Preview requests a host preview game (#1192): the owner test-plays a
+		// draft solo quiz without their run reaching the leaderboard. Only the
+		// quiz owner or an admin may set it; a non-owner is rejected with 403.
+		Preview bool `json:"preview"`
 	}
 
 	type createGameResponse struct {
@@ -580,19 +613,13 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		g, err := service.CreateGame(ctx, req.QuizID, player.ID)
+		if req.Preview && !gatePreviewOwner(w, r, logger, service, req.QuizID, player) {
+			return
+		}
+
+		g, err := service.CreateGame(ctx, req.QuizID, player.ID, req.Preview)
 		if err != nil {
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			if errors.Is(err, game.ErrGameAlreadyExists) {
-				http.Error(w, err.Error(), http.StatusConflict)
-
-				return
-			}
-			writeInternalError(w, r, logger, "error creating game", err)
+			writeCreateGameError(w, r, logger, err)
 
 			return
 		}
@@ -606,6 +633,22 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 	})
+}
+
+// writeCreateGameError maps a [game.Service.CreateGame] failure onto the right
+// HTTP response: a missing/draft/live quiz 404s (opaque), a disallowed preview
+// 403s, an existing game 409s, and anything else 500s.
+func writeCreateGameError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	switch {
+	case errors.Is(err, quiz.ErrQuizNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, game.ErrPreviewNotAllowed):
+		http.Error(w, "this quiz cannot be previewed", http.StatusForbidden)
+	case errors.Is(err, game.ErrGameAlreadyExists):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		writeInternalError(w, r, logger, "error creating game", err)
+	}
 }
 
 // HandleGameForQuiz is the resume probe: callers POST /api/games or

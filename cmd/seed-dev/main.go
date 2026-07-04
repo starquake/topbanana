@@ -483,6 +483,9 @@ func quizFromFixture(f *quizFixture) (*quiz.Quiz, error) {
 		Slug:              slug.Make(f.Title),
 		Description:       f.Description,
 		CreatedByPlayerID: seededAdminID,
+		// Seed fixtures are ready to play, so publish them (#1192); a draft
+		// would be hidden from the public listing and not solo-playable.
+		Published: true,
 	}
 
 	if len(f.Rounds) > 0 {

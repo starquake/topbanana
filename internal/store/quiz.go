@@ -41,6 +41,8 @@ func (s *QuizStore) Ping(ctx context.Context) error {
 // ListQuizzes returns a summary list of quizzes without questions or options.
 // Includes rows of every visibility - use [QuizStore.ListPublicQuizzes] from
 // public-facing handlers.
+//
+//nolint:dupl // The three list methods are thin sqlc wrappers over distinct generated row types (ListQuizzesRow / ListPublicQuizzesRow / ListLiveQuizzesRow); the identical field mapping cannot be shared without reflection.
 func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListQuizzes(ctx)
 	if err != nil {
@@ -61,6 +63,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
 			PlayCount:         r.PlayCount,
+			Published:         r.Published != 0,
 			// INNER JOIN on players makes this a plain string (#359);
 			// the FK guarantees a creator row exists.
 			CreatedByDisplayName: r.CreatedByDisplayName,
@@ -74,6 +77,8 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 // ListPublicQuizzes returns the visibility=public subset of
 // [QuizStore.ListQuizzes] (#103). Same shape, same ordering - just the
 // rows safe to surface to anonymous traffic.
+//
+//nolint:dupl // See ListQuizzes: distinct sqlc row types, identical mapping.
 func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListPublicQuizzes(ctx)
 	if err != nil {
@@ -94,6 +99,7 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
 			PlayCount:         r.PlayCount,
+			Published:         r.Published != 0,
 			// INNER JOIN, see ListQuizzes (#359).
 			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
@@ -107,6 +113,8 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 // (#836). Same shape, same ordering - just the rows a host can run live,
 // which the intermission picker offers as the next quiz. Visibility is not
 // filtered, matching CreateSession's host gate (mode='live' alone).
+//
+//nolint:dupl // See ListQuizzes: distinct sqlc row types, identical mapping.
 func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListLiveQuizzes(ctx)
 	if err != nil {
@@ -127,6 +135,7 @@ func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
 			PlayCount:         r.PlayCount,
+			Published:         r.Published != 0,
 			// INNER JOIN, see ListQuizzes (#359).
 			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
@@ -191,6 +200,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		Visibility:        row.Visibility,
 		Mode:              row.Mode,
 		PlayCount:         row.PlayCount,
+		Published:         row.Published != 0,
 		// INNER JOIN, see ListQuizzes (#359).
 		CreatedByDisplayName: row.CreatedByDisplayName,
 	}
@@ -261,6 +271,35 @@ func (s *QuizStore) SetQuizMode(ctx context.Context, id int64, mode string) erro
 	}
 
 	return nil
+}
+
+// SetQuizPublished flips just the quiz's published flag (#1192), leaving its
+// questions untouched, and maps a no-op update (id gone) to ErrQuizNotFound.
+func (s *QuizStore) SetQuizPublished(ctx context.Context, id int64, published bool) error {
+	res, err := s.q.SetQuizPublished(ctx, db.SetQuizPublishedParams{
+		Published: boolToInt64(published),
+		ID:        id,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set quiz published: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return quiz.ErrQuizNotFound
+	}
+
+	return nil
+}
+
+// QuizHasRealPlays reports whether the quiz has at least one non-preview game
+// (#1192). Host preview games are excluded, so an owner previewing their draft
+// never blocks a later unpublish.
+func (s *QuizStore) QuizHasRealPlays(ctx context.Context, id int64) (bool, error) {
+	hasPlays, err := s.q.QuizHasRealPlays(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to check quiz real plays: %w", err)
+	}
+
+	return hasPlays, nil
 }
 
 // ListQuestions retrieves a list of questions for the specified quiz ID, including their options, from the data store.
@@ -759,6 +798,10 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		TimeLimitSeconds:  int64(timeLimit),
 		Visibility:        visibility,
 		Mode:              mode,
+		// New quizzes are drafts by default (#1192); the admin create path
+		// leaves Published false. Callers that seed a ready-to-play quiz
+		// (fixtures, importers) set it explicitly.
+		Published: boolToInt64(qz.Published),
 	})
 	if err != nil {
 		return classifySlugConflictErr(err, "failed to create quiz")
@@ -771,6 +814,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.Visibility = row.Visibility
 	qz.Mode = row.Mode
 	qz.PlayCount = row.PlayCount
+	qz.Published = row.Published != 0
 
 	// Every quiz needs a default round (#444): questions.round_id is NOT
 	// NULL and execCreateQuestion resolves it via GetDefaultRound.

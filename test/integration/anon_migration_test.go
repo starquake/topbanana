@@ -31,6 +31,7 @@ func TestAnonMigration_Integration(t *testing.T) {
 	// Seed an admin + a quiz the anonymous visitor will play.
 	quizRow := &quiz.Quiz{
 		Title: "Migration Test Quiz", Slug: "migration-test-quiz",
+		Published:         true,
 		Description:       "Carry me across the auth boundary.",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{

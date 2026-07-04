@@ -16,6 +16,13 @@
                 {{/* Visibility is not yet modelled; show a default Public pill
                      so the structure is in place for #103. */}}
                 <span class="pill pill-public">Public</span>
+                {{/* Draft / Published status (#1192). A frontend agent will
+                     restyle this into a proper badge. */}}
+                {{if .Quiz.Published}}
+                    <span class="pill" data-testid="quiz-status">Published</span>
+                {{else}}
+                    <span class="pill" data-testid="quiz-status">Draft</span>
+                {{end}}
                 <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
                 {{if .Quiz.CreatedByDisplayName}}
                     <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Created by {{.Quiz.CreatedByDisplayName}}</span>
@@ -87,6 +94,44 @@
                     <span>Share</span>
                 </button>
                 {{if $canEdit}}
+                {{/* Export bundles the quiz tree plus its referenced media into
+                     a downloadable .zip (#1113). Read-only, so it is available in
+                     both draft and published states. */}}
+                <a href="/admin/quizzes/{{.Quiz.ID}}/export"
+                   data-testid="export-quiz"
+                   class="btn-ghost gap-2">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+                    <span>Export</span>
+                </a>
+                {{if .Quiz.Published}}
+                {{/* Published: the quiz is locked from edits (#1192). Offer
+                     Unpublish only while it has not been played; otherwise show a
+                     disabled control explaining why. */}}
+                {{if .Quiz.CanUnpublish}}
+                <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/unpublish" class="inline-flex">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit" data-testid="unpublish-quiz" class="btn-ghost gap-2">
+                        <span>Unpublish</span>
+                    </button>
+                </form>
+                {{else}}
+                <button type="button" disabled data-testid="unpublish-quiz"
+                        title="This quiz has been played and can no longer be unpublished."
+                        class="btn-ghost gap-2 opacity-50 cursor-not-allowed">
+                    <span>Unpublish</span>
+                </button>
+                {{end}}
+                {{else}}
+                {{/* Draft: publish, preview (solo only), and the content-edit
+                     controls, all hidden once published. */}}
+                <a href="/admin/quizzes/{{.Quiz.ID}}/publish" data-testid="publish-quiz" class="btn-primary gap-2">
+                    <span>Publish</span>
+                </a>
+                {{if eq .Quiz.Mode "solo"}}
+                <a href="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}?preview=1" data-testid="preview-quiz" class="btn-ghost gap-2">
+                    <span>Preview &amp; play</span>
+                </a>
+                {{end}}
                 {{/* Solo<->live toggle (#830): flip the play mode without
                      opening the edit form. The action targets the opposite of
                      the current mode; the server validates the {mode} segment. */}}
@@ -104,21 +149,13 @@
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
                     <span>Edit quiz</span>
                 </a>
-                {{/* Export bundles the quiz tree plus its referenced media into
-                     a downloadable .zip (#1113). Plain GET link, same gate as
-                     Edit. */}}
-                <a href="/admin/quizzes/{{.Quiz.ID}}/export"
-                   data-testid="export-quiz"
-                   class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
-                    <span>Export</span>
-                </a>
                 <button type="button"
                         onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
                         class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-sm bg-transparent text-danger border border-danger/40 font-semibold text-xs uppercase tracking-[0.12em] transition-colors hover:bg-danger/10 hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer">
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
                     <span>Delete</span>
                 </button>
+                {{end}}
                 {{end}}
             </div>
         </header>

@@ -2891,7 +2891,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
-		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
+		qz := env.seedQuiz(t, publishedTwoQuestionQuiz("Q1", "q-1"))
 		alice := env.seedPlayer(t, "alice")
 		bob := env.seedPlayer(t, "bob")
 		env.playThrough(t, qz, alice)
@@ -2953,7 +2953,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
-		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
+		qz := env.seedQuiz(t, publishedTwoQuestionQuiz("Q1", "q-1"))
 
 		handler := HandleQuizView(
 			logger,
@@ -2987,7 +2987,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
-		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
+		qz := env.seedQuiz(t, publishedTwoQuestionQuiz("Q1", "q-1"))
 		player := env.seedPlayer(t, "alice")
 		env.playThrough(t, qz, player)
 

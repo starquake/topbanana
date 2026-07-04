@@ -15,13 +15,17 @@ import (
 const bumpQuizPlayCountForGame = `-- name: BumpQuizPlayCountForGame :exec
 UPDATE quizzes
 SET play_count = play_count + 1
-WHERE quizzes.id = (SELECT quiz_id FROM games WHERE games.id = ?)
+WHERE quizzes.id = (
+    SELECT quiz_id FROM games WHERE games.id = ? AND games.is_preview = 0
+)
 `
 
 // Increments the durable hit counter (#891) for the quiz that owns this solo
 // game. Resolves the quiz from the game id so the caller only signals "this
 // play completed" without threading the quiz id. Never decremented; the CHECK
-// on quizzes.play_count keeps it non-negative.
+// on quizzes.play_count keeps it non-negative. A host preview game
+// (games.is_preview = 1, #1192) matches no row so the bump is a safe no-op:
+// previewing a draft never inflates the "times played" number.
 func (q *Queries) BumpQuizPlayCountForGame(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, bumpQuizPlayCountForGame, id)
 	return err
@@ -109,9 +113,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode, play_count
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, published, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode, play_count, published
 `
 
 type CreateQuizParams struct {
@@ -122,6 +126,7 @@ type CreateQuizParams struct {
 	TimeLimitSeconds  int64
 	Visibility        string
 	Mode              string
+	Published         int64
 }
 
 // created_by_player_id is NOT NULL with an FK to players.id (migration
@@ -137,6 +142,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		arg.TimeLimitSeconds,
 		arg.Visibility,
 		arg.Mode,
+		arg.Published,
 	)
 	var i Quiz
 	err := row.Scan(
@@ -151,6 +157,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.Visibility,
 		&i.Mode,
 		&i.PlayCount,
+		&i.Published,
 	)
 	return i, err
 }
@@ -289,6 +296,7 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -308,6 +316,7 @@ type GetQuizRow struct {
 	Visibility           string
 	Mode                 string
 	PlayCount            int64
+	Published            int64
 	CreatedByDisplayName string
 }
 
@@ -329,6 +338,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.Visibility,
 		&i.Mode,
 		&i.PlayCount,
+		&i.Published,
 		&i.CreatedByDisplayName,
 	)
 	return i, err
@@ -363,10 +373,12 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.mode = 'live'
+  AND q.published = 1
 ORDER BY q.updated_at DESC, q.id DESC
 `
 
@@ -382,13 +394,15 @@ type ListLiveQuizzesRow struct {
 	Visibility           string
 	Mode                 string
 	PlayCount            int64
+	Published            int64
 	CreatedByDisplayName string
 }
 
 // Live-mode variant of ListQuizzes (#836). Filters to mode = 'live' so the
-// host intermission picker only offers hostable quizzes. Visibility is left
-// unfiltered, matching CreateSession, which gates a host on mode = 'live'
-// alone (any live quiz is hostable, regardless of who created it).
+// host intermission picker only offers hostable quizzes, and to published = 1
+// (#1192) so a draft live quiz stays out of the shared picker (its owner can
+// still host it to test via the owner-or-published gate in CreateSession).
+// Visibility is left unfiltered: a host can view any quiz.
 func (q *Queries) ListLiveQuizzes(ctx context.Context) ([]ListLiveQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listLiveQuizzes)
 	if err != nil {
@@ -410,6 +424,7 @@ func (q *Queries) ListLiveQuizzes(ctx context.Context) ([]ListLiveQuizzesRow, er
 			&i.Visibility,
 			&i.Mode,
 			&i.PlayCount,
+			&i.Published,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -538,11 +553,13 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
 ORDER BY q.updated_at DESC, q.id DESC
 `
 
@@ -558,6 +575,7 @@ type ListPublicQuizzesRow struct {
 	Visibility           string
 	Mode                 string
 	PlayCount            int64
+	Published            int64
 	CreatedByDisplayName string
 }
 
@@ -565,7 +583,8 @@ type ListPublicQuizzesRow struct {
 // 'public' so unlisted and private quizzes never appear in the player
 // client's quiz picker or on the home page's all-quizzes view. The
 // mode = 'solo' filter (MP-0 / #677) keeps live (hosted-only) quizzes
-// out of the solo browse paths too.
+// out of the solo browse paths too. The published = 1 filter (#1192)
+// keeps draft quizzes out until their owner publishes them.
 func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPublicQuizzes)
 	if err != nil {
@@ -587,6 +606,7 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 			&i.Visibility,
 			&i.Mode,
 			&i.PlayCount,
+			&i.Published,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -719,6 +739,7 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -737,6 +758,7 @@ type ListQuizzesRow struct {
 	Visibility           string
 	Mode                 string
 	PlayCount            int64
+	Published            int64
 	CreatedByDisplayName string
 }
 
@@ -774,6 +796,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.Visibility,
 			&i.Mode,
 			&i.PlayCount,
+			&i.Published,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -877,6 +900,22 @@ func (q *Queries) QuizExists(ctx context.Context, id int64) (bool, error) {
 	return quiz_exists, err
 }
 
+const quizHasRealPlays = `-- name: QuizHasRealPlays :one
+SELECT EXISTS(
+    SELECT 1 FROM games WHERE quiz_id = ? AND is_preview = 0
+) AS has_plays
+`
+
+// Reports whether the quiz has at least one non-preview game (#1192). Once a
+// real player has started a game the quiz can no longer be unpublished; host
+// preview games (is_preview = 1) do not count.
+func (q *Queries) QuizHasRealPlays(ctx context.Context, quizID int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, quizHasRealPlays, quizID)
+	var has_plays bool
+	err := row.Scan(&has_plays)
+	return has_plays, err
+}
+
 const setQuestionMedia = `-- name: SetQuestionMedia :execresult
 UPDATE questions
 SET image_media_id = ?,
@@ -904,6 +943,25 @@ func (q *Queries) SetQuestionMedia(ctx context.Context, arg SetQuestionMediaPara
 		arg.AudioRepeat,
 		arg.ID,
 	)
+}
+
+const setQuizPublished = `-- name: SetQuizPublished :execresult
+UPDATE quizzes
+SET published  = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+`
+
+type SetQuizPublishedParams struct {
+	Published int64
+	ID        int64
+}
+
+// Flips just the published flag without touching the question tree (#1192),
+// so publishing / unpublishing cannot clobber a concurrent edit the way the
+// full UpdateQuiz would. Modelled on UpdateQuizMode.
+func (q *Queries) SetQuizPublished(ctx context.Context, arg SetQuizPublishedParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setQuizPublished, arg.Published, arg.ID)
 }
 
 const updateOption = `-- name: UpdateOption :execresult

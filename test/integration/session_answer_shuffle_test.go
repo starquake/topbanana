@@ -24,6 +24,7 @@ func seedShuffleLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, 
 	}
 	qz := &quiz.Quiz{
 		Title:             "Shuffle " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "per-session shuffle fixture",
 		CreatedByPlayerID: seededAdminID,

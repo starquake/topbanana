@@ -53,24 +53,28 @@ func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Gam
 }
 
 const createGame = `-- name: CreateGame :one
-INSERT INTO games (id, quiz_id)
-VALUES (?, ?)
-RETURNING id, quiz_id, created_at, started_at
+INSERT INTO games (id, quiz_id, is_preview)
+VALUES (?, ?, ?)
+RETURNING id, quiz_id, created_at, started_at, is_preview
 `
 
 type CreateGameParams struct {
-	ID     string
-	QuizID int64
+	ID        string
+	QuizID    int64
+	IsPreview int64
 }
 
+// is_preview marks a host preview game (#1192): the owner test-plays a draft
+// solo quiz without their run reaching the leaderboard or the play_count.
 func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, error) {
-	row := q.db.QueryRowContext(ctx, createGame, arg.ID, arg.QuizID)
+	row := q.db.QueryRowContext(ctx, createGame, arg.ID, arg.QuizID, arg.IsPreview)
 	var i Game
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
@@ -282,7 +286,7 @@ func (q *Queries) DeleteGamesByIDs(ctx context.Context, ids []string) error {
 }
 
 const getGame = `-- name: GetGame :one
-SELECT id, quiz_id, created_at, started_at
+SELECT id, quiz_id, created_at, started_at, is_preview
 FROM games
 WHERE id = ?
 `
@@ -295,6 +299,7 @@ func (q *Queries) GetGame(ctx context.Context, id string) (Game, error) {
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
@@ -314,13 +319,20 @@ type GetGameByPlayerAndQuizParams struct {
 	QuizID   int64
 }
 
+type GetGameByPlayerAndQuizRow struct {
+	ID        string
+	QuizID    int64
+	CreatedAt time.Time
+	StartedAt sql.NullTime
+}
+
 // Returns the most-recent game for the given (player, quiz) pair. Used by the
 // player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
 // defensive backstop in CreateGame so the same player cannot start a second
 // attempt at a quiz they have already played.
-func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlayerAndQuizParams) (Game, error) {
+func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlayerAndQuizParams) (GetGameByPlayerAndQuizRow, error) {
 	row := q.db.QueryRowContext(ctx, getGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
-	var i Game
+	var i GetGameByPlayerAndQuizRow
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
@@ -477,6 +489,7 @@ FROM game_answers ga
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
 WHERE g.quiz_id = ?
+  AND g.is_preview = 0
 `
 
 type ListAnswersForQuizLeaderboardRow struct {
@@ -732,6 +745,7 @@ FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id
 WHERE g.quiz_id = ?2
+  AND g.is_preview = 0
 `
 
 type ListParticipantsForQuizLeaderboardParams struct {

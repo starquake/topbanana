@@ -25,6 +25,13 @@ var (
 	// [Service.GetGameForPlayerOnQuiz] first.
 	ErrGameAlreadyExists = errors.New("game already exists for this player and quiz")
 
+	// ErrPreviewNotAllowed is returned by [Service.CreateGame] when a preview
+	// game is requested for a quiz that cannot be previewed this way (#1192):
+	// preview & play is solo-only. Ownership is enforced by the handler (which
+	// has the requester's admin status); the service enforces the solo-mode
+	// rule. Handlers map it to 403.
+	ErrPreviewNotAllowed = errors.New("preview not allowed for this quiz")
+
 	// ErrAnswerAlreadyRecorded is returned by [GameStore.CreateAnswer]
 	// when a second answer for the same (game, player, game_question)
 	// trips the UNIQUE constraint. Handlers treat this as an idempotent
@@ -68,9 +75,13 @@ var (
 
 // Game represents a game. It is an instance of a quiz being played by a player.
 type Game struct {
-	ID           string
-	QuizID       int64
-	Quiz         *quiz.Quiz
+	ID     string
+	QuizID int64
+	Quiz   *quiz.Quiz
+	// Preview marks a host preview game (#1192): the owner test-plays a draft
+	// solo quiz without their run reaching the leaderboard or the play_count.
+	// Set on the create path; hydrated from games.is_preview on reads.
+	Preview      bool
 	CreatedAt    time.Time
 	StartedAt    *time.Time
 	Questions    []*Question

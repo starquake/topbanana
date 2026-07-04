@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	. "github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // withPlayer returns ctx annotated with an authenticated player. Use it
@@ -195,7 +196,7 @@ func TestHandleCreateGame_AlreadyExists(t *testing.T) {
 
 	// First game claims the (player, quiz) slot; the second create must
 	// surface 409 via the UNIQUE(player_id, quiz_id) guard.
-	if _, err := env.service.CreateGame(t.Context(), qz.ID, playerID); err != nil {
+	if _, err := env.service.CreateGame(t.Context(), qz.ID, playerID, false); err != nil {
 		t.Fatalf("seed CreateGame err = %v, want nil", err)
 	}
 
@@ -211,6 +212,102 @@ func TestHandleCreateGame_AlreadyExists(t *testing.T) {
 	if got, want := rec.Code, http.StatusConflict; got != want {
 		t.Errorf("status code = %v, want %v", got, want)
 	}
+}
+
+func TestHandleCreateGame_Preview(t *testing.T) {
+	t.Parallel()
+
+	// draftSoloQuiz is twoQuestionQuiz owned by ownerID but left as a draft, so
+	// only the owner may preview it and a normal create 404s.
+	draftSoloQuiz := func(ownerID int64) *quiz.Quiz {
+		qz := twoQuestionQuiz("Draft", "draft-quiz")
+		qz.CreatedByPlayerID = ownerID
+		qz.Published = false
+
+		return qz
+	}
+
+	t.Run("owner previews a draft solo quiz", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		owner := env.seedPlayer(t, "preview-owner")
+		qz := env.seedQuiz(t, draftSoloQuiz(owner))
+		handler := HandleCreateGame(env.logger, env.service)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), owner), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d, "preview": true}`, qz.ID)),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusCreated; got != want {
+			t.Fatalf("status = %v, want %v (body=%q)", got, want, rec.Body.String())
+		}
+	})
+
+	t.Run("non-owner cannot preview", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		owner := env.seedPlayer(t, "preview-owner-2")
+		stranger := env.seedPlayer(t, "preview-stranger")
+		qz := env.seedQuiz(t, draftSoloQuiz(owner))
+		handler := HandleCreateGame(env.logger, env.service)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), stranger), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d, "preview": true}`, qz.ID)),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusForbidden; got != want {
+			t.Errorf("status = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("normal create on a draft returns 404", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		owner := env.seedPlayer(t, "draft-normal-owner")
+		player := env.seedPlayer(t, "draft-normal-player")
+		qz := env.seedQuiz(t, draftSoloQuiz(owner))
+		handler := HandleCreateGame(env.logger, env.service)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), player), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("normal create on a published quiz succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Published", "published-quiz"))
+		player := env.seedPlayer(t, "published-player")
+		handler := HandleCreateGame(env.logger, env.service)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), player), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusCreated; got != want {
+			t.Errorf("status = %v, want %v (body=%q)", got, want, rec.Body.String())
+		}
+	})
 }
 
 // gameForQuizTestResponse mirrors the JSON shape returned by
@@ -233,7 +330,7 @@ func TestHandleGameForQuiz(t *testing.T) {
 
 		// Create the game and issue only the first of two questions, so
 		// the resume probe reports it as still in progress.
-		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
@@ -809,7 +906,7 @@ func TestHandleAnswerPost(t *testing.T) {
 
 		// Fresh game has no issued questions, so any question id is "not
 		// in game" from the answer path's view.
-		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
@@ -843,7 +940,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		// Issue the first question so it is in the game, then submit an
 		// option id that belongs to a different question: SubmitAnswer
 		// surfaces ErrOptionNotInQuestion, which the handler maps to 400.
-		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
@@ -907,7 +1004,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		svc := game.NewService(env.games, env.quizzes, env.logger)
 		svc.SetRevealDelay(-time.Hour)
 
-		g, err := svc.CreateGame(t.Context(), qz.ID, playerID)
+		g, err := svc.CreateGame(t.Context(), qz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
@@ -944,7 +1041,7 @@ func TestHandleAnswerPost(t *testing.T) {
 
 		// Issue the question for real, then submit through a store that
 		// reports it deleted - the mid-game race must 404, not 500 (#1180).
-		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
@@ -1073,7 +1170,7 @@ func TestHandleGameResults(t *testing.T) {
 		carol := env.seedPlayer(t, "carol-order")
 
 		ctx := t.Context()
-		g, err := env.service.CreateGame(ctx, qz.ID, alice)
+		g, err := env.service.CreateGame(ctx, qz.ID, alice, false)
 		if err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}

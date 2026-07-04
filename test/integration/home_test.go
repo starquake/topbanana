@@ -31,6 +31,7 @@ func TestHome_Integration(t *testing.T) {
 	// make quiz1 the popular leader and alice the active leader.
 	quiz1 := &quiz.Quiz{
 		Title: "Bananas of the World", Slug: "bananas-of-the-world",
+		Published:         true,
 		Description:       "Twenty rounds on cultivars.",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
@@ -42,6 +43,7 @@ func TestHome_Integration(t *testing.T) {
 	}
 	quiz2 := &quiz.Quiz{
 		Title: "Capital Cities", Slug: "capital-cities",
+		Published:         true,
 		Description:       "Geography quickfire.",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
@@ -247,6 +249,7 @@ func TestHome_Integration(t *testing.T) {
 	// inherit the same filter.
 	neverPlayed := &quiz.Quiz{
 		Title:             "Newly Authored",
+		Published:         true,
 		Slug:              "newly-authored",
 		Description:       "Just published — no one has played yet.",
 		CreatedByPlayerID: seededAdminID,

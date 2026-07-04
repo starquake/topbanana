@@ -139,6 +139,7 @@ func (e *sessionTestEnv) seedLiveQuiz(t *testing.T, slug string) *quiz.Quiz {
 		CreatedByPlayerID: seededAdminID,
 		Visibility:        quiz.VisibilityPublic,
 		Mode:              quiz.ModeLive,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is the capital of France?",

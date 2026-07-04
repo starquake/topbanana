@@ -27,6 +27,7 @@ func TestAnswer_TappedAtClamp(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Tapped-at Clamp Quiz",
+		Published:         true,
 		Slug:              "tapped-at-clamp-quiz",
 		Description:       "single-question fixture for #237 integration coverage",
 		CreatedByPlayerID: seededAdminID,

@@ -21,6 +21,7 @@ func TestAcceptInvite_PreservesAnonymousGame(t *testing.T) {
 
 	quizRow := &quiz.Quiz{
 		Title: "Invite Claim Quiz", Slug: "invite-claim-quiz",
+		Published:         true,
 		Description:       "Played as a guest, then accepted an invite.",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{

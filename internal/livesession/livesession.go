@@ -28,6 +28,13 @@ var (
 	// quizzes are hostable (MP-0 / #677).
 	ErrNotLiveQuiz = errors.New("quiz is not a live quiz")
 
+	// ErrQuizNotPublished is returned when a host tries to host a draft live
+	// quiz they do not own (#1192). A live quiz is hostable only if it is
+	// published or owned by the host (owner-or-published): the shared picker
+	// lists only published live quizzes, but the owner may host their own draft
+	// to test it before publishing.
+	ErrQuizNotPublished = errors.New("quiz is not published")
+
 	// ErrNotParticipant is returned by participant-gated reads/writes when
 	// the caller has not joined the session. Handlers map it to 404 so the
 	// join code stays opaque to non-participants, mirroring the game
@@ -565,6 +572,23 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 	s.startCountdown = d
 }
 
+// hostableQuizErr reports why qz cannot be hosted live by hostPlayerID, or nil
+// when it can (#677, #1192). It must be a live quiz (else [ErrNotLiveQuiz]), and
+// it must be published or owned by the host (else [ErrQuizNotPublished]): the
+// shared picker lists only published live quizzes, but the owner may host their
+// own draft to test it. Shared by the two hosting entry points, CreateSession
+// (a new room) and armRoomForHost (arming an existing room).
+func hostableQuizErr(qz *quiz.Quiz, hostPlayerID int64) error {
+	if qz.Mode != quiz.ModeLive {
+		return ErrNotLiveQuiz
+	}
+	if !qz.Published && qz.CreatedByPlayerID != hostPlayerID {
+		return ErrQuizNotPublished
+	}
+
+	return nil
+}
+
 // CreateSession opens a hosted room on behalf of the host (#836). quizID is
 // optional: nil opens an empty room with no current quiz (the "no game running
 // yet" staging state, where the host picks the first live quiz ad-hoc once
@@ -572,17 +596,19 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 // (the "Host live" entry, via [Service.StartHosting]). The route layer has
 // already gated the caller to host/admin; when a quiz is supplied this method
 // enforces the domain rules: it must exist and be visible to the host (any
-// visibility - a host can view any quiz, decision 4) and must be mode='live'
-// (MP-0 / #677). Returns [quiz.ErrQuizNotFound] when the supplied quiz does not
-// exist and [ErrNotLiveQuiz] when it is a solo quiz.
+// visibility - a host can view any quiz, decision 4), must be mode='live'
+// (MP-0 / #677), and must be published or owned by the host (owner-or-published,
+// #1192). Returns [quiz.ErrQuizNotFound] when the supplied quiz does not exist,
+// [ErrNotLiveQuiz] when it is a solo quiz, and [ErrQuizNotPublished] when it is
+// a draft live quiz the host does not own.
 func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID int64) (*Session, error) {
 	if quizID != nil {
 		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get quiz for session: %w", err)
 		}
-		if qz.Mode != quiz.ModeLive {
-			return nil, ErrNotLiveQuiz
+		if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+			return nil, gerr
 		}
 	}
 

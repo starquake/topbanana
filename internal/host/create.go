@@ -84,9 +84,12 @@ func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, play
 	sess, err := h.service.StartHosting(r.Context(), quizID, playerID)
 	if err != nil {
 		switch {
-		case errors.Is(err, quiz.ErrQuizNotFound), errors.Is(err, livesession.ErrNotLiveQuiz):
-			// A missing or solo quiz is not hostable; bounce back to the
-			// quiz list rather than surfacing a raw error.
+		case errors.Is(err, quiz.ErrQuizNotFound),
+			errors.Is(err, livesession.ErrNotLiveQuiz),
+			errors.Is(err, livesession.ErrQuizNotPublished):
+			// A missing, solo, or unpublished-and-not-owned quiz is not
+			// hostable; bounce back to the quiz list rather than surfacing a
+			// raw error.
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error hosting live quiz", slog.Any("err", err))
@@ -106,7 +109,9 @@ func (h *Handlers) hostLiveRestart(w http.ResponseWriter, r *http.Request, quizI
 	sess, err := h.service.RestartHosting(r.Context(), quizID, playerID)
 	if err != nil {
 		switch {
-		case errors.Is(err, quiz.ErrQuizNotFound), errors.Is(err, livesession.ErrNotLiveQuiz):
+		case errors.Is(err, quiz.ErrQuizNotFound),
+			errors.Is(err, livesession.ErrNotLiveQuiz),
+			errors.Is(err, livesession.ErrQuizNotPublished):
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error restarting host session", slog.Any("err", err))
@@ -195,7 +200,8 @@ func (h *Handlers) NextQuiz(w http.ResponseWriter, r *http.Request) {
 	case err == nil,
 		errors.Is(err, livesession.ErrGameInFlight),
 		errors.Is(err, quiz.ErrQuizNotFound),
-		errors.Is(err, livesession.ErrNotLiveQuiz):
+		errors.Is(err, livesession.ErrNotLiveQuiz),
+		errors.Is(err, livesession.ErrQuizNotPublished):
 		// code is the server-minted path value, never request input, so the
 		// redirect back to the lobby is same-origin.
 		dest := hostScreenPathPrefix + code

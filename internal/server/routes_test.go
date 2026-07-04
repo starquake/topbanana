@@ -69,6 +69,7 @@ func seedQuiz(t *testing.T, quizzes quiz.Store) *quiz.Quiz {
 		Description:       "for the routing test",
 		CreatedByPlayerID: seededAdminID,
 		Visibility:        quiz.VisibilityPublic,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
 		},

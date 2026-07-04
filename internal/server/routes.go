@@ -565,6 +565,18 @@ func addAdminRoutes(
 		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes, gameDeps.mediaSvc))),
 	)
 	mux.Handle(
+		"GET /admin/quizzes/{quizID}/publish",
+		requireGameHost(admin.HandleQuizPublishConfirm(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/publish",
+		csrfMW(requireGameHost(admin.HandleQuizPublish(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/unpublish",
+		csrfMW(requireGameHost(admin.HandleQuizUnpublish(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
 		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameDeps.gameService))),
 	)

@@ -337,6 +337,52 @@ func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
 	}
 }
 
+// TestService_CreateSession_DraftLiveQuizOwnerGate pins the owner-or-published
+// hosting gate (#1192): the owner may host their own draft live quiz to test it,
+// but another host cannot host an unpublished quiz (the shared picker only lists
+// published live quizzes).
+func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.July, 4, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	// seedRunnerQuizSlug creates a live quiz owned by player 1 and left as a
+	// draft (CreateQuiz defaults to draft).
+	const ownerID int64 = 1
+	qz := seedRunnerQuizSlug(t, h.quizStore, "draft-live-owner-gate", [][]bool{{true}})
+
+	t.Run("owner can host their own draft", func(t *testing.T) {
+		t.Parallel()
+
+		sess, err := h.service.CreateSession(ctx, &qz.ID, ownerID)
+		if err != nil {
+			t.Fatalf("CreateSession (owner, draft) err = %v, want nil", err)
+		}
+		if sess == nil {
+			t.Fatal("CreateSession (owner, draft) session = nil, want a room")
+		}
+	})
+
+	t.Run("a non-owner cannot host a draft", func(t *testing.T) {
+		t.Parallel()
+
+		stranger, err := h.playerStore.CreateAnonymousPlayer(ctx, "stranger-host")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+
+		sess, err := h.service.CreateSession(ctx, &qz.ID, stranger.ID)
+		if got, want := err, ErrQuizNotPublished; !errors.Is(got, want) {
+			t.Errorf("CreateSession (non-owner, draft) err = %v, want %v", got, want)
+		}
+		if sess != nil {
+			t.Errorf("CreateSession (non-owner, draft) session = %v, want nil", sess)
+		}
+	})
+}
+
 // TestService_ArmQuiz pins the arm-without-start contract (#863): ArmQuiz points
 // an empty staging room at a live quiz and leaves it in the lobby (not started),
 // and rejects a solo quiz.

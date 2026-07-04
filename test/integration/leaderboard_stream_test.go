@@ -50,6 +50,7 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 	// Seed: one quiz, one question, two options (one correct).
 	qz := &quiz.Quiz{
 		Title:             "Stream Quiz",
+		Published:         true,
 		Slug:              "stream-quiz",
 		Description:       "seed for the SSE leaderboard test",
 		CreatedByPlayerID: seededAdminID,
@@ -255,6 +256,7 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 
 	qz := &quiz.Quiz{
 		Title:             "Heartbeat Quiz",
+		Published:         true,
 		Slug:              "heartbeat-quiz",
 		Description:       "seed for the SSE write-deadline regression test",
 		CreatedByPlayerID: seededAdminID,
@@ -393,6 +395,7 @@ func TestQuizLeaderboard_ShowsParticipantBeforeAnyAnswer(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Pre-Answer Quiz",
+		Published:         true,
 		Slug:              "pre-answer-quiz",
 		Description:       "seed for #335",
 		CreatedByPlayerID: seededAdminID,
@@ -505,6 +508,7 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Name Update Quiz",
+		Published:         true,
 		Slug:              "name-update-quiz",
 		Description:       "seed for the claim-name SSE fan-out test",
 		CreatedByPlayerID: seededAdminID,

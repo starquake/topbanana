@@ -340,6 +340,7 @@ func seedMultiRoundLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Stor
 	}
 	qz := &quiz.Quiz{
 		Title:             "Multi " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "two-round hosted fixture",
 		CreatedByPlayerID: seededAdminID,

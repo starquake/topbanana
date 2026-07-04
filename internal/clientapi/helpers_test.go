@@ -151,6 +151,7 @@ func twoQuestionQuiz(title, slug string) *quiz.Quiz {
 		Description:       "seeded",
 		CreatedByPlayerID: seededAdminID,
 		Visibility:        quiz.VisibilityPublic,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is the capital of France?",
@@ -229,7 +230,7 @@ func (e *testEnv) playCorrectly(t *testing.T, qz *quiz.Quiz, playerID int64, que
 
 	ctx := t.Context()
 
-	g, err := e.service.CreateGame(ctx, qz.ID, playerID)
+	g, err := e.service.CreateGame(ctx, qz.ID, playerID, false)
 	if err != nil {
 		t.Fatalf("CreateGame err = %v, want nil", err)
 	}

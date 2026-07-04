@@ -23,6 +23,7 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -33,7 +34,8 @@ ORDER BY q.updated_at DESC, q.id DESC;
 -- 'public' so unlisted and private quizzes never appear in the player
 -- client's quiz picker or on the home page's all-quizzes view. The
 -- mode = 'solo' filter (MP-0 / #677) keeps live (hosted-only) quizzes
--- out of the solo browse paths too.
+-- out of the solo browse paths too. The published = 1 filter (#1192)
+-- keeps draft quizzes out until their owner publishes them.
 SELECT q.id,
        q.title,
        q.slug,
@@ -45,18 +47,21 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
 ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: ListLiveQuizzes :many
 -- Live-mode variant of ListQuizzes (#836). Filters to mode = 'live' so the
--- host intermission picker only offers hostable quizzes. Visibility is left
--- unfiltered, matching CreateSession, which gates a host on mode = 'live'
--- alone (any live quiz is hostable, regardless of who created it).
+-- host intermission picker only offers hostable quizzes, and to published = 1
+-- (#1192) so a draft live quiz stays out of the shared picker (its owner can
+-- still host it to test via the owner-or-published gate in CreateSession).
+-- Visibility is left unfiltered: a host can view any quiz.
 SELECT q.id,
        q.title,
        q.slug,
@@ -68,10 +73,12 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.mode = 'live'
+  AND q.published = 1
 ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: QuestionCountsByQuiz :many
@@ -98,6 +105,7 @@ SELECT q.id,
        q.visibility,
        q.mode,
        q.play_count,
+       q.published,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -125,8 +133,8 @@ LIMIT 1;
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
 -- ErrCreatorRequired when the caller forgot to stamp the session
 -- admin, so the FK constraint is the second line of defence.
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, published, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
@@ -148,6 +156,23 @@ UPDATE quizzes
 SET mode       = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
+
+-- name: SetQuizPublished :execresult
+-- Flips just the published flag without touching the question tree (#1192),
+-- so publishing / unpublishing cannot clobber a concurrent edit the way the
+-- full UpdateQuiz would. Modelled on UpdateQuizMode.
+UPDATE quizzes
+SET published  = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+-- name: QuizHasRealPlays :one
+-- Reports whether the quiz has at least one non-preview game (#1192). Once a
+-- real player has started a game the quiz can no longer be unpublished; host
+-- preview games (is_preview = 1) do not count.
+SELECT EXISTS(
+    SELECT 1 FROM games WHERE quiz_id = ? AND is_preview = 0
+) AS has_plays;
 
 -- name: DeleteQuiz :execresult
 DELETE
@@ -292,10 +317,14 @@ WHERE id = ?
 -- Increments the durable hit counter (#891) for the quiz that owns this solo
 -- game. Resolves the quiz from the game id so the caller only signals "this
 -- play completed" without threading the quiz id. Never decremented; the CHECK
--- on quizzes.play_count keeps it non-negative.
+-- on quizzes.play_count keeps it non-negative. A host preview game
+-- (games.is_preview = 1, #1192) matches no row so the bump is a safe no-op:
+-- previewing a draft never inflates the "times played" number.
 UPDATE quizzes
 SET play_count = play_count + 1
-WHERE quizzes.id = (SELECT quiz_id FROM games WHERE games.id = ?);
+WHERE quizzes.id = (
+    SELECT quiz_id FROM games WHERE games.id = ? AND games.is_preview = 0
+);
 
 -- name: BumpQuizPlayCountForSession :exec
 -- Increments the durable hit counter (#891) for the quiz a live session is

@@ -196,10 +196,17 @@ func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
 func (stubQuizStore) GetQuizVisibility(_ context.Context, _ int64) (string, error) {
 	return "", errStub
 }
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
-func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return errStub }
-func (stubQuizStore) SetQuizMode(_ context.Context, _ int64, _ string) error   { return errStub }
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error       { return errStub }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error       { return errStub }
+func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error            { return errStub }
+func (stubQuizStore) SetQuizMode(_ context.Context, _ int64, _ string) error { return errStub }
+func (stubQuizStore) SetQuizPublished(_ context.Context, _ int64, _ bool) error {
+	return errStub
+}
+
+func (stubQuizStore) QuizHasRealPlays(_ context.Context, _ int64) (bool, error) {
+	return false, errStub
+}
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
 	return errStub

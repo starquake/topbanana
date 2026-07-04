@@ -144,7 +144,7 @@ func HandleRoundMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		if !ok {
 			return
 		}
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		roundID, ok := handlers.ParseIDFromPath(w, r, logger, "roundID")
@@ -214,7 +214,7 @@ func HandleRoundPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore q
 		if !ok {
 			return
 		}
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		roundID, ok := handlers.ParseIDFromPath(w, r, logger, "roundID")
@@ -256,7 +256,7 @@ func HandleQuestionPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStor
 		if !ok {
 			return
 		}
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		questionID, ok := handlers.ParseIDFromPath(w, r, logger, "questionID")
@@ -326,7 +326,7 @@ func HandleRoundDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -378,7 +378,7 @@ func HandleQuestionMoveToRound(logger *slog.Logger, csrfMgr *csrf.Manager, quizS
 		if !ok {
 			return
 		}
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		questionID, ok := handlers.ParseIDFromPath(w, r, logger, "questionID")
@@ -442,7 +442,7 @@ func loadRoundForSave(
 	if !ok {
 		return nil, false
 	}
-	qz, ok := requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID)
+	qz, ok := requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID)
 	if !ok {
 		return nil, false
 	}

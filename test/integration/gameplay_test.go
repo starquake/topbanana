@@ -296,6 +296,7 @@ func TestGameplay_Integration(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Integration Quiz",
+		Published:         true,
 		Slug:              "integration-quiz",
 		Description:       "A quiz for integration testing",
 		CreatedByPlayerID: adminPlayer.ID,
@@ -975,6 +976,7 @@ func TestGameplay_Integration(t *testing.T) {
 		// issued) left behind.
 		finalQz := &quiz.Quiz{
 			Title:             "Final Question Resume Quiz",
+			Published:         true,
 			Slug:              "final-question-resume",
 			Description:       "Integration coverage for #310 final-question reload",
 			CreatedByPlayerID: adminPlayer.ID,
@@ -1137,13 +1139,12 @@ func TestGameplay_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("admin can delete a played question without FK 787", func(t *testing.T) {
-		// Regression for #157 sec.1: admin delete of a played question must not
-		// 500. The fresh game above answered question[0], so game_questions and
-		// game_answers both have rows referencing that question at the moment
-		// the delete fires. Without the in-Go cascade in execDeleteQuestion the
-		// FK on game_questions.question_id would raise FOREIGN KEY constraint
-		// failed (787) and the admin route would surface it as a 500.
+	t.Run("published quiz question delete is blocked by the edit lock", func(t *testing.T) {
+		// #1192: this quiz has been played by a real player, so it is published
+		// and locked from content edits. Deleting one of its questions is a
+		// content edit, so the route rejects it with 409 rather than mutating a
+		// live quiz. (The FK-cascade-on-delete path itself is covered by the
+		// store-layer TestQuizStore_DeleteQuestion tests against a draft.)
 		questionDeleteToken := fetchCSRFToken(
 			ctx, t, adminClient, fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID),
 		)
@@ -1163,15 +1164,8 @@ func TestGameplay_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to POST question delete: %v", err)
 		}
-		if got, want := questionDeleteResp.StatusCode, http.StatusSeeOther; got != want {
-			t.Fatalf(
-				"question delete status = %d, want %d (500 here means the FK cascade for question delete regressed)",
-				got, want,
-			)
-		}
-		wantQuestionDeleteLocation := fmt.Sprintf("/admin/quizzes/%d", qz.ID)
-		if got, want := questionDeleteResp.Header.Get("Location"), wantQuestionDeleteLocation; got != want {
-			t.Errorf("question delete Location = %q, want %q", got, want)
+		if got, want := questionDeleteResp.StatusCode, http.StatusConflict; got != want {
+			t.Fatalf("published question delete status = %d, want %d (edit lock)", got, want)
 		}
 		if cerr := questionDeleteResp.Body.Close(); cerr != nil {
 			t.Errorf("question delete body close err = %v", cerr)
@@ -1229,9 +1223,11 @@ func TestGameplay_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("admin can delete a played quiz and clears it from the listing", func(t *testing.T) {
-		// Admin POSTs /admin/quizzes/{id}/delete with a CSRF token tied to
-		// the admin session jar created by loginAdminAndResetPlayer above.
+	t.Run("published quiz delete is blocked by the edit lock", func(t *testing.T) {
+		// #1192: a published quiz that has been played by a real player can no
+		// longer be deleted (delete is a locked content mutation). The route
+		// returns 409 and the quiz stays in the listing. (The FK-cascade delete
+		// path is covered by the store-layer TestQuizStore_DeleteQuiz tests.)
 		quizDetailURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID)
 		deleteToken := fetchCSRFToken(ctx, t, adminClient, quizDetailURL)
 
@@ -1250,17 +1246,14 @@ func TestGameplay_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to POST admin delete: %v", err)
 		}
-		if got, want := deleteResp.StatusCode, http.StatusSeeOther; got != want {
-			t.Fatalf("admin delete status = %d, want %d (500 here means the FK cascade regressed)", got, want)
-		}
-		if got, want := deleteResp.Header.Get("Location"), "/admin/quizzes"; got != want {
-			t.Errorf("admin delete Location = %q, want %q", got, want)
+		if got, want := deleteResp.StatusCode, http.StatusConflict; got != want {
+			t.Fatalf("published quiz delete status = %d, want %d (edit lock)", got, want)
 		}
 		if cerr := deleteResp.Body.Close(); cerr != nil {
 			t.Errorf("delete body close err = %v", cerr)
 		}
 
-		// /api/quizzes no longer lists the deleted quiz.
+		// The quiz is still listed: the delete was refused, not performed.
 		resp := httpGet(ctx, t, client, baseURL+"/api/quizzes")
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("post-delete /api/quizzes status = %d, want %d", got, want)
@@ -1275,8 +1268,8 @@ func TestGameplay_Integration(t *testing.T) {
 		if cerr := resp.Body.Close(); cerr != nil {
 			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
 		}
-		if got, want := len(afterDelete), 0; got != want {
-			t.Errorf("quizzes after delete len = %d, want %d", got, want)
+		if got, want := len(afterDelete), 1; got != want {
+			t.Errorf("quizzes after refused delete len = %d, want %d (still listed)", got, want)
 		}
 	})
 }

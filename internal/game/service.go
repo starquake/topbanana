@@ -137,20 +137,37 @@ func (s *Service) PublishLeaderboardForPlayer(ctx context.Context, playerID int6
 	return nil
 }
 
-// CreateGame creates a game for the given quiz and player. Returns
-// [ErrGameAlreadyExists] when the player already has one - enforced
-// both by the fast-path check and the UNIQUE INDEX on
+// CreateGame creates a game for the given quiz and player.
+//
+// When preview is true the owner is test-playing a draft (#1192): the game is
+// flagged is_preview so it stays off the leaderboard and play_count, and any
+// prior game for the (player, quiz) is reset first so the owner can re-preview
+// despite the one-attempt UNIQUE index. Ownership is enforced by the caller
+// (the handler, which has the requester's admin status); this method enforces
+// that preview is solo-only, returning [ErrPreviewNotAllowed] otherwise.
+//
+// When preview is false this is normal play: a draft or live quiz is rejected
+// with [quiz.ErrQuizNotFound] so it stays indistinguishable from a missing one,
+// and [ErrGameAlreadyExists] is returned when the player already has a game -
+// enforced both by the fast-path check and the UNIQUE INDEX on
 // game_participants, so a concurrent race surfaces the same error.
-func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game, error) {
+//
+//nolint:revive // preview selects the preview-play path (a distinct create flow), not a behavioural mode switch inside one flow.
+func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64, preview bool) (*Game, error) {
 	qz, err := s.quizStore.GetQuiz(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
 	}
-	// Live quizzes are hosted-only (MP-0 / #677): a solo game can never be
-	// created for one. Surface ErrQuizNotFound so the handler returns 404,
-	// keeping a live quiz indistinguishable from a missing one and giving
-	// no spoiler that a hosted quiz exists at this id.
-	if qz.Mode == quiz.ModeLive {
+
+	if preview {
+		return s.createPreviewGame(ctx, qz, playerID)
+	}
+
+	// Live quizzes are hosted-only (MP-0 / #677) and drafts are not yet
+	// playable by real players (#1192). Surface ErrQuizNotFound in both cases
+	// so the handler returns 404, keeping a live or draft quiz indistinguishable
+	// from a missing one and giving no spoiler that it exists at this id.
+	if qz.Mode == quiz.ModeLive || !qz.Published {
 		return nil, quiz.ErrQuizNotFound
 	}
 
@@ -565,6 +582,31 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 	}
 
 	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
+}
+
+// createPreviewGame is the preview branch of [Service.CreateGame] (#1192): the
+// owner test-plays a draft solo quiz. Preview is solo-only, so a live quiz
+// returns [ErrPreviewNotAllowed]. Any prior game for the (player, quiz) is
+// reset first so re-previewing works despite the one-attempt UNIQUE index, then
+// a fresh is_preview game is created. No leaderboard publish fires: a preview
+// game never appears in the standings.
+func (s *Service) createPreviewGame(ctx context.Context, qz *quiz.Quiz, playerID int64) (*Game, error) {
+	if qz.Mode != quiz.ModeSolo {
+		return nil, ErrPreviewNotAllowed
+	}
+
+	if err := s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, qz.ID); err != nil {
+		return nil, fmt.Errorf("failed to reset prior game for preview: %w", err)
+	}
+
+	g := &Game{QuizID: qz.ID, Preview: true}
+	pa := &Participant{PlayerID: playerID, QuizID: qz.ID}
+	if err := s.store.CreateGameAndParticipant(ctx, g, pa); err != nil {
+		return nil, fmt.Errorf("failed to create preview game and participant: %w", err)
+	}
+	g.Quiz = qz
+
+	return g, nil
 }
 
 // resolveAnswerTarget finds the issued game_question for the supplied

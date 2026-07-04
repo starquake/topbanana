@@ -55,6 +55,7 @@ func (s *GameStore) GetGame(ctx context.Context, id string) (*game.Game, error) 
 	g := &game.Game{
 		ID:        row.ID,
 		QuizID:    row.QuizID,
+		Preview:   row.IsPreview != 0,
 		CreatedAt: row.CreatedAt,
 	}
 
@@ -114,7 +115,11 @@ func (s *GameStore) GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID
 func (s *GameStore) CreateGame(ctx context.Context, g *game.Game) error {
 	var err error
 	id := xid.New()
-	row, err := s.q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
+	row, err := s.q.CreateGame(ctx, db.CreateGameParams{
+		ID:        id.String(),
+		QuizID:    g.QuizID,
+		IsPreview: boolToInt64(g.Preview),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create game: %w", err)
 	}
@@ -205,7 +210,11 @@ func execCreateGameAndParticipant(
 	ctx context.Context, q *db.Queries, g *game.Game, p *game.Participant,
 ) error {
 	id := xid.New()
-	gameRow, err := q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
+	gameRow, err := q.CreateGame(ctx, db.CreateGameParams{
+		ID:        id.String(),
+		QuizID:    g.QuizID,
+		IsPreview: boolToInt64(g.Preview),
+	})
 	if err != nil {
 		return fmt.Errorf("create game: %w", err)
 	}

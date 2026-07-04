@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-
-	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // StartHosting opens or reuses the host's live room for a quiz, enforcing one
@@ -175,8 +173,8 @@ func (s *Service) GetActiveSessionForHost(ctx context.Context, hostPlayerID int6
 // not publish or start - the caller decides: [Service.ArmQuiz] stops here (the
 // room waits in the lobby), [Service.StartQuiz] marks it started. Returns
 // [ErrSessionNotFound] for an unknown code, [ErrNotHost] for a foreign host,
-// [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] for an unhostable quiz, and
-// [ErrGameInFlight] when a game is already running.
+// [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] / [ErrQuizNotPublished] for an
+// unhostable quiz, and [ErrGameInFlight] when a game is already running.
 func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlayerID, quizID int64) (*Session, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
@@ -195,8 +193,8 @@ func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlaye
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz to arm: %w", err)
 	}
-	if qz.Mode != quiz.ModeLive {
-		return nil, ErrNotLiveQuiz
+	if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+		return nil, gerr
 	}
 
 	// RearmSession is scoped to "no game in flight", so it is the real arbiter if

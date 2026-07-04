@@ -75,6 +75,7 @@ func TestQuestionAudio_SoloWire(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Audio Solo Quiz",
+		Published:         true,
 		Slug:              "audio-solo-quiz",
 		Description:       "solo audio fixture",
 		CreatedByPlayerID: seededAdminID,

@@ -30,6 +30,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 	// reaches og:description rather than the default.
 	qz := &quiz.Quiz{
 		Title:             "Bananas of the World",
+		Published:         true,
 		Slug:              "bananas-of-the-world",
 		Description:       "Twenty rounds on cultivars, cuisines, and corporate history.",
 		CreatedByPlayerID: seededAdminID,
@@ -142,6 +143,7 @@ func TestOGMetadata_LiveQuiz(t *testing.T) {
 
 	liveQz := &quiz.Quiz{
 		Title:             "Secret Live Quiz",
+		Published:         true,
 		Slug:              "secret-live-quiz",
 		Description:       "Spoilers that must not leak into a link preview.",
 		CreatedByPlayerID: seededAdminID,
@@ -154,6 +156,7 @@ func TestOGMetadata_LiveQuiz(t *testing.T) {
 
 	soloQz := &quiz.Quiz{
 		Title:             "Open Solo Quiz",
+		Published:         true,
 		Slug:              "open-solo-quiz",
 		Description:       "Self-paced; safe to preview.",
 		CreatedByPlayerID: seededAdminID,
@@ -209,6 +212,7 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 
 	privateQz := &quiz.Quiz{
 		Title:             "Confidential Private Quiz",
+		Published:         true,
 		Slug:              "confidential-private-quiz",
 		Description:       "Title and description that must stay behind sign-in.",
 		CreatedByPlayerID: seededAdminID,
@@ -221,6 +225,7 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 
 	publicQz := &quiz.Quiz{
 		Title:             "Open Public Quiz",
+		Published:         true,
 		Slug:              "open-public-quiz",
 		Description:       "Listed and safe to preview.",
 		CreatedByPlayerID: seededAdminID,

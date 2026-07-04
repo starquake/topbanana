@@ -4,8 +4,10 @@ FROM games
 WHERE id = ?;
 
 -- name: CreateGame :one
-INSERT INTO games (id, quiz_id)
-VALUES (?, ?)
+-- is_preview marks a host preview game (#1192): the owner test-plays a draft
+-- solo quiz without their run reaching the leaderboard or the play_count.
+INSERT INTO games (id, quiz_id, is_preview)
+VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: StartGame :execresult
@@ -123,7 +125,8 @@ FROM game_answers ga
          JOIN game_questions gq ON gq.id = ga.game_question_id
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
-WHERE g.quiz_id = ?;
+WHERE g.quiz_id = ?
+  AND g.is_preview = 0;
 
 -- name: ListParticipantsForQuizLeaderboard :many
 -- One row per player joined to the quiz, flagged with is_completed
@@ -155,7 +158,8 @@ SELECT gp.player_id AS player_id,
 FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id
-WHERE g.quiz_id = sqlc.arg('quiz_id');
+WHERE g.quiz_id = sqlc.arg('quiz_id')
+  AND g.is_preview = 0;
 
 -- name: GetGameByPlayerAndQuiz :one
 -- Returns the most-recent game for the given (player, quiz) pair. Used by the
