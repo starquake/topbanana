@@ -233,18 +233,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	// QuestionCount defaults to len(Questions); the list handler overrides
 	// it from a separate count query because ListQuizzes doesn't load the
 	// question tree.
-	visibility := qz.Visibility
-	if visibility == "" {
-		visibility = quiz.VisibilityPublic
-	}
-	mode := qz.Mode
-	if mode == "" {
-		mode = quiz.ModeSolo
-	}
-	language := qz.Language
-	if language == "" {
-		language = quiz.LanguageEN
-	}
+	visibility, mode, language := quiz.NormalizedFields(qz)
 
 	return &QuizData{
 		ID:                   qz.ID,

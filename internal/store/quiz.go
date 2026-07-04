@@ -798,7 +798,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if timeLimit == 0 {
 		timeLimit = quiz.DefaultTimeLimitSeconds
 	}
-	visibility, mode, language := normalizedQuizFields(qz)
+	visibility, mode, language := quiz.NormalizedFields(qz)
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
 		Title:             qz.Title,
 		Slug:              qz.Slug,
@@ -914,7 +914,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		return quiz.ErrCannotUpdateQuizWithIDZero
 	}
 
-	visibility, mode, language := normalizedQuizFields(qz)
+	visibility, mode, language := quiz.NormalizedFields(qz)
 	var err error
 	timeLimit := qz.TimeLimitSeconds
 	if timeLimit == 0 {
@@ -1292,26 +1292,6 @@ func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, questionID, i
 	}
 
 	return nil
-}
-
-// normalizedQuizFields resolves the store-side defaults for a quiz's
-// visibility, mode, and language: an empty value maps to the project default
-// (public / solo / English) so fixtures and the JSON-import path need not
-// repeat them. The DB DEFAULT only fires on an INSERT that omits the column,
-// but CreateQuiz / UpdateQuiz always supply all three.
-func normalizedQuizFields(qz *quiz.Quiz) (visibility, mode, language string) {
-	visibility, mode, language = qz.Visibility, qz.Mode, qz.Language
-	if visibility == "" {
-		visibility = quiz.VisibilityPublic
-	}
-	if mode == "" {
-		mode = quiz.ModeSolo
-	}
-	if language == "" {
-		language = quiz.LanguageEN
-	}
-
-	return visibility, mode, language
 }
 
 // nullableInt packs a *int into the [sql.NullInt64] the sqlc-generated params

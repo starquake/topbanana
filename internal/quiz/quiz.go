@@ -329,6 +329,25 @@ func IsValidLanguage(l string) bool {
 	return slices.Contains(LanguageValues(), l)
 }
 
+// NormalizedFields resolves the project defaults for a quiz's visibility, mode,
+// and language: an empty value maps to public / solo / English. It is the single
+// source for this defaulting, shared by the store's write path and the admin
+// view-model so the default lives in one place.
+func NormalizedFields(qz *Quiz) (visibility, mode, language string) {
+	visibility, mode, language = qz.Visibility, qz.Mode, qz.Language
+	if visibility == "" {
+		visibility = VisibilityPublic
+	}
+	if mode == "" {
+		mode = ModeSolo
+	}
+	if language == "" {
+		language = LanguageEN
+	}
+
+	return visibility, mode, language
+}
+
 // Quiz represents a quiz. CreatedByPlayerID + CreatedByDisplayName were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
