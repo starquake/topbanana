@@ -1,8 +1,8 @@
 {{define "content"}}
     <div class="auth-shell">
-        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Accept your invite</h1>
+        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "acceptInvite.heading"}}</h1>
         <p class="mt-0 mb-6 text-text-dim text-[0.95rem]">
-            Pick a display name and a password to set up your account. {{passwordHelp}}
+            {{t "acceptInvite.subtitle"}} {{passwordHelp}}
         </p>
 
         {{if .Message}}
@@ -13,21 +13,21 @@
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
             <input type="hidden" name="token" value="{{.Token}}">
             <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim">Name</span>
+                <span class="text-text-dim">{{t "common.name"}}</span>
                 <input type="text" name="display_name" value="{{.DisplayName}}" autocomplete="nickname" required class="form-input">
             </label>
             <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim">Password</span>
+                <span class="text-text-dim">{{t "common.password"}}</span>
                 <input type="password" name="password" autocomplete="new-password" required
                        minlength="{{passwordMinLength}}" data-password-length="password-length-hint"
                        class="form-input">
                 <span id="password-length-hint" class="text-xs text-danger" role="alert" aria-live="polite"></span>
             </label>
             <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim">Confirm password</span>
+                <span class="text-text-dim">{{t "register.confirmPassword"}}</span>
                 <input type="password" name="confirm" autocomplete="new-password" required class="form-input">
             </label>
-            <button type="submit" class="btn-primary">Create account</button>
+            <button type="submit" class="btn-primary">{{t "acceptInvite.submit"}}</button>
         </form>
     </div>
 {{end}}

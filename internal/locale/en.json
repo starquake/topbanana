@@ -3,6 +3,16 @@
   "common.password": "Password",
   "common.or": "or",
   "common.noVerificationEmail": "Didn't get the verification email?",
+  "common.name": "Name",
+  "common.currentPassword": "Current password",
+  "common.newPassword": "New password",
+  "common.confirmNewPassword": "Confirm new password",
+  "common.updatePassword": "Update password",
+  "common.backToProfile": "Back to profile",
+  "common.save": "Save",
+  "common.signOut": "Sign out",
+  "common.wait": "Wait",
+  "common.rememberedIt": "Remembered it?",
 
   "footer.signedInAs": "Signed in as",
   "footer.logOut": "Log out",
@@ -56,6 +66,65 @@
   "register.submit": "Register",
   "register.haveAccount": "Have an account? Log in",
   "register.google": "Sign up with Google",
+
+  "forgotPassword.heading": "Forgot your password?",
+  "forgotPassword.subtitle": "Enter your email and we'll send a reset link.",
+  "forgotPassword.submit": "Send reset link",
+
+  "resetPassword.heading": "Set a new password",
+  "resetPassword.subtitle": "Pick a fresh one.",
+
+  "resetPasswordInvalid.heading": "Link is no longer valid",
+  "resetPasswordInvalid.body": "This reset link has expired or was already used. Request a fresh one and try again.",
+  "resetPasswordInvalid.requestNew": "Request a new link",
+
+  "verifyEmail.eyebrow": "Email verification",
+
+  "verifyEmailPending.eyebrow": "One more step",
+  "verifyEmailPending.heading": "Verify your email",
+  "verifyEmailPending.sentTo": "We sent a confirmation link to",
+  "verifyEmailPending.sentAfter": "Click it to finish setting up your account.",
+  "verifyEmailPending.resend": "Resend verification email",
+  "verifyEmailPending.noLink": "Didn't get the link?",
+
+  "registerPending.alreadyVerified": "Already verified? Sign in",
+
+  "verifyEmailRequest.heading": "Resend verification email",
+  "verifyEmailRequest.subtitle": "Enter your email address and we'll send a fresh verification link.",
+  "verifyEmailRequest.submit": "Send verification link",
+
+  "acceptInvite.heading": "Accept your invite",
+  "acceptInvite.subtitle": "Pick a display name and a password to set up your account.",
+  "acceptInvite.submit": "Create account",
+
+  "acceptInviteInvalid.heading": "Invite link is no longer valid",
+  "acceptInviteInvalid.body": "This invite has expired or was already used. Ask whoever invited you to send a fresh one.",
+  "acceptInviteInvalid.goToSignIn": "Go to sign in",
+
+  "accessDenied.eyebrow": "Restricted area",
+  "accessDenied.heading": "Access denied",
+  "accessDenied.subtitle": "This area requires an admin account.",
+  "accessDenied.signedInAs": "You are signed in as",
+  "accessDenied.onlyAdmins": "but the page you tried to open is only available to admins.",
+  "accessDenied.signOut": "Sign out and switch accounts",
+
+  "profile.heading": "Profile",
+  "profile.subtitle": "Your account settings.",
+  "profile.savedName": "Display name updated.",
+  "profile.nameHint": "This is the name your leaderboard rows are shown under.",
+  "profile.account": "Account",
+  "profile.changeEmail": "Change email",
+  "profile.changePassword": "Change password",
+
+  "profileEmail.subtitle": "Switch the address tied to your account.",
+  "profileEmail.currentEmail": "Current email",
+  "profileEmail.newEmail": "New email",
+  "profileEmail.newEmailHint": "We'll send a verification link to the new address. Your account email switches when you click that link, not before.",
+  "profileEmail.passwordHint": "Confirm your current password to start an email change.",
+  "profileEmail.providerManaged": "Your email is managed by your sign-in provider and can't be changed here.",
+
+  "profilePassword.subtitle": "Pick a fresh password. Other signed-in sessions will be signed out.",
+  "profilePassword.saved": "Password updated.",
 
   "common.retry": "Retry",
   "common.loading": "Loading...",

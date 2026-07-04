@@ -3,6 +3,16 @@
   "common.password": "Wachtwoord",
   "common.or": "of",
   "common.noVerificationEmail": "Geen verificatie-e-mail ontvangen?",
+  "common.name": "Naam",
+  "common.currentPassword": "Huidig wachtwoord",
+  "common.newPassword": "Nieuw wachtwoord",
+  "common.confirmNewPassword": "Nieuw wachtwoord bevestigen",
+  "common.updatePassword": "Wachtwoord bijwerken",
+  "common.backToProfile": "Terug naar profiel",
+  "common.save": "Opslaan",
+  "common.signOut": "Uitloggen",
+  "common.wait": "Wacht",
+  "common.rememberedIt": "Weet je het weer?",
 
   "footer.signedInAs": "Ingelogd als",
   "footer.logOut": "Uitloggen",
@@ -56,6 +66,65 @@
   "register.submit": "Registreren",
   "register.haveAccount": "Heb je al een account? Inloggen",
   "register.google": "Registreren met Google",
+
+  "forgotPassword.heading": "Wachtwoord vergeten?",
+  "forgotPassword.subtitle": "Vul je e-mailadres in en we sturen je een resetlink.",
+  "forgotPassword.submit": "Resetlink versturen",
+
+  "resetPassword.heading": "Stel een nieuw wachtwoord in",
+  "resetPassword.subtitle": "Kies een nieuw wachtwoord.",
+
+  "resetPasswordInvalid.heading": "Link is niet meer geldig",
+  "resetPasswordInvalid.body": "Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan en probeer het opnieuw.",
+  "resetPasswordInvalid.requestNew": "Nieuwe link aanvragen",
+
+  "verifyEmail.eyebrow": "E-mailverificatie",
+
+  "verifyEmailPending.eyebrow": "Nog een stap",
+  "verifyEmailPending.heading": "Verifieer je e-mailadres",
+  "verifyEmailPending.sentTo": "We hebben een bevestigingslink gestuurd naar",
+  "verifyEmailPending.sentAfter": "Klik erop om je account af te ronden.",
+  "verifyEmailPending.resend": "Verificatie-e-mail opnieuw versturen",
+  "verifyEmailPending.noLink": "Geen link ontvangen?",
+
+  "registerPending.alreadyVerified": "Al geverifieerd? Inloggen",
+
+  "verifyEmailRequest.heading": "Verificatie-e-mail opnieuw versturen",
+  "verifyEmailRequest.subtitle": "Vul je e-mailadres in en we sturen je een nieuwe verificatielink.",
+  "verifyEmailRequest.submit": "Verificatielink versturen",
+
+  "acceptInvite.heading": "Je uitnodiging accepteren",
+  "acceptInvite.subtitle": "Kies een weergavenaam en een wachtwoord om je account in te stellen.",
+  "acceptInvite.submit": "Account aanmaken",
+
+  "acceptInviteInvalid.heading": "Uitnodigingslink is niet meer geldig",
+  "acceptInviteInvalid.body": "Deze uitnodiging is verlopen of al gebruikt. Vraag degene die je heeft uitgenodigd om een nieuwe te sturen.",
+  "acceptInviteInvalid.goToSignIn": "Naar inloggen",
+
+  "accessDenied.eyebrow": "Afgeschermd gebied",
+  "accessDenied.heading": "Toegang geweigerd",
+  "accessDenied.subtitle": "Voor dit gedeelte heb je een adminaccount nodig.",
+  "accessDenied.signedInAs": "Je bent ingelogd als",
+  "accessDenied.onlyAdmins": "maar de pagina die je probeerde te openen is alleen voor admins.",
+  "accessDenied.signOut": "Uitloggen en van account wisselen",
+
+  "profile.heading": "Profiel",
+  "profile.subtitle": "Je accountinstellingen.",
+  "profile.savedName": "Weergavenaam bijgewerkt.",
+  "profile.nameHint": "Dit is de naam waaronder je op het scorebord verschijnt.",
+  "profile.account": "Account",
+  "profile.changeEmail": "E-mailadres wijzigen",
+  "profile.changePassword": "Wachtwoord wijzigen",
+
+  "profileEmail.subtitle": "Wijzig het e-mailadres dat aan je account is gekoppeld.",
+  "profileEmail.currentEmail": "Huidig e-mailadres",
+  "profileEmail.newEmail": "Nieuw e-mailadres",
+  "profileEmail.newEmailHint": "We sturen een verificatielink naar het nieuwe adres. Je account-e-mailadres verandert pas als je op die link klikt.",
+  "profileEmail.passwordHint": "Bevestig je huidige wachtwoord om een e-mailwijziging te starten.",
+  "profileEmail.providerManaged": "Je e-mailadres wordt beheerd door je aanbieder waarmee je inlogt en kan hier niet worden gewijzigd.",
+
+  "profilePassword.subtitle": "Kies een nieuw wachtwoord. Andere ingelogde sessies worden uitgelogd.",
+  "profilePassword.saved": "Wachtwoord bijgewerkt.",
 
   "common.retry": "Opnieuw",
   "common.loading": "Laden...",

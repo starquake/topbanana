@@ -1,8 +1,8 @@
 {{define "content"}}
     <div class="auth-shell">
-        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Resend verification email</h1>
+        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "verifyEmailRequest.heading"}}</h1>
         <p class="mt-0 mb-6 text-text-dim text-[0.95rem]">
-            Enter your email address and we'll send a fresh verification link.
+            {{t "verifyEmailRequest.subtitle"}}
         </p>
 
         {{if .Notice}}
@@ -15,17 +15,17 @@
         <form action="/verify-email/request" method="POST" class="flex flex-col gap-4">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
             <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim">Email</span>
+                <span class="text-text-dim">{{t "common.email"}}</span>
                 <input type="email" name="email" value="{{.Email}}" autocomplete="email" required
                        class="form-input">
             </label>
-            <button type="submit" class="btn-primary" data-cooldown="{{.SubmitWaitSecs}}" data-cooldown-label="Send verification link" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
-                {{if .SubmitDisabled}}Wait {{.SubmitWaitSecs}}s{{else}}Send verification link{{end}}
+            <button type="submit" class="btn-primary" data-cooldown="{{.SubmitWaitSecs}}" data-cooldown-label="{{t "verifyEmailRequest.submit"}}" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
+                {{if .SubmitDisabled}}{{t "common.wait"}} {{.SubmitWaitSecs}}s{{else}}{{t "verifyEmailRequest.submit"}}{{end}}
             </button>
         </form>
 
         <p class="mt-6 text-sm text-text-dim text-center">
-            Remembered it? <a href="/login" class="underline">Log in</a>
+            {{t "common.rememberedIt"}} <a href="/login" class="underline">{{t "login.submit"}}</a>
         </p>
     </div>
 {{end}}
