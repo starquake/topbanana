@@ -103,8 +103,7 @@ func TestMessages(t *testing.T) {
 	if got, want := en["login.submit"], "Log in"; got != want {
 		t.Errorf("Messages(en)[login.submit] = %q, want %q", got, want)
 	}
-	// Every English key must be present in the merged nl map (English base
-	// overlaid with the locale), so the SPA always has a value.
+	// Every English key must resolve in the merged nl map so the SPA has a value.
 	for key := range en {
 		if _, ok := nl[key]; !ok {
 			t.Errorf("Messages(nl) missing key %q present in English base", key)

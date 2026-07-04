@@ -48,11 +48,9 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 // <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
 //
-// Locale is the resolved UI language; it sets <html lang> and the SPA's
-// window.__I18N__.locale. MessagesJSON is the full merged message catalog for
-// that locale, marshaled to JSON, injected as window.__I18N__.messages so the
-// SPA always has a value for every key without a fetch. Both are set by render
-// from the request, not by the per-URL callers.
+// Locale sets <html lang> and window.__I18N__.locale; MessagesJSON is the
+// merged catalog injected as window.__I18N__.messages so the SPA needs no
+// fetch. Both are set by render from the request, not by the per-URL callers.
 type shellData struct {
 	Title               string
 	Description         string

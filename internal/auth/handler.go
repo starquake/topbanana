@@ -989,8 +989,7 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// t and lang are rebound per request by render.Renderer; these
-		// parse-time placeholders keep the templates parseable.
+		// Parse-time placeholders; render.Renderer rebinds t/lang per request.
 		"t":    func(string) string { return "" },
 		"lang": func() string { return locale.LocaleEN },
 		"passwordHelp": func() string {

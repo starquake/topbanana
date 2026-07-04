@@ -108,8 +108,7 @@ type QuizData struct {
 	ModeOptions []string
 	// Language is the advisory content-language label (#1115).
 	Language string
-	// LanguageOptions feeds the admin form's language selector (#1115) -
-	// pulled straight from the domain constants.
+	// LanguageOptions feeds the admin form's language selector (#1115).
 	LanguageOptions []string
 	// PlayCount is the durable "times played" counter surfaced on the
 	// admin quiz list footer (#891).
@@ -361,10 +360,8 @@ func parseTemplate(path string) *template.Template {
 		"versionLabel":      version.Label,
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
-		// The shared client_footer component uses t/lang (#1115); the admin
-		// surface stays English but still parses the components glob, so these
-		// placeholders keep it parseable. render.Renderer rebinds them per
-		// request.
+		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
+		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
 		"lang": func() string { return locale.LocaleEN },
 	}
@@ -668,9 +665,8 @@ func fillQuizFromForm(
 	} else {
 		qz.Mode = quiz.ModeSolo
 	}
-	// Content language (#1115). Defaults to English if the form omits it; an
-	// unrecognised value is passed through verbatim so Quiz.Valid surfaces an
-	// inline error.
+	// Defaults to English when omitted; an unrecognised value passes through so
+	// quizForm.Valid surfaces an inline error (#1115).
 	if l := r.PostFormValue("language"); l != "" {
 		qz.Language = l
 	} else {

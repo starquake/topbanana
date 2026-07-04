@@ -303,36 +303,28 @@ func IsValidMode(m string) bool {
 	return slices.Contains(ModeValues(), m)
 }
 
-// Content languages (#1115). An advisory label on the quiz recording which
-// language its questions are written in; it never changes the player's UI
-// language and never filters any list. The DB CHECK on quizzes.language
-// enforces the same set.
-//
-//   - LanguageEN - English (the default for existing and new quizzes).
-//   - LanguageNL - Dutch.
+// Content languages (#1115): an advisory label recording which language a
+// quiz's questions are written in. It never changes the player's UI language
+// and never filters any list. The DB CHECK on quizzes.language enforces this set.
 const (
 	LanguageEN = "en"
 	LanguageNL = "nl"
 )
 
-// LanguageValues lists the content languages in the order the admin form's
-// selector renders them. Returned as a fresh slice on every call so callers
-// can range over it without sharing a backing array (and to keep the
-// gochecknoglobals linter happy).
+// LanguageValues lists the content languages in the admin selector's display
+// order, as a fresh slice callers can range over without sharing a backing array.
 func LanguageValues() []string {
 	return []string{LanguageEN, LanguageNL}
 }
 
-// IsValidLanguage reports whether l is one of the recognised content
-// languages (#1115).
+// IsValidLanguage reports whether l is one of the recognised content languages.
 func IsValidLanguage(l string) bool {
 	return slices.Contains(LanguageValues(), l)
 }
 
-// NormalizedFields resolves the project defaults for a quiz's visibility, mode,
-// and language: an empty value maps to public / solo / English. It is the single
-// source for this defaulting, shared by the store's write path and the admin
-// view-model so the default lives in one place.
+// NormalizedFields resolves a quiz's visibility, mode, and language defaults: an
+// empty value maps to public / solo / English. Shared by the store write path
+// and the admin view-model so the defaulting lives in one place.
 func NormalizedFields(qz *Quiz) (visibility, mode, language string) {
 	visibility, mode, language = qz.Visibility, qz.Mode, qz.Language
 	if visibility == "" {
@@ -383,11 +375,8 @@ type Quiz struct {
 	// JSON-import path don't need to repeat the default.
 	Mode string
 	// Language is the advisory content-language label (#1115): LanguageEN or
-	// LanguageNL, recording which language the questions are written in. It is
-	// metadata only - it never changes the player's UI language and never
-	// filters any list. A zero value (empty string) is treated as LanguageEN
-	// by the store layer so existing fixtures and the JSON-import path don't
-	// need to repeat the default.
+	// LanguageNL. A zero value (empty string) is treated as LanguageEN by the
+	// store layer so existing fixtures and the JSON-import path skip the default.
 	Language string
 	// PlayCount is the durable hit counter on the quiz row (#891): bumped
 	// once when a play of the quiz completes (the solo path bumps when the

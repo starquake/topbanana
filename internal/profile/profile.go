@@ -285,10 +285,8 @@ func parseTemplate(page string) *template.Template {
 		// Placeholder so the shared components glob parses; this surface
 		// does not render quiz_card, which is the only user (#889).
 		"humanizeTime": func(time.Time) string { return "" },
-		// The shared client_footer component uses t/lang (#1115); the profile
-		// surface stays English but parses the components glob, so these
-		// placeholders keep it parseable. render.Renderer rebinds them per
-		// request.
+		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
+		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
 		"lang": func() string { return locale.LocaleEN },
 	}

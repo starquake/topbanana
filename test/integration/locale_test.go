@@ -17,11 +17,9 @@ const (
 	loginSubNL    = "Welkom terug. Log in om je quizzen te beheren."
 )
 
-// TestLocale_Integration covers #1115: the home and login pages localize to
-// Dutch when the request asks for it (Accept-Language header or the lang
-// cookie) and default to English otherwise, and the /lang switcher endpoint
-// sets the cookie and redirects back. Driven through the real server, real
-// templates, and real locale resolution.
+// TestLocale_Integration covers #1115 through the real server: the home and
+// login pages localize to Dutch for an Accept-Language header or lang cookie
+// and default to English, and the /lang switcher sets the cookie and redirects.
 func TestLocale_Integration(t *testing.T) {
 	t.Parallel()
 

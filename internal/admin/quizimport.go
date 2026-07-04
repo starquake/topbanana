@@ -24,8 +24,8 @@ type quizImportPayload struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	// Language is the advisory content-language label (#1115): "en" or "nl".
-	// Optional - omitted maps to [quiz.LanguageEN], matching the admin form's
-	// new-quiz default. An unrecognised value is surfaced by quizForm.Valid.
+	// Optional - omitted maps to [quiz.LanguageEN]; an unrecognised value is
+	// surfaced by quizForm.Valid.
 	Language string `json:"language,omitempty"`
 	// TimeLimitSeconds is the per-quiz default answer window (#99).
 	// Optional in the payload - omitted maps to
@@ -354,8 +354,8 @@ func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, error) {
 		Slug:             slug.Make(p.Title),
 		Description:      p.Description,
 		TimeLimitSeconds: timeLimit,
-		// Empty maps to LanguageEN in the store; a non-empty unrecognised
-		// value is caught by quizForm.Valid (#1115).
+		// Empty maps to LanguageEN in the store; unrecognised is caught by
+		// quizForm.Valid (#1115).
 		Language: p.Language,
 	}
 

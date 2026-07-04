@@ -2,8 +2,7 @@
 <html lang="{{.Locale}}">
 <head>
     <meta charset="UTF-8">
-    {{/* SPA i18n catalog (#1115): the resolved UI locale plus the full merged
-         message map so the client JS can localize without a fetch. */}}
+    {{/* SPA i18n catalog (#1115) so the client JS can localize without a fetch. */}}
     <script>window.__I18N__ = {locale: "{{.Locale}}", messages: {{.MessagesJSON}}};</script>
     {{/* viewport-fit=cover is required for env(safe-area-inset-*) to
          resolve to non-zero values on notched iOS devices; without it
@@ -542,10 +541,8 @@
                 </div>
             </div>
 
-            <!-- Footer language switcher (#1115). Hidden during an active live
-                 question / reveal (same gate as the header, #253) so it does not
-                 add height below the viewport-filling answer pad; still reachable
-                 on the enter-code, name, lobby, round, and standings screens. -->
+            <!-- Hidden during an active live question / reveal (same gate as the
+                 header, #253) so it does not add height below the answer pad. -->
             <div x-show="!inActiveQuestion()">
                 {{template "lang-switcher" .}}
             </div>

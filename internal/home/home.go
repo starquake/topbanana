@@ -326,8 +326,7 @@ func parseTemplate(page string) *template.Template {
 		// Rebound per request by executeTemplate from cfg.DemoMode; this
 		// parse-time placeholder keeps the template parseable.
 		"demoMode": func() bool { return false },
-		// t and lang are rebound per request by executeTemplate; these
-		// parse-time placeholders keep the templates parseable.
+		// Parse-time placeholders; executeTemplate rebinds t/lang per request.
 		"t":    func(string) string { return "" },
 		"lang": func() string { return locale.LocaleEN },
 	}

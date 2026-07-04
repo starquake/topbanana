@@ -144,9 +144,8 @@ func addClientAndPublicRoutes(
 	// can find ones outside the home page's top-six popular slice.
 	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))
 
-	// UI language switcher (#1115). A plain GET link so the footer switcher
-	// needs no CSRF token; it sets the lang cookie and redirects back. An
-	// invalid locale is ignored.
+	// UI language switcher (#1115). A plain GET link (no CSRF) that sets the
+	// lang cookie and redirects back; an invalid locale is ignored.
 	mux.Handle("GET /lang/{locale}", locale.HandleSetLocale())
 }
 

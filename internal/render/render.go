@@ -115,10 +115,8 @@ func (re *Renderer) prepare(w http.ResponseWriter, r *http.Request) (*template.T
 	if re.csrf != nil {
 		csrfToken = re.csrf.Token(w, r)
 	}
-	// t and lang are bound here alongside csrfToken so every server-rendered
-	// surface can localize its player-facing text and set <html lang> without
-	// each surface wiring the locale itself. Surfaces that never call them
-	// simply ignore the funcs.
+	// t and lang are bound here so every server-rendered surface can localize
+	// text and set <html lang> without wiring the locale itself (#1115).
 	loc := locale.Resolve(r)
 	funcs := template.FuncMap{
 		"csrfToken": func() string { return csrfToken },

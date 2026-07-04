@@ -90,8 +90,8 @@ func TestQuizFromImportPayload_MapsQuestions(t *testing.T) {
 }
 
 // TestQuizFromImportPayload_MapsLanguage pins the #1115 language field: a
-// payload language carries onto the domain quiz, and an omitted language
-// leaves it empty for the store to default to English.
+// payload language carries onto the quiz, and an omitted one stays empty for
+// the store to default to English.
 func TestQuizFromImportPayload_MapsLanguage(t *testing.T) {
 	t.Parallel()
 

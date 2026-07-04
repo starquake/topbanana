@@ -10,10 +10,8 @@ import (
 )
 
 // TestQuizLanguageMigration_DefaultsToEnglish pins the #1115 migration: a
-// quizzes row inserted without a language lands as 'en', matching how the
-// ADD COLUMN ... DEFAULT 'en' backfilled rows that existed before it. The
-// CHECK must reject any value outside ('en','nl'), and a valid 'nl' must
-// round-trip back through the store.
+// quizzes row inserted without a language lands as 'en', the CHECK rejects any
+// value outside ('en','nl'), and a valid 'nl' round-trips through the store.
 func TestQuizLanguageMigration_DefaultsToEnglish(t *testing.T) {
 	t.Parallel()
 
@@ -27,8 +25,8 @@ func TestQuizLanguageMigration_DefaultsToEnglish(t *testing.T) {
 
 	creatorID := seedPlayer(t, db)
 
-	// Insert straight through SQL, omitting language, so the column DEFAULT
-	// fires exactly as it did for pre-migration rows during the backfill.
+	// Insert through raw SQL omitting language, so the column DEFAULT fires as
+	// it did for pre-migration rows during the backfill.
 	res, err := db.ExecContext(
 		ctx,
 		"INSERT INTO quizzes (title, slug, description, created_by_player_id) VALUES (?, ?, ?, ?)",

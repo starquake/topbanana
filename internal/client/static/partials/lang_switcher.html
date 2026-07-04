@@ -1,10 +1,6 @@
 {{define "lang-switcher"}}
-<!-- Footer language switcher (#1115) shared by the solo (index.html) and live
-     (join.html) SPA shells, and rendered identically to the server-page footer
-     switcher (components/client_footer.gohtml) from the same `lang` template
-     func so the active-locale source never diverges. Plain links to
-     /lang/{locale}: the endpoint sets the lang cookie and 303s back to the
-     referring page, so no JS is involved. -->
+<!-- Footer language switcher (#1115), shared by both SPA shells. Plain links to
+     /lang/{locale}: the endpoint sets the lang cookie and 303s back, no JS. -->
 {{$loc := lang}}
 <nav class="mt-10 mb-[max(theme(spacing.5),env(safe-area-inset-bottom))] flex items-center justify-center gap-2 text-sm text-text-dim"
      aria-label="{{t "lang.switcherLabel"}}"

@@ -1,16 +1,8 @@
 import { test, expect } from './fixtures';
 
-// #1115 multi-language (English default + Dutch). Covers the two player-facing
-// behaviours the feature promises:
-//   1. auto-detect from Accept-Language (set by Playwright's `locale` option) on
-//      both the server-rendered home page and the SPA shell (/join), with the
-//      default English context still English.
-//   2. the footer language switcher flips the UI language and the choice
-//      persists across a reload via the lang cookie.
-//
-// The assertions anchor on localized strings that only appear in one language
-// (the Popular/Populair tab, the join heading) and on the switcher's stable
-// data-testids, not on layout.
+// #1115 multi-language: auto-detect from Accept-Language on the home page and
+// SPA shell, and the footer switcher flipping the UI language and persisting the
+// choice across a reload via the lang cookie.
 
 test.describe('locale auto-detect from Accept-Language', () => {
   test.use({ locale: 'nl-NL' });
@@ -46,13 +38,10 @@ test.describe('footer language switcher', () => {
     await page.goto('/');
     await expect(page.getByRole('tab', { name: 'Popular' })).toBeVisible();
 
-    // The switcher is a plain link to /lang/nl; the endpoint sets the cookie and
-    // redirects back to the home page it came from.
     await page.getByTestId('lang-nl').click();
     await expect(page.getByRole('tab', { name: 'Populair' })).toBeVisible();
 
-    // The cookie carries the choice, so a fresh load stays Dutch without the
-    // Accept-Language header asking for it.
+    // The cookie carries the choice, so a fresh load stays Dutch.
     await page.reload();
     await expect(page.getByRole('tab', { name: 'Populair' })).toBeVisible();
     await expect(page.getByTestId('lang-nl')).toHaveAttribute('aria-current', 'true');

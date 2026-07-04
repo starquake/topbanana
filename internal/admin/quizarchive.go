@@ -25,8 +25,7 @@ type quizArchiveManifest struct {
 	Visibility       string `json:"visibility"`
 	Mode             string `json:"mode"`
 	// Language is the advisory content-language label (#1115): "en" or "nl".
-	// Empty in archives written before it was added; the importer treats an
-	// empty value as the store default (English).
+	// Empty in older archives, which the importer defaults to English.
 	Language  string                `json:"language,omitempty"`
 	Questions []quizArchiveQuestion `json:"questions,omitempty"`
 	Rounds    []quizArchiveRound    `json:"rounds,omitempty"`
