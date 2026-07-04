@@ -33,6 +33,7 @@ test('a host publishes a draft quiz through the confirm screen', async ({ page, 
   await expect(page.getByTestId('publish-quiz')).toBeVisible();
   await expect(page.getByTestId('preview-quiz')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Edit quiz' })).toBeVisible();
+  await expect(page.getByTestId('delete-quiz')).toBeVisible();
 
   // The confirm screen reviews every question with the correct answer marked.
   await page.getByTestId('publish-quiz').click();
@@ -47,12 +48,16 @@ test('a host publishes a draft quiz through the confirm screen', async ({ page, 
   await expect(page.getByTestId('quiz-status')).toHaveText('Published');
   await expect(page.getByTestId('publish-lock-notice')).toBeVisible();
 
-  // The draft-only edit controls are gone; Unpublish is offered instead.
+  // The content-edit controls are gone; Unpublish is offered instead.
   await expect(page.getByTestId('publish-quiz')).toHaveCount(0);
   await expect(page.getByTestId('preview-quiz')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Edit quiz' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /switch to (solo|live)/i })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Add round' })).toHaveCount(0);
   await expect(page.getByTestId('unpublish-quiz')).toBeVisible();
+
+  // Delete stays available to the owner on a published quiz (#1192).
+  await expect(page.getByTestId('delete-quiz')).toBeVisible();
 });
 
 test('previewing a draft quiz plays without recording a score', async ({ page, browserName }) => {
