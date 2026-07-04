@@ -1,8 +1,7 @@
 {{define "content"}}
-    {{/* Publish confirm / overview (#1192). Minimal working page: a read-only
-         review of every round -> question -> option (correct marked), a warning
-         that publishing locks the quiz from edits, a Confirm POST button, and a
-         Cancel link back to the quiz view. A frontend agent will restyle it. */}}
+    {{/* Publish confirm / overview (#1192): a read-only review of every round
+         -> question -> option (correct marked) before the host locks the quiz
+         from edits. Confirm posts to /publish; Cancel returns to the quiz. */}}
     <nav aria-label="breadcrumbs" class="crumb">
         <a href="/admin">Admin</a>
         <span class="crumb-sep" aria-hidden="true">/</span>
@@ -14,61 +13,89 @@
     </nav>
 
     <header class="mb-8 pb-6 border-b border-border-soft">
-        <h1 class="mb-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
+        <div class="mb-3 flex flex-wrap items-center gap-3">
+            <span class="pill pill-draft">Draft</span>
+            <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
+        </div>
+        <h1 class="mb-4 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
             Publish &ldquo;{{.Quiz.Title}}&rdquo;
         </h1>
-        <p class="mb-4 max-w-[58ch] text-text-dim">
-            Review the whole quiz below. Once you publish it, this quiz can not be
-            edited. It becomes playable by real players and can only be unpublished
-            until someone has played it.
-        </p>
-        <div class="flex flex-wrap gap-2">
-            <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/publish">
-                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <button type="submit" class="btn-primary">Publish quiz</button>
-            </form>
-            <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
+
+        {{/* Warning callout: publishing is a one-way lock until someone plays. */}}
+        <div class="max-w-[62ch] rounded-sm border border-warning/40 bg-warning/10 px-4 py-3 text-[0.9rem] text-warning" role="note" data-testid="publish-warning">
+            <p class="flex items-start gap-2">
+                <svg viewBox="0 0 16 16" fill="currentColor" class="mt-0.5 w-4 h-4 shrink-0" aria-hidden="true"><path d="M7.938 2.016A.13.13 0 0 1 8.002 2a.13.13 0 0 1 .063.016.15.15 0 0 1 .054.057l6.857 11.667c.036.06.035.124.002.183a.2.2 0 0 1-.054.06.1.1 0 0 1-.066.017H1.146a.1.1 0 0 1-.066-.017.2.2 0 0 1-.054-.06.18.18 0 0 1 .002-.183L7.884 2.073a.15.15 0 0 1 .054-.057m1.044-.45a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767z"/><path d="M7.002 12a1 1 0 1 1 2 0 1 1 0 0 1-2 0M7.1 5.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0z"/></svg>
+                <span>
+                    Once published, this quiz becomes playable by real players and is
+                    locked from edits. You can only return it to draft until someone
+                    has played it. Review everything below before you confirm.
+                </span>
+            </p>
         </div>
     </header>
 
-    <div class="flex flex-col gap-6">
-        {{range .Rounds}}
-            {{$round := .Round}}
-            <section class="round-section" data-round-id="{{$round.ID}}">
-                <header class="flex items-center justify-between gap-3 mb-3 pb-2 border-b border-border-soft">
-                    <h3 class="font-display font-bold uppercase tracking-[0.08em] text-[0.95rem]">{{$round.Title}}</h3>
-                </header>
-                {{if $round.Summary}}
-                    <div class="mb-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
-                        <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
-                        <p class="mt-1 text-text">{{$round.Summary}}</p>
-                    </div>
-                {{end}}
-                <div class="flex flex-col gap-3">
-                    {{range .Questions}}
-                        {{$q := .}}
-                        <article class="q-row" data-question-id="{{$q.ID}}">
-                            <div class="q-position">{{printf "%02d" $q.Position}}</div>
-                            <div class="q-body">
-                                <p class="q-text">{{$q.Text}}</p>
-                                <ul class="q-options">
-                                    {{range $q.Options}}
-                                        <li{{if .Correct}} class="correct"{{end}}>
-                                            <span>{{.Text}}</span>
-                                            {{if .Correct}}
-                                                <span class="sr-only" aria-label="Correct">Correct</span>
-                                            {{end}}
-                                        </li>
-                                    {{end}}
-                                </ul>
+    <section aria-label="Quiz review">
+        <div class="section-head">
+            <h2>Review</h2>
+            {{if .Rounds}}
+                <span class="section-count">{{len .Rounds}} round{{if ne (len .Rounds) 1}}s{{end}}{{if .Quiz.Questions}}, {{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}{{end}}</span>
+            {{end}}
+        </div>
+
+        {{if .Rounds}}
+            <div class="flex flex-col gap-6">
+                {{range .Rounds}}
+                    {{$round := .Round}}
+                    <section class="round-section" data-round-id="{{$round.ID}}">
+                        <header class="flex items-center justify-between gap-3 mb-3 pb-2 border-b border-border-soft">
+                            <h3 class="font-display font-bold uppercase tracking-[0.08em] text-[0.95rem]">{{$round.Title}}</h3>
+                        </header>
+                        {{if $round.Summary}}
+                            <div class="mb-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
+                                <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
+                                <p class="mt-1 text-text">{{$round.Summary}}</p>
                             </div>
-                        </article>
-                    {{end}}
-                    {{if not .Questions}}
-                        <p class="text-text-dim text-[0.9rem] italic">No questions in this round yet.</p>
-                    {{end}}
-                </div>
-            </section>
+                        {{end}}
+                        <div class="flex flex-col gap-3">
+                            {{range .Questions}}
+                                {{$q := .}}
+                                <article class="q-row" data-question-id="{{$q.ID}}">
+                                    <div class="q-position">{{printf "%02d" $q.Position}}</div>
+                                    <div class="q-body">
+                                        <p class="q-text">{{$q.Text}}</p>
+                                        <ul class="q-options">
+                                            {{range $q.Options}}
+                                                <li{{if .Correct}} class="correct"{{end}}>
+                                                    <span>{{.Text}}</span>
+                                                    {{if .Correct}}
+                                                        <span class="ml-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em]">Correct</span>
+                                                    {{end}}
+                                                </li>
+                                            {{end}}
+                                        </ul>
+                                    </div>
+                                </article>
+                            {{end}}
+                            {{if not .Questions}}
+                                <p class="text-text-dim text-[0.9rem] italic">No questions in this round yet.</p>
+                            {{end}}
+                        </div>
+                    </section>
+                {{end}}
+            </div>
+        {{else}}
+            <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
+                This quiz has no rounds yet.
+            </div>
         {{end}}
+    </section>
+
+    {{/* Confirm / Cancel at the bottom, after the review. */}}
+    <div class="mt-10 pt-6 border-t border-border-soft flex flex-wrap gap-2">
+        <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/publish" class="inline-flex">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <button type="submit" data-testid="publish-confirm" class="btn-primary">Publish quiz</button>
+        </form>
+        <a href="/admin/quizzes/{{.Quiz.ID}}" data-testid="publish-cancel" class="btn-ghost">Cancel</a>
     </div>
 {{end}}

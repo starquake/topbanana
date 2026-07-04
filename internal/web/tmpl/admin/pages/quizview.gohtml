@@ -16,12 +16,13 @@
                 {{/* Visibility is not yet modelled; show a default Public pill
                      so the structure is in place for #103. */}}
                 <span class="pill pill-public">Public</span>
-                {{/* Draft / Published status (#1192). A frontend agent will
-                     restyle this into a proper badge. */}}
+                {{/* Draft / Published status (#1192). Draft quizzes are
+                     editable and host-preview-only; published quizzes are
+                     playable by real players and locked from edits. */}}
                 {{if .Quiz.Published}}
-                    <span class="pill" data-testid="quiz-status">Published</span>
+                    <span class="pill pill-published" data-testid="quiz-status">Published</span>
                 {{else}}
-                    <span class="pill" data-testid="quiz-status">Draft</span>
+                    <span class="pill pill-draft" data-testid="quiz-status">Draft</span>
                 {{end}}
                 <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
                 {{if .Quiz.CreatedByDisplayName}}
@@ -35,6 +36,10 @@
                  owns the quiz (or is an admin); the rest of this
                  template treats it as opaque. */}}
             {{$canEdit := .Quiz.CanEdit}}
+            {{/* Content-editing affordances (add/edit/delete rounds, questions,
+                 and media) are locked once the quiz is published (#1192); Export
+                 and Unpublish stay under $canEdit so they remain available. */}}
+            {{$canEditContent := and $canEdit (not .Quiz.Published)}}
             <h1 class="mb-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
                 <span>{{.Quiz.Title}}</span>
             </h1>
@@ -158,6 +163,18 @@
                 {{end}}
                 {{end}}
             </div>
+
+            {{/* Lock notice (#1192): once published the quiz is read-only. Show
+                 why, and whether it can still be returned to draft. */}}
+            {{if and $canEdit .Quiz.Published}}
+            <p class="mt-4 inline-flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.8rem] text-text-dim" data-testid="publish-lock-notice">
+                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 shrink-0 text-text-mute" aria-hidden="true"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+                <span>
+                    Published quizzes are locked from edits.
+                    {{if .Quiz.CanUnpublish}}Unpublish to make changes.{{else}}This quiz has been played, so it can no longer be unpublished.{{end}}
+                </span>
+            </p>
+            {{end}}
         </header>
 
         {{/* Share modal */}}
@@ -246,7 +263,7 @@
                 {{/* Delete modals - only mounted for the creator so
                      non-owners can't open the dialog. The questions_list
                      partial gates the per-row buttons on the same rule. */}}
-                {{if $canEdit}}
+                {{if $canEditContent}}
                 {{range .Quiz.Questions}}
                     <div id="modal-delete-question-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-question-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                         <div class="absolute inset-0" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
@@ -323,7 +340,7 @@
                 </div>
             {{end}}
 
-            {{if $canEdit}}
+            {{if $canEditContent}}
             <div class="mt-6 flex flex-wrap gap-2">
                 <a href="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
                    class="btn-ghost gap-2">
@@ -340,7 +357,7 @@
              upload form - only the owner or an admin manages the library. The
              handler still validates the upload server-side; the file input's
              accept attribute is just a picker hint. */}}
-        {{if $canEdit}}
+        {{if $canEditContent}}
         <section id="images" aria-label="Images" class="scroll-mt-6">
             <div class="section-head">
                 <h2>Images</h2>
@@ -544,7 +561,7 @@
              plus an upload control. Gated on $canEdit like the Images section;
              the upload is validated server-side, the file input's accept
              attribute is only a picker hint. */}}
-        {{if $canEdit}}
+        {{if $canEditContent}}
         <section id="audio" aria-label="Audio" class="scroll-mt-6">
             <div class="section-head">
                 <h2>Audio</h2>

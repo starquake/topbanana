@@ -371,6 +371,15 @@
     .pill-public {
         @apply before:bg-cyan;
     }
+    /* Publish-status pills (#1192). Draft reads as a muted, in-progress
+     * state (amber dot on a soft amber tint); Published as a settled,
+     * locked state (green dot on a soft green tint). */
+    .pill-draft {
+        @apply border-warning/40 bg-warning/10 text-warning before:bg-warning;
+    }
+    .pill-published {
+        @apply border-success/40 bg-success/10 text-success before:bg-success;
+    }
     /* Play-mode badges for the manage-quizzes list (#829, #890): the
      * leading dot is suppressed; the template draws an inline Lucide
      * icon (user / users) before the label so the pill reads as solo

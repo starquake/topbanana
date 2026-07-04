@@ -24,7 +24,9 @@
      Required data: .Quiz (for CanEdit / QuizID), .Rounds (slice of
      RoundViewData), plus the csrfToken template func. */}}
 {{define "questions_list"}}
-{{$canEdit := .Quiz.CanEdit}}
+{{/* Content-editing affordances are locked once the quiz is published (#1192),
+     so the drag handles and per-row edit/delete controls hide there. */}}
+{{$canEdit := and .Quiz.CanEdit (not .Quiz.Published)}}
 {{$quizID := .Quiz.ID}}
 <div id="questions-list" class="flex flex-col gap-6" data-quiz-id="{{$quizID}}" data-csrf="{{csrfToken}}">
     {{range .Rounds}}

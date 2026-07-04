@@ -59,6 +59,16 @@
                         Solo
                     </span>
                 {{end}}
+                {{/* Publish-status badge (#1192). Admin surface only: the host
+                     picker and public lists show published quizzes exclusively,
+                     so a badge there carries no information. */}}
+                {{if eq .ActionVariant "admin"}}
+                    {{if .Published}}
+                        <span class="pill pill-published" data-testid="quiz-card-status-{{.ID}}">Published</span>
+                    {{else}}
+                        <span class="pill pill-draft" data-testid="quiz-card-status-{{.ID}}">Draft</span>
+                    {{end}}
+                {{end}}
             </div>
             {{if eq .ActionVariant "host"}}{{template "quiz_card_actions_host" .}}{{else}}{{template "quiz_card_actions_admin" .}}{{end}}
         </footer>

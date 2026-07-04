@@ -120,7 +120,7 @@ func TestHandleQuizPublishConfirm(t *testing.T) {
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}
-		if got := rr.Body.String(); !strings.Contains(got, "can not be") {
+		if got := rr.Body.String(); !strings.Contains(got, "locked from edits") {
 			t.Error("confirm page missing the edit-lock warning")
 		}
 	})
