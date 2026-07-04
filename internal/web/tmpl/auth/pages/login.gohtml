@@ -1,8 +1,8 @@
 {{define "content"}}
     <div class="auth-shell">
         <header class="mb-8 text-center">
-            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Log in</h1>
-            <p class="mt-2 text-text-dim text-[0.95rem]">Welcome back. Sign in to manage your quizzes.</p>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "login.heading"}}</h1>
+            <p class="mt-2 text-text-dim text-[0.95rem]">{{t "login.subtitle"}}</p>
         </header>
 
         {{if .Message}}
@@ -14,19 +14,19 @@
             {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
 
             <div class="form-field">
-                <label for="email" class="label-eyebrow">Email</label>
+                <label for="email" class="label-eyebrow">{{t "common.email"}}</label>
                 <input id="email" name="email" type="email" required
                        autocomplete="email"
                        value="{{.Email}}" class="form-input">
             </div>
 
             <div class="form-field">
-                <label for="password" class="label-eyebrow">Password</label>
+                <label for="password" class="label-eyebrow">{{t "common.password"}}</label>
                 <input id="password" name="password" type="password" required
                        autocomplete="current-password"
                        class="form-input">
-                {{if .ShowForgotPassword}}<p class="mt-2 text-xs text-text-mute"><a href="/forgot-password" class="underline">Forgot your password?</a></p>{{end}}
-                <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">Didn't get the verification email?</a></p>
+                {{if .ShowForgotPassword}}<p class="mt-2 text-xs text-text-mute"><a href="/forgot-password" class="underline">{{t "login.forgotPassword"}}</a></p>{{end}}
+                <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">{{t "common.noVerificationEmail"}}</a></p>
             </div>
 
             {{/* flex-row-reverse pushes "Log in" to the right (thumb-
@@ -35,9 +35,9 @@
                  the secondary register link. justify-between spreads
                  the pair to the row's edges. */}}
             <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
-                <button type="submit" class="btn-primary">Log in</button>
+                <button type="submit" class="btn-primary">{{t "login.submit"}}</button>
                 {{if .ShowRegister}}
-                    <a href="/register" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">No account? Register</a>
+                    <a href="/register" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "login.noAccount"}}</a>
                 {{end}}
             </div>
         </form>
@@ -49,12 +49,12 @@
                  after the "or" divider. */}}
             <div class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.18em] text-text-dim" aria-hidden="true">
                 <span class="h-px flex-1 bg-border-soft"></span>
-                <span>or</span>
+                <span>{{t "common.or"}}</span>
                 <span class="h-px flex-1 bg-border-soft"></span>
             </div>
             <a href="/login/google{{if .Next}}?next={{.Next | urlquery}}{{end}}" class="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-sm bg-surface border border-border-soft text-text hover:bg-surface-alt no-underline">
                 {{template "googleIcon"}}
-                <span class="text-sm font-medium">Sign in with Google</span>
+                <span class="text-sm font-medium">{{t "login.google"}}</span>
             </a>
         {{end}}
     </div>

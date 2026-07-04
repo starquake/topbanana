@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -46,10 +48,18 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 // shellData feeds the index.html template. One title value drives both
 // <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
+//
+// Locale is the resolved UI language; it sets <html lang> and the SPA's
+// window.__I18N__.locale. MessagesJSON is the full merged message catalog for
+// that locale, marshaled to JSON, injected as window.__I18N__.messages so the
+// SPA always has a value for every key without a fetch. Both are set by render
+// from the request, not by the per-URL callers.
 type shellData struct {
 	Title               string
 	Description         string
 	RegistrationEnabled bool
+	Locale              string
+	MessagesJSON        template.JS
 }
 
 // Index handles GET /client/{$} - the SPA root with no quiz context. Uses
@@ -123,9 +133,25 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 // without a rebuild. Page loads are infrequent compared to /api/* traffic, so
 // the extra allocation is in the noise.
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name string, data shellData) {
+	loc := locale.Resolve(r)
+	data.Locale = loc
+	messages, err := json.Marshal(locale.Messages(loc))
+	if err != nil {
+		// The catalog is static ASCII strings, so a marshal failure is not
+		// reachable in practice; fall back to an empty object so the SPA's
+		// window.__I18N__.messages is always valid JSON.
+		s.logger.ErrorContext(r.Context(), "marshal locale messages", slog.Any("err", err))
+		messages = []byte("{}")
+	}
+	// messages is our own static ASCII catalog marshaled to JSON, never user
+	// input, so injecting it as template.JS carries no XSS risk.
+	//nolint:gosec // G203: trusted, server-owned JSON; not attacker-controlled.
+	data.MessagesJSON = template.JS(messages)
 	funcs := template.FuncMap{
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"envTitleTag": envtag.Get,
+		"t":           func(key string) string { return locale.Translate(loc, key) },
+		"lang":        func() string { return loc },
 	}
 	// partials/ holds the {{define}} blocks shared between index.html (solo) and
 	// join.html (live): round_intro.html ("round-intro-card"), standings_bars.html

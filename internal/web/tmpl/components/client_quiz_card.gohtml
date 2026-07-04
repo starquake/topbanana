@@ -21,7 +21,7 @@
         <div class="flex-1 p-5 pb-2">
             <div class="flex items-center justify-between gap-2 mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
                 {{if .CreatedByDisplayName}}
-                    <span class="text-text-dim truncate min-w-0">By {{.CreatedByDisplayName}}</span>
+                    <span class="text-text-dim truncate min-w-0">{{t "card.by"}} {{.CreatedByDisplayName}}</span>
                 {{else}}
                     <span></span>
                 {{end}}
@@ -41,13 +41,13 @@
         </div>
         <footer class="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <span>{{.RoundCount}} {{if eq .RoundCount 1}}round{{else}}rounds{{end}}</span>
-                <span>{{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}</span>
+                <span>{{.RoundCount}} {{if eq .RoundCount 1}}{{t "card.roundOne"}}{{else}}{{t "card.roundMany"}}{{end}}</span>
+                <span>{{.QuestionCount}} {{if eq .QuestionCount 1}}{{t "card.questionOne"}}{{else}}{{t "card.questionMany"}}{{end}}</span>
                 {{/* Times-played counter (#891), shown with the same Lucide
                      play-circle icon the admin card uses. */}}
-                <span class="inline-flex items-center gap-1" title="Times played">
+                <span class="inline-flex items-center gap-1" title="{{t "card.timesPlayed"}}">
                     <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-                    {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
+                    {{.PlayCount}} {{if eq .PlayCount 1}}{{t "card.playOne"}}{{else}}{{t "card.playMany"}}{{end}}
                 </span>
             </div>
             {{/* Yellow accent fill so the share affordance stands out against
@@ -57,11 +57,11 @@
                     data-share-trigger
                     data-share-path="{{.PlayURL}}"
                     data-share-title="{{.Title}}"
-                    data-share-text="Play this quiz: {{.Title}}"
-                    aria-label="Share {{.Title}}"
+                    data-share-text="{{t "card.sharePrefix"}} {{.Title}}"
+                    aria-label="{{t "card.share"}} {{.Title}}"
                     class="relative z-10 inline-flex items-center justify-center w-9 h-9 rounded-sm bg-accent text-bg border-0 hover:bg-accent-deep focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                <span class="sr-only">Share</span>
+                <span class="sr-only">{{t "card.share"}}</span>
             </button>
         </footer>
     </article>

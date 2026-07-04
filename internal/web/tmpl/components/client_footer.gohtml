@@ -35,16 +35,16 @@
 
         <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-start sm:gap-x-5">
             {{if isSignedIn}}
-                <span class="whitespace-nowrap">Signed in as&nbsp;<a href="{{profileHref}}"
+                <span class="whitespace-nowrap">{{t "footer.signedInAs"}}&nbsp;<a href="{{profileHref}}"
                        class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{viewerName}}</a></span>
                 <form action="/logout" method="POST" class="m-0 p-0 inline-flex">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                    <button type="submit" class="m-0 p-0 bg-transparent border-0 cursor-pointer whitespace-nowrap text-text-dim hover:text-text underline-offset-2 hover:underline">Log out</button>
+                    <button type="submit" class="m-0 p-0 bg-transparent border-0 cursor-pointer whitespace-nowrap text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "footer.logOut"}}</button>
                 </form>
             {{else}}
-                <a href="/login" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">Log in</a>
+                <a href="/login" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">{{t "footer.logIn"}}</a>
             {{end}}
-            <a href="/admin" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">Manage quizzes</a>
+            <a href="/admin" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">{{t "footer.manageQuizzes"}}</a>
         </div>
 
         <span class="text-xs text-text-mute whitespace-nowrap">{{versionLabel}}</span>

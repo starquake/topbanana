@@ -7,7 +7,7 @@
             Top<span class="text-accent font-extrabold">Banana</span>!
         </h1>
         <p class="mt-2 max-w-[55ch] text-text-dim text-[0.95rem]">
-            Every quiz, ordered by most recently updated.
+            {{t "allQuizzes.tagline"}}
         </p>
     </header>
 
@@ -19,7 +19,7 @@
         </ul>
     {{else}}
         <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
-            <p class="m-0 text-sm">No quizzes have been published yet.</p>
+            <p class="m-0 text-sm">{{t "allQuizzes.empty"}}</p>
         </div>
     {{end}}
 {{end}}
