@@ -19,6 +19,7 @@ JOIN game_participants gp ON gp.player_id = p.id
 JOIN games g ON g.id = gp.game_id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND p.display_name_claimed = 1
+  AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
@@ -86,6 +87,7 @@ FROM quizzes q
 JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
 ORDER BY q.created_at DESC, q.id DESC
 `
@@ -111,6 +113,7 @@ type ListNewestQuizzesRow struct {
 // the start page. Unlisted is link-only; private requires a logged-in
 // player, neither of which fits this anonymous list. Mode gate (MP-0 /
 // #677): live quizzes are hosted-only, so they are excluded here too.
+// Published gate (#1192): a draft is not yet playable, so it is excluded.
 //
 // The EXISTS gate on questions excludes quizzes with zero questions:
 // they cannot be played, so they have no business on a "pick a quiz"
@@ -169,6 +172,8 @@ JOIN games g ON g.quiz_id = q.id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND q.visibility = 'public'
   AND q.mode = 'solo'
+  AND q.published = 1
+  AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id)
@@ -194,7 +199,8 @@ type ListPopularQuizzesRow struct {
 // been issued, i.e. the count of game_questions rows for the game has
 // caught up with the count of questions on the quiz. Same finisher
 // condition as ListAnswersForQuizLeaderboard so the home page and the
-// per-quiz leaderboard agree on what "played" means.
+// per-quiz leaderboard agree on what "played" means. Preview games
+// (is_preview = 1) are excluded so a preview never inflates the ranking (#1192).
 //
 // The EXISTS gate on questions excludes quizzes with zero questions:
 // without it the finisher predicate above degenerates to 0 >= 0 and
@@ -211,7 +217,8 @@ type ListPopularQuizzesRow struct {
 // the start page. Unlisted is link-only; private requires a logged-in
 // player, neither of which fits this anonymous list. Mode gate (MP-0 /
 // #677): live quizzes are hosted-only and never solo-playable, so they
-// are excluded from the start page too.
+// are excluded from the start page too. Published gate (#1192): a draft
+// is not yet playable, so it must not surface here either.
 //
 // Two play tallies, deliberately distinct: recent_play_count is the
 // 30-day finished-game count that drives the ranking (what "popular"

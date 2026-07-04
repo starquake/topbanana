@@ -24,6 +24,7 @@ func TestQuizModeGating_Integration(t *testing.T) {
 
 	soloQz := &quiz.Quiz{
 		Title:             "Solo Mode Quiz",
+		Published:         true,
 		Slug:              "solo-mode-quiz",
 		Description:       "Self-paced.",
 		CreatedByPlayerID: seededAdminID,
@@ -39,6 +40,7 @@ func TestQuizModeGating_Integration(t *testing.T) {
 
 	liveQz := &quiz.Quiz{
 		Title:             "Live Mode Quiz",
+		Published:         true,
 		Slug:              "live-mode-quiz",
 		Description:       "Hosted only.",
 		CreatedByPlayerID: seededAdminID,

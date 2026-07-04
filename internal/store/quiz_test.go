@@ -306,11 +306,11 @@ func TestQuizStore_ListLiveQuizzes(t *testing.T) {
 	}
 	liveA := &quiz.Quiz{
 		Title: "Live A", Slug: "live-a", Description: "x",
-		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo,
+		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo, Published: true,
 	}
 	liveB := &quiz.Quiz{
 		Title: "Live B", Slug: "live-b", Description: "x",
-		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo,
+		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo, Published: true,
 	}
 	for _, qz := range []*quiz.Quiz{soloQz, liveA, liveB} {
 		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
@@ -1165,6 +1165,275 @@ func TestQuizStore_SetQuizMode(t *testing.T) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
+}
+
+func TestQuizStore_SetQuizPublished(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("publishes a draft and unpublishes it again", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		// A new quiz is a draft.
+		if got, want := publishedOf(t, quizStore, qz.ID), false; got != want {
+			t.Fatalf("new quiz Published = %v, want %v (draft)", got, want)
+		}
+
+		if err := quizStore.SetQuizPublished(t.Context(), qz.ID, true); err != nil {
+			t.Fatalf("SetQuizPublished(true) err = %v, want nil", err)
+		}
+		if got, want := publishedOf(t, quizStore, qz.ID), true; got != want {
+			t.Errorf("Published = %v, want %v", got, want)
+		}
+
+		if err := quizStore.SetQuizPublished(t.Context(), qz.ID, false); err != nil {
+			t.Fatalf("SetQuizPublished(false) err = %v, want nil", err)
+		}
+		if got, want := publishedOf(t, quizStore, qz.ID), false; got != want {
+			t.Errorf("Published = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("missing quiz returns ErrQuizNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		err := quizStore.SetQuizPublished(t.Context(), 9999, true)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestQuizStore_QuizHasRealPlays(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	seedQuizAndPlayer := func(t *testing.T, db *sql.DB, quizStore *QuizStore) (int64, int64) {
+		t.Helper()
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		playerStore := NewPlayerStore(db, logger)
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-real-plays")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+
+		return qz.ID, player.ID
+	}
+
+	t.Run("false with no games and false with only a preview game", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+		gameStore := NewGameStore(db, logger)
+		quizID, playerID := seedQuizAndPlayer(t, db, quizStore)
+
+		if got, want := hasRealPlays(t, quizStore, quizID), false; got != want {
+			t.Errorf("QuizHasRealPlays (no games) = %v, want %v", got, want)
+		}
+
+		// A preview game does not count as a real play.
+		preview := &game.Game{QuizID: quizID, Preview: true}
+		if err := gameStore.CreateGameAndParticipant(
+			t.Context(), preview, &game.Participant{PlayerID: playerID, QuizID: quizID},
+		); err != nil {
+			t.Fatalf("CreateGameAndParticipant (preview) err = %v, want nil", err)
+		}
+		if got, want := hasRealPlays(t, quizStore, quizID), false; got != want {
+			t.Errorf("QuizHasRealPlays (only preview) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("true once a non-preview game exists", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+		gameStore := NewGameStore(db, logger)
+		quizID, playerID := seedQuizAndPlayer(t, db, quizStore)
+
+		realGame := &game.Game{QuizID: quizID}
+		if err := gameStore.CreateGameAndParticipant(
+			t.Context(), realGame, &game.Participant{PlayerID: playerID, QuizID: quizID},
+		); err != nil {
+			t.Fatalf("CreateGameAndParticipant (real) err = %v, want nil", err)
+		}
+		if got, want := hasRealPlays(t, quizStore, quizID), true; got != want {
+			t.Errorf("QuizHasRealPlays (real game) = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestQuizStore_UnpublishQuizIfUnplayed(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	seedPublishedQuiz := func(t *testing.T, db *sql.DB, quizStore *QuizStore) (int64, int64) {
+		t.Helper()
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		if err := quizStore.SetQuizPublished(t.Context(), qz.ID, true); err != nil {
+			t.Fatalf("SetQuizPublished(true) err = %v, want nil", err)
+		}
+		playerStore := NewPlayerStore(db, logger)
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-unpublish")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+
+		return qz.ID, player.ID
+	}
+
+	t.Run("unplayed quiz is unpublished", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+		quizID, _ := seedPublishedQuiz(t, db, quizStore)
+
+		unpublished, err := quizStore.UnpublishQuizIfUnplayed(t.Context(), quizID)
+		if err != nil {
+			t.Fatalf("UnpublishQuizIfUnplayed err = %v, want nil", err)
+		}
+		if got, want := unpublished, true; got != want {
+			t.Errorf("unpublished = %v, want %v", got, want)
+		}
+		if got, want := publishedOf(t, quizStore, quizID), false; got != want {
+			t.Errorf("Published after unpublish = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a preview-only game still allows unpublish", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+		gameStore := NewGameStore(db, logger)
+		quizID, playerID := seedPublishedQuiz(t, db, quizStore)
+
+		preview := &game.Game{QuizID: quizID, Preview: true}
+		if err := gameStore.CreateGameAndParticipant(
+			t.Context(), preview, &game.Participant{PlayerID: playerID, QuizID: quizID},
+		); err != nil {
+			t.Fatalf("CreateGameAndParticipant (preview) err = %v, want nil", err)
+		}
+
+		unpublished, err := quizStore.UnpublishQuizIfUnplayed(t.Context(), quizID)
+		if err != nil {
+			t.Fatalf("UnpublishQuizIfUnplayed err = %v, want nil", err)
+		}
+		if got, want := unpublished, true; got != want {
+			t.Errorf("unpublished (preview only) = %v, want %v", got, want)
+		}
+		if got, want := publishedOf(t, quizStore, quizID), false; got != want {
+			t.Errorf("Published after unpublish = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a played quiz is not unpublished", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+		gameStore := NewGameStore(db, logger)
+		quizID, playerID := seedPublishedQuiz(t, db, quizStore)
+
+		realGame := &game.Game{QuizID: quizID}
+		if err := gameStore.CreateGameAndParticipant(
+			t.Context(), realGame, &game.Participant{PlayerID: playerID, QuizID: quizID},
+		); err != nil {
+			t.Fatalf("CreateGameAndParticipant (real) err = %v, want nil", err)
+		}
+
+		unpublished, err := quizStore.UnpublishQuizIfUnplayed(t.Context(), quizID)
+		if err != nil {
+			t.Fatalf("UnpublishQuizIfUnplayed err = %v, want nil", err)
+		}
+		if got, want := unpublished, false; got != want {
+			t.Errorf("unpublished (played) = %v, want %v", got, want)
+		}
+		if got, want := publishedOf(t, quizStore, quizID), true; got != want {
+			t.Errorf("Published after refused unpublish = %v, want %v (stays published)", got, want)
+		}
+	})
+}
+
+// TestQuizStore_ListPublicQuizzes_ExcludesDrafts pins that a draft quiz stays out of the public solo listing until published (#1192).
+func TestQuizStore_ListPublicQuizzes_ExcludesDrafts(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
+
+	published := &quiz.Quiz{
+		Title: "Published Public", Slug: "pub-public", Description: "x",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Mode: quiz.ModeSolo, Published: true,
+	}
+	draft := &quiz.Quiz{
+		Title: "Draft Public", Slug: "draft-public", Description: "x",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Mode: quiz.ModeSolo, Published: false,
+	}
+	for _, qz := range []*quiz.Quiz{published, draft} {
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz(%s) err = %v, want nil", qz.Title, err)
+		}
+	}
+
+	quizzes, err := quizStore.ListPublicQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListPublicQuizzes err = %v, want nil", err)
+	}
+
+	titles := make([]string, 0, len(quizzes))
+	for _, qz := range quizzes {
+		titles = append(titles, qz.Title)
+	}
+	if slices.Contains(titles, "Draft Public") {
+		t.Errorf("public listing = %v, should exclude the draft", titles)
+	}
+	if !slices.Contains(titles, "Published Public") {
+		t.Errorf("public listing = %v, should include the published quiz", titles)
+	}
+}
+
+func publishedOf(t *testing.T, quizStore *QuizStore, quizID int64) bool {
+	t.Helper()
+	qz, err := quizStore.GetQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+
+	return qz.Published
+}
+
+func hasRealPlays(t *testing.T, quizStore *QuizStore, quizID int64) bool {
+	t.Helper()
+	got, err := quizStore.QuizHasRealPlays(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("QuizHasRealPlays err = %v, want nil", err)
+	}
+
+	return got
 }
 
 func TestQuizStore_UpdateQuiz_ErrorHandling(t *testing.T) {

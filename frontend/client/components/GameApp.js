@@ -93,6 +93,8 @@ export class GameApp {
         // instead of silently dropping the player onto the generic picker
         // (#802). Reset whenever a real quiz is picked.
         this.deepLinkUnavailable = false;
+        // True when opened as an owner preview (?preview=1); drives the HUD chip and marks the game non-scoring (#1192).
+        this.preview = false;
         // Gates the deep-link title/description so it only paints once
         // checkAlreadyPlayed has resolved the start state. Without it the
         // header renders optimistically on a deep link, then vanishes when
@@ -184,6 +186,12 @@ export class GameApp {
             playerService.getMe(),
         ]);
         this.player = player;
+        // Preview deep link: a draft is absent from the public list, so take the id from the path and start a preview game, bypassing the list/resume probe (#1192).
+        if (this.isPreviewDeepLink()) {
+            await this.startPreviewGame();
+
+            return;
+        }
         // A list failure leaves the start screen on its error + Retry state
         // (#1120); the deep-link resolution and resume probe both need the
         // loaded list, so defer them until a successful (re)load.
@@ -419,6 +427,63 @@ export class GameApp {
         return PLAY_PATH_PATTERN.test(window.location.pathname);
     }
 
+    // isPreviewDeepLink reports whether the URL is a /play deep link carrying ?preview=1; the server owner-gates the create (#1192).
+    isPreviewDeepLink() {
+        if (!this.hasDeepLinkPath()) return false;
+        return new URLSearchParams(window.location.search).get('preview') === '1';
+    }
+
+    // deepLinkQuizId extracts the numeric quiz id from a /play/<slug>-<id>
+    // path, or null when the path is not a deep link.
+    deepLinkQuizId() {
+        const match = window.location.pathname.match(PLAY_PATH_PATTERN);
+        return match ? parseInt(match[1], 10) : null;
+    }
+
+    // deepLinkSlugId returns the `${slug}-${id}` portion of a /play/ deep link, used as the leaderboard key when the quiz is absent from the loaded list.
+    deepLinkSlugId() {
+        return window.location.pathname
+            .replace(/\/$/, '')
+            .replace(/^\/play\//, '');
+    }
+
+    // startPreviewGame creates a preview game from the deep-link quiz id and drops into the normal play loop; a 403/404 surfaces the "not available" note (#1192).
+    async startPreviewGame() {
+        this.preview = true;
+        const quizId = this.deepLinkQuizId();
+        if (!quizId) {
+            this.deepLinkUnavailable = true;
+            this.startStateResolved = true;
+
+            return;
+        }
+        this.quizSlugId = this.deepLinkSlugId();
+        // No Start gesture on a preview auto-start: no loading screen and no audio teardown (no keep-alive to stop).
+        await this.bootstrapGame({
+            create: async () => {
+                try {
+                    const data = await gameService.startGame(quizId, true);
+                    this.startStateResolved = true;
+
+                    return data.id;
+                } catch (err) {
+                    if (err && (err.status === 403 || err.status === 404)) {
+                        this.deepLinkUnavailable = true;
+                    } else {
+                        console.error('startPreviewGame failed', err);
+                        this.startError = "Couldn't start the preview - please refresh and try again.";
+                    }
+                    this.startStateResolved = true;
+
+                    return null;
+                }
+            },
+            failureCopy: "Couldn't start the preview - please refresh and try again.",
+            showAudioLoading: false,
+            tearDownAudioOnFailure: false,
+        });
+    }
+
     // slugIdFor returns the `${slug}-${id}` form for the selected quiz, or
     // null when no matching quiz exists in this.quizzes.
     slugIdFor(quizId) {
@@ -579,6 +644,46 @@ export class GameApp {
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return;
         this.quizSlugId = slugId;
+        // The Start gesture armed the iOS keep-alive, so preload behind the loading screen and tear audio down on failure.
+        await this.bootstrapGame({
+            create: async () => {
+                if (existing) return existing.gameId;
+                try {
+                    const data = await gameService.startGame(this.selectedQuizId);
+
+                    return data.id;
+                } catch (err) {
+                    // #287: 409 means a game already exists (a two-tab race); recover by re-fetching it. Any other error surfaces startError.
+                    if (err && err.status === 409) {
+                        const recovered = await gameService.getMyGameForQuiz(slugId);
+                        if (!recovered) {
+                            console.error('startGame: 409 with no recoverable game', err);
+                            this.startError = "Couldn't start the quiz — please refresh and try again.";
+
+                            return null;
+                        }
+
+                        return recovered.gameId;
+                    }
+                    console.error('startGame failed', err);
+                    this.startError = "Couldn't start the quiz — please refresh and try again.";
+
+                    return null;
+                }
+            },
+            failureCopy: "Couldn't start the quiz — please refresh and try again.",
+            showAudioLoading: true,
+            tearDownAudioOnFailure: true,
+        });
+    }
+
+    // bootstrapGame is the shared game-start tail for the normal start and the
+    // preview. `create` returns the new game id, or null when it already handled
+    // its own failure and set the UI state (bootstrap then aborts). A failed first
+    // question rolls back to the start screen with `failureCopy` (#1188).
+    // `showAudioLoading` gates the loading screen; `tearDownAudioOnFailure` stops
+    // the iOS keep-alive.
+    async bootstrapGame({ create, failureCopy, showAudioLoading, tearDownAudioOnFailure }) {
         this.score = 0;
         // Clear any leftover round-card state from a prior session in
         // the same tab so the gameplay view doesn't render the old
@@ -586,50 +691,27 @@ export class GameApp {
         this.roundItem = null;
         this.roundContinueError = false;
         this.lastQuestionPosition = 0;
-        if (existing) {
-            this.gameId = existing.gameId;
+
+        const gameId = await create();
+        if (!gameId) return;
+        this.gameId = gameId;
+
+        // Preload every clip up front (#1088). With the loading screen the start blocks on it; otherwise it runs in the background and the manual play control covers a blocked clip.
+        if (showAudioLoading) {
+            await this.preloadGameAudio();
         } else {
-            try {
-                const data = await gameService.startGame(this.selectedQuizId);
-                this.gameId = data.id;
-            } catch (err) {
-                // #287: 409 means a game already exists for this
-                // (player, quiz) pair — usually a two-tab race past
-                // the checkAlreadyPlayed gate above. Recover by
-                // re-fetching the existing game so the player still
-                // gets through; any other error (500, network) gives
-                // up with a visible startError.
-                if (err && err.status === 409) {
-                    const recovered = await gameService.getMyGameForQuiz(slugId);
-                    if (!recovered) {
-                        console.error('startGame: 409 with no recoverable game', err);
-                        this.startError = "Couldn't start the quiz — please refresh and try again.";
-                        return;
-                    }
-                    this.gameId = recovered.gameId;
-                } else {
-                    console.error('startGame failed', err);
-                    this.startError = "Couldn't start the quiz — please refresh and try again.";
-                    return;
-                }
-            }
+            void this.preloadGameAudio({ showLoading: false });
         }
-        // Preload every clip up front (#1088) behind the "Loading sounds" state so
-        // each question plays an already-decoded Howl; the engine's budget keeps a
-        // slow/failed clip from hanging the start.
-        await this.preloadGameAudio();
+
         try {
             await this.nextQuestion();
         } catch (err) {
-            // Roll back to the start screen with a retry banner so a first-question
-            // /next failure can't freeze the player on "Loading question..." (#1188).
-            console.error('startGame: first question fetch failed', err);
+            console.error('bootstrapGame: first question fetch failed', err);
             this.gameId = null;
             this.question = null;
             this.roundItem = null;
-            this.startError = "Couldn't start the quiz — please refresh and try again.";
-            // Stop the iOS silent keep-alive unlock() started; clips re-preload on the next Start.
-            this.audio.teardown();
+            this.startError = failureCopy;
+            if (tearDownAudioOnFailure) this.audio.teardown();
         }
     }
 

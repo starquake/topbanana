@@ -283,7 +283,7 @@ func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {
 		return c
 	}
 	store := &fakeStore{existingCodes: map[string]bool{"TAKEN1": true, "TAKEN2": true}}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
+	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 8)
 
 	sess, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
@@ -302,7 +302,7 @@ func TestService_CreateSession_ExhaustsCodeBudget(t *testing.T) {
 	// gives up with ErrJoinCodeUnavailable rather than looping forever.
 	gen := func() string { return "ALWAYS" }
 	store := &fakeStore{existingCodes: map[string]bool{"ALWAYS": true}}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
+	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 3)
 
 	_, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)

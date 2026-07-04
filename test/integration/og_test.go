@@ -30,6 +30,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 	// reaches og:description rather than the default.
 	qz := &quiz.Quiz{
 		Title:             "Bananas of the World",
+		Published:         true,
 		Slug:              "bananas-of-the-world",
 		Description:       "Twenty rounds on cultivars, cuisines, and corporate history.",
 		CreatedByPlayerID: seededAdminID,
@@ -142,6 +143,7 @@ func TestOGMetadata_LiveQuiz(t *testing.T) {
 
 	liveQz := &quiz.Quiz{
 		Title:             "Secret Live Quiz",
+		Published:         true,
 		Slug:              "secret-live-quiz",
 		Description:       "Spoilers that must not leak into a link preview.",
 		CreatedByPlayerID: seededAdminID,
@@ -154,6 +156,7 @@ func TestOGMetadata_LiveQuiz(t *testing.T) {
 
 	soloQz := &quiz.Quiz{
 		Title:             "Open Solo Quiz",
+		Published:         true,
 		Slug:              "open-solo-quiz",
 		Description:       "Self-paced; safe to preview.",
 		CreatedByPlayerID: seededAdminID,
@@ -209,6 +212,7 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 
 	privateQz := &quiz.Quiz{
 		Title:             "Confidential Private Quiz",
+		Published:         true,
 		Slug:              "confidential-private-quiz",
 		Description:       "Title and description that must stay behind sign-in.",
 		CreatedByPlayerID: seededAdminID,
@@ -221,6 +225,7 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 
 	publicQz := &quiz.Quiz{
 		Title:             "Open Public Quiz",
+		Published:         true,
 		Slug:              "open-public-quiz",
 		Description:       "Listed and safe to preview.",
 		CreatedByPlayerID: seededAdminID,
@@ -255,6 +260,67 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 		wantDesc := fmt.Sprintf(`<meta property="og:description" content="%s">`, publicQz.Description)
 		if !strings.Contains(body, wantDesc) {
 			t.Errorf("public quiz play card missing og:description %q", wantDesc)
+		}
+	})
+}
+
+// TestOGMetadata_DraftQuiz pins that a draft's /play link falls back to the default OG card (no title/description leak), while a published quiz surfaces its own (#1192).
+func TestOGMetadata_DraftQuiz(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+
+	draftQz := &quiz.Quiz{
+		Title:             "Unfinished Draft Quiz",
+		Published:         false,
+		Slug:              "unfinished-draft-quiz",
+		Description:       "Work-in-progress that must not leak into a link preview.",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Mode:              quiz.ModeSolo,
+	}
+	if err := setup.Stores.Quizzes.CreateQuiz(ctx, draftQz); err != nil {
+		t.Fatalf("CreateQuiz draft err = %v, want nil", err)
+	}
+
+	publishedQz := &quiz.Quiz{
+		Title:             "Ready Published Quiz",
+		Published:         true,
+		Slug:              "ready-published-quiz",
+		Description:       "Published and safe to preview.",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Mode:              quiz.ModeSolo,
+	}
+	if err := setup.Stores.Quizzes.CreateQuiz(ctx, publishedQz); err != nil {
+		t.Fatalf("CreateQuiz published err = %v, want nil", err)
+	}
+
+	t.Run("draft quiz play link serves the default OG card", func(t *testing.T) {
+		t.Parallel()
+		assertSitewideOG(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, draftQz.Slug, draftQz.ID), baseURL)
+
+		body := getBody(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, draftQz.Slug, draftQz.ID))
+		if strings.Contains(body, draftQz.Title) {
+			t.Errorf("draft quiz play card leaked title %q", draftQz.Title)
+		}
+		if strings.Contains(body, draftQz.Description) {
+			t.Errorf("draft quiz play card leaked description %q", draftQz.Description)
+		}
+	})
+
+	t.Run("published quiz play link still injects its title and description", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, publishedQz.Slug, publishedQz.ID))
+
+		wantTitle := fmt.Sprintf(`<meta property="og:title" content="%s - Top Banana!">`, publishedQz.Title)
+		if !strings.Contains(body, wantTitle) {
+			t.Errorf("published quiz play card missing og:title %q", wantTitle)
+		}
+		wantDesc := fmt.Sprintf(`<meta property="og:description" content="%s">`, publishedQz.Description)
+		if !strings.Contains(body, wantDesc) {
+			t.Errorf("published quiz play card missing og:description %q", wantDesc)
 		}
 	})
 }

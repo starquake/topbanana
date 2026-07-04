@@ -33,6 +33,7 @@ func newTestQuiz(t *testing.T) *quiz.Quiz {
 		Title:             "Flurpsydurpsy",
 		Slug:              "flurpsydurpsy",
 		CreatedByPlayerID: seededAdminID,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is the capital of France?",
@@ -108,7 +109,7 @@ func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 		svc := NewService(gameStore, quizStore, slog.Default())
 
 		const playerID = int64(1)
-		created, err := svc.CreateGame(ctx, testQuiz.ID, playerID)
+		created, err := svc.CreateGame(ctx, testQuiz.ID, playerID, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -149,6 +150,35 @@ func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 		svc := NewService(gameStore, quizStore, slog.Default())
 
 		_, err := svc.GetGameForPlayerOnQuiz(ctx, 999, testQuiz.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns ErrGameNotFound when only a preview game exists", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		const playerID = int64(1)
+		if _, err := svc.CreateGame(ctx, draft.ID, playerID, true); err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+
+		// The resume probe must skip the owner-preview game so the owner can still start a real run (#1192).
+		_, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, draft.ID)
 		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -245,15 +275,229 @@ func TestService_CreateGame_RejectsSecondAttempt(t *testing.T) {
 	svc := NewService(gameStore, quizStore, slog.Default())
 
 	const playerID = int64(1)
-	if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+	if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID, false); err != nil {
 		t.Fatalf("failed to create initial game: %v", err)
 	}
 
 	// Second attempt for the same (player, quiz) must be rejected.
-	_, err := svc.CreateGame(ctx, testQuiz.ID, playerID)
+	_, err := svc.CreateGame(ctx, testQuiz.ID, playerID, false)
 	if got, want := err, ErrGameAlreadyExists; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
+}
+
+func TestService_CreateGame_RejectsUnpublishedDraft(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := dbtest.Open(t)
+
+	quizStore := store.NewQuizStore(db, slog.Default())
+	gameStore := store.NewGameStore(db, slog.Default())
+
+	// A draft is not real-playable; the service surfaces ErrQuizNotFound (#1192).
+	draft := newTestQuiz(t)
+	draft.Published = false
+	if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+		t.Fatalf("failed to create draft quiz: %v", err)
+	}
+
+	svc := NewService(gameStore, quizStore, slog.Default())
+
+	_, err := svc.CreateGame(ctx, draft.ID, int64(1), false)
+	if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+		t.Errorf("CreateGame(draft, normal) err = %v, want %v", got, want)
+	}
+}
+
+func TestService_CreateGame_Preview(t *testing.T) {
+	t.Parallel()
+
+	const playerID = int64(1)
+
+	t.Run("owner previews a draft, re-preview resets the prior game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		first, err := svc.CreateGame(ctx, draft.ID, playerID, true)
+		if err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+		if !first.Preview {
+			t.Error("first preview game Preview = false, want true")
+		}
+		if got := previewFlagOf(t, db, first.ID); !got {
+			t.Error("games.is_preview = 0 for a preview game, want 1")
+		}
+
+		// Re-previewing resets the prior game (a new game id) despite the one-attempt UNIQUE(player_id, quiz_id) index.
+		second, err := svc.CreateGame(ctx, draft.ID, playerID, true)
+		if err != nil {
+			t.Fatalf("re-preview CreateGame err = %v, want nil", err)
+		}
+		if got, want := second.ID, first.ID; got == want {
+			t.Errorf("re-preview game ID = %q, want a fresh id (prior reset)", got)
+		}
+		_, err = gameStore.GetGame(ctx, first.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("GetGame err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("preview does not bump the quiz play count", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, draft.ID, playerID, true)
+		if err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+		// Issue every question so the final one triggers the play-count bump, which must be a no-op for a preview game.
+		for {
+			_, nerr := svc.GetNextQuestion(ctx, g.ID, playerID)
+			if errors.Is(nerr, ErrNoMoreQuestions) {
+				break
+			}
+			if nerr != nil {
+				t.Fatalf("GetNextQuestion err = %v, want nil", nerr)
+			}
+		}
+
+		played, err := quizStore.GetQuiz(ctx, draft.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := played.PlayCount, int64(0); got != want {
+			t.Errorf("play_count after preview = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("preview on a published quiz is rejected and keeps the real game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		published := newTestQuiz(t) // Published: true
+		if err := quizStore.CreateQuiz(ctx, published); err != nil {
+			t.Fatalf("failed to create published quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		// The owner has a real game on the published quiz.
+		realGame, err := svc.CreateGame(ctx, published.ID, playerID, false)
+		if err != nil {
+			t.Fatalf("real CreateGame err = %v, want nil", err)
+		}
+
+		// A preview on a published quiz must be refused and must NOT hard-delete the real game (a data-loss bug).
+		_, err = svc.CreateGame(ctx, published.ID, playerID, true)
+		if got, want := err, ErrPreviewNotAllowed; !errors.Is(got, want) {
+			t.Errorf("CreateGame err = %v, want %v", got, want)
+		}
+		if _, err = gameStore.GetGame(ctx, realGame.ID); err != nil {
+			t.Errorf("real game gone after refused preview: GetGame err = %v, want nil", err)
+		}
+	})
+
+	t.Run("preview then publish then real play resets the preview game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		preview, err := svc.CreateGame(ctx, draft.ID, playerID, true)
+		if err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+
+		if err = quizStore.SetQuizPublished(ctx, draft.ID, true); err != nil {
+			t.Fatalf("SetQuizPublished err = %v, want nil", err)
+		}
+
+		// The leftover preview game must not block the owner's real attempt.
+		realGame, err := svc.CreateGame(ctx, draft.ID, playerID, false)
+		if err != nil {
+			t.Fatalf("real CreateGame after preview err = %v, want nil", err)
+		}
+		if realGame.Preview {
+			t.Error("real game Preview = true, want false")
+		}
+		_, err = gameStore.GetGame(ctx, preview.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("GetGame err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("preview of a live quiz is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		live := newTestQuiz(t)
+		live.Published = false
+		live.Mode = quiz.ModeLive
+		if err := quizStore.CreateQuiz(ctx, live); err != nil {
+			t.Fatalf("failed to create live quiz: %v", err)
+		}
+		if err := quizStore.SetQuizMode(ctx, live.ID, quiz.ModeLive); err != nil {
+			t.Fatalf("SetQuizMode(live) err = %v, want nil", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		_, err := svc.CreateGame(ctx, live.ID, playerID, true)
+		if got, want := err, ErrPreviewNotAllowed; !errors.Is(got, want) {
+			t.Errorf("preview live CreateGame err = %v, want %v", got, want)
+		}
+	})
+}
+
+func previewFlagOf(t *testing.T, db *sql.DB, gameID string) bool {
+	t.Helper()
+	var n int64
+	if err := db.QueryRowContext(
+		t.Context(), "SELECT is_preview FROM games WHERE id = ?", gameID,
+	).Scan(&n); err != nil {
+		t.Fatalf("read is_preview err = %v, want nil", err)
+	}
+
+	return n != 0
 }
 
 func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
@@ -276,7 +520,7 @@ func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
 		svc := NewService(gameStore, quizStore, slog.Default())
 
 		const playerID = int64(1)
-		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID, false); err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
@@ -294,7 +538,7 @@ func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
 			t.Errorf("after reset, err = %v, want %v", got, want)
 		}
 
-		if _, err = svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+		if _, err = svc.CreateGame(ctx, testQuiz.ID, playerID, false); err != nil {
 			t.Errorf("CreateGame after reset err = %v, want nil", err)
 		}
 	})
@@ -316,7 +560,7 @@ func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
 		svc := NewService(gameStore, quizStore, slog.Default())
 
 		const playerID = int64(1)
-		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID, false); err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
@@ -363,7 +607,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -398,7 +642,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -434,7 +678,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 		// Negative reveal delay issues the question already expired.
 		svc.SetRevealDelay(-time.Hour)
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -472,7 +716,7 @@ func TestService_GetResults(t *testing.T) {
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -533,7 +777,7 @@ func TestService_GetResults(t *testing.T) {
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -593,7 +837,7 @@ func TestService_GetResults(t *testing.T) {
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 
-		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
@@ -1229,6 +1473,7 @@ func TestService_GetNext(t *testing.T) {
 			Title:             "Two rounds",
 			Slug:              "two-rounds",
 			CreatedByPlayerID: seededAdminID,
+			Published:         true,
 			Questions: []*quiz.Question{
 				{Text: "Q1", Position: 10, Options: []*quiz.Option{{Text: "a", Correct: true}, {Text: "b"}}},
 				{Text: "Q2", Position: 20, Options: []*quiz.Option{{Text: "c", Correct: true}, {Text: "d"}}},
@@ -1501,6 +1746,7 @@ func TestService_CreateGame_Race(t *testing.T) {
 		Slug:              "race-quiz",
 		Description:       "for the create-game race test",
 		CreatedByPlayerID: seededAdminID,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Q1",
@@ -1542,7 +1788,7 @@ func TestService_CreateGame_Race(t *testing.T) {
 	for i := range parallel {
 		go func(idx int) {
 			defer wg.Done()
-			g, gerr := svc.CreateGame(context.Background(), qz.ID, player.ID)
+			g, gerr := svc.CreateGame(context.Background(), qz.ID, player.ID, false)
 			games[idx] = g
 			results[idx] = gerr
 		}(i)
@@ -1622,6 +1868,7 @@ func TestService_GetNextQuestion_Race(t *testing.T) {
 		Slug:              "next-race-quiz",
 		Description:       "for the concurrent /next race test",
 		CreatedByPlayerID: seededAdminID,
+		Published:         true,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Q1",
@@ -1646,7 +1893,7 @@ func TestService_GetNextQuestion_Race(t *testing.T) {
 	svc := NewService(stores.Games, stores.Quizzes, slog.Default())
 	svc.SetLeaderboardPublisher(leaderboard.NewHub())
 
-	game, err := svc.CreateGame(ctx, qz.ID, player.ID)
+	game, err := svc.CreateGame(ctx, qz.ID, player.ID, false)
 	if err != nil {
 		t.Fatalf("CreateGame err = %v, want nil", err)
 	}

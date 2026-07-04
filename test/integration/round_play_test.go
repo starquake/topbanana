@@ -58,6 +58,7 @@ type roundAnswerRes struct {
 func roundPlayQuiz(adminID int64) *quiz.Quiz {
 	return &quiz.Quiz{
 		Title:             "Round Play Quiz",
+		Published:         true,
 		Slug:              "round-play-quiz",
 		CreatedByPlayerID: adminID,
 		Questions: []*quiz.Question{
@@ -335,6 +336,7 @@ func multiRoundSoloQuiz(adminID int64) *quiz.Quiz {
 
 	return &quiz.Quiz{
 		Title:             "Multi Round Solo",
+		Published:         true,
 		Slug:              "multi-round-solo",
 		CreatedByPlayerID: adminID,
 		Rounds: []*quiz.Round{

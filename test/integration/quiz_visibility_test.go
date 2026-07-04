@@ -22,6 +22,7 @@ func TestQuizVisibility_Integration(t *testing.T) {
 
 	publicQz := &quiz.Quiz{
 		Title:             "Public Quiz",
+		Published:         true,
 		Slug:              "public-quiz",
 		Description:       "Visible everywhere.",
 		CreatedByPlayerID: seededAdminID,
@@ -36,6 +37,7 @@ func TestQuizVisibility_Integration(t *testing.T) {
 
 	unlistedQz := &quiz.Quiz{
 		Title:             "Unlisted Quiz",
+		Published:         true,
 		Slug:              "unlisted-quiz",
 		Description:       "Link-only.",
 		CreatedByPlayerID: seededAdminID,
@@ -50,6 +52,7 @@ func TestQuizVisibility_Integration(t *testing.T) {
 
 	privateQz := &quiz.Quiz{
 		Title:             "Private Quiz",
+		Published:         true,
 		Slug:              "private-quiz",
 		Description:       "Members only.",
 		CreatedByPlayerID: seededAdminID,

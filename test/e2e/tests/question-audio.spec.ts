@@ -7,6 +7,7 @@ import {
   endHostedSession,
   installPlaythroughClock,
   playerRow,
+  publishQuiz,
   setQuizMode,
   waitForHostRoom,
   type QuestionSpec,
@@ -198,6 +199,8 @@ async function startSoloAudioQuiz(
   await createQuizWithQuestions(page, quizTitle, questions);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   attachQuizAudio(quizTitle, { audioRepeat: opts.audioRepeat });
+  // Publish so the quiz shows in the public solo list (#1192).
+  publishQuiz(quizTitle);
 
   await page.context().clearCookies();
   await installAudioSpies(page);
@@ -473,6 +476,8 @@ test('the solo player surfaces the manual play fallback when a clip fails to loa
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   attachQuizAudio(quizTitle);
+  // Publish so the quiz shows in the public solo list (#1192).
+  publishQuiz(quizTitle);
 
   await page.context().clearCookies();
   await installAudioSpies(page);

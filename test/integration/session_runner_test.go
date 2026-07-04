@@ -267,6 +267,7 @@ func seedRunnerLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, s
 	t.Helper()
 	qz := &quiz.Quiz{
 		Title:             "Runner " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "hosted runner fixture",
 		CreatedByPlayerID: seededAdminID,

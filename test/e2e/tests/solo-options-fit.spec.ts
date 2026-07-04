@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, installPlaythroughClock, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, installPlaythroughClock, publishQuiz, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // An iPhone SE small viewport: 375 logical px wide, and a height that models the
@@ -64,6 +64,8 @@ test.describe('solo gameplay fits the iPhone SE viewport (#954)', () => {
 
     const quizTitle = `E2E Solo Fit ${browserName}`;
     await authorQuizWithImageQuestion(page, quizTitle);
+    // Publish after the UI authoring so the quiz shows in the public solo list (#1192).
+    publishQuiz(quizTitle);
 
     await page.context().clearCookies();
     await page.setViewportSize(VIEWPORT);

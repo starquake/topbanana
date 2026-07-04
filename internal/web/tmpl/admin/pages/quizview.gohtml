@@ -16,6 +16,12 @@
                 {{/* Visibility is not yet modelled; show a default Public pill
                      so the structure is in place for #103. */}}
                 <span class="pill pill-public">Public</span>
+                {{/* Draft / Published status pill (#1192). */}}
+                {{if .Quiz.Published}}
+                    <span class="pill pill-published" data-testid="quiz-status">Published</span>
+                {{else}}
+                    <span class="pill pill-draft" data-testid="quiz-status">Draft</span>
+                {{end}}
                 <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
                 {{if .Quiz.CreatedByDisplayName}}
                     <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Created by {{.Quiz.CreatedByDisplayName}}</span>
@@ -28,6 +34,8 @@
                  owns the quiz (or is an admin); the rest of this
                  template treats it as opaque. */}}
             {{$canEdit := .Quiz.CanEdit}}
+            {{/* Content edits (rounds/questions/media) lock once published; Export/Unpublish/Delete stay under $canEdit (#1192). */}}
+            {{$canEditContent := and $canEdit (not .Quiz.Published)}}
             <h1 class="mb-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
                 <span>{{.Quiz.Title}}</span>
             </h1>
@@ -87,6 +95,39 @@
                     <span>Share</span>
                 </button>
                 {{if $canEdit}}
+                {{/* Export bundles the quiz tree + media into a .zip (#1113); read-only, so available in both states. */}}
+                <a href="/admin/quizzes/{{.Quiz.ID}}/export"
+                   data-testid="export-quiz"
+                   class="btn-ghost gap-2">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+                    <span>Export</span>
+                </a>
+                {{if .Quiz.Published}}
+                {{/* Published: offer Unpublish only while unplayed, else a disabled control (#1192). */}}
+                {{if .Quiz.CanUnpublish}}
+                <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/unpublish" class="inline-flex">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit" data-testid="unpublish-quiz" class="btn-ghost gap-2">
+                        <span>Unpublish</span>
+                    </button>
+                </form>
+                {{else}}
+                <button type="button" disabled data-testid="unpublish-quiz"
+                        title="This quiz has been played and can no longer be unpublished."
+                        class="btn-ghost gap-2 opacity-50 cursor-not-allowed">
+                    <span>Unpublish</span>
+                </button>
+                {{end}}
+                {{else}}
+                {{/* Draft-only controls: publish, preview, and content edits. */}}
+                <a href="/admin/quizzes/{{.Quiz.ID}}/publish" data-testid="publish-quiz" class="btn-primary gap-2">
+                    <span>Publish</span>
+                </a>
+                {{if eq .Quiz.Mode "solo"}}
+                <a href="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}?preview=1" data-testid="preview-quiz" class="btn-ghost gap-2">
+                    <span>Preview &amp; play</span>
+                </a>
+                {{end}}
                 {{/* Solo<->live toggle (#830): flip the play mode without
                      opening the edit form. The action targets the opposite of
                      the current mode; the server validates the {mode} segment. */}}
@@ -104,16 +145,10 @@
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
                     <span>Edit quiz</span>
                 </a>
-                {{/* Export bundles the quiz tree plus its referenced media into
-                     a downloadable .zip (#1113). Plain GET link, same gate as
-                     Edit. */}}
-                <a href="/admin/quizzes/{{.Quiz.ID}}/export"
-                   data-testid="export-quiz"
-                   class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
-                    <span>Export</span>
-                </a>
+                {{end}}
+                {{/* Delete stays available in both states; publishing locks content edits, not deletion (#1192). */}}
                 <button type="button"
+                        data-testid="delete-quiz"
                         onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
                         class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-sm bg-transparent text-danger border border-danger/40 font-semibold text-xs uppercase tracking-[0.12em] transition-colors hover:bg-danger/10 hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer">
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
@@ -121,6 +156,17 @@
                 </button>
                 {{end}}
             </div>
+
+            {{/* Lock notice shown once published (#1192). */}}
+            {{if and $canEdit .Quiz.Published}}
+            <p class="mt-4 inline-flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.8rem] text-text-dim" data-testid="publish-lock-notice">
+                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 shrink-0 text-text-mute" aria-hidden="true"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+                <span>
+                    Published quizzes are locked from edits, but can still be deleted.
+                    {{if .Quiz.CanUnpublish}}Unpublish to make changes.{{else}}This quiz has been played, so it can no longer be unpublished.{{end}}
+                </span>
+            </p>
+            {{end}}
         </header>
 
         {{/* Share modal */}}
@@ -167,7 +213,8 @@
              room hosting this quiz. */}}
         {{if .HostHasRunningGame}}{{template "restart_modal" .Quiz.ID}}{{end}}
 
-        {{/* Delete-quiz modal */}}
+        {{/* Delete-quiz modal, mounted for the owner only. */}}
+        {{if $canEdit}}
         <div id="modal-delete-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
             <div class="absolute inset-0" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></div>
             <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
@@ -191,6 +238,7 @@
                 </footer>
             </div>
         </div>
+        {{end}}
 
         {{/* Rounds section. Questions are grouped into rounds in play
              order (#444); each round shows the authored round-summary text
@@ -209,7 +257,7 @@
                 {{/* Delete modals - only mounted for the creator so
                      non-owners can't open the dialog. The questions_list
                      partial gates the per-row buttons on the same rule. */}}
-                {{if $canEdit}}
+                {{if $canEditContent}}
                 {{range .Quiz.Questions}}
                     <div id="modal-delete-question-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-question-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                         <div class="absolute inset-0" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
@@ -286,7 +334,7 @@
                 </div>
             {{end}}
 
-            {{if $canEdit}}
+            {{if $canEditContent}}
             <div class="mt-6 flex flex-wrap gap-2">
                 <a href="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
                    class="btn-ghost gap-2">
@@ -303,7 +351,7 @@
              upload form - only the owner or an admin manages the library. The
              handler still validates the upload server-side; the file input's
              accept attribute is just a picker hint. */}}
-        {{if $canEdit}}
+        {{if $canEditContent}}
         <section id="images" aria-label="Images" class="scroll-mt-6">
             <div class="section-head">
                 <h2>Images</h2>
@@ -507,7 +555,7 @@
              plus an upload control. Gated on $canEdit like the Images section;
              the upload is validated server-side, the file input's accept
              attribute is only a picker hint. */}}
-        {{if $canEdit}}
+        {{if $canEditContent}}
         <section id="audio" aria-label="Audio" class="scroll-mt-6">
             <div class="section-head">
                 <h2>Audio</h2>

@@ -24,7 +24,8 @@ async function sentinelSurvived(page: Page): Promise<boolean> {
 
 test('deleting a quiz removes its card in place without a reload', async ({ page, browserName }) => {
   const title = `E2E Delete Quiz ${browserName} ${Date.now()}`;
-  await seedQuiz(page, title);
+  // A published quiz cannot be deleted (#1192), so keep this one a draft.
+  await seedQuiz(page, title, undefined, { publish: false });
 
   await page.goto('/admin/quizzes');
   const card = page.getByRole('link', { name: title }).first();
@@ -56,7 +57,8 @@ test('deleting a quiz removes its card in place without a reload', async ({ page
 
 test('the no-JS fallback still deletes the quiz and 303s', async ({ page }) => {
   const title = `E2E Delete Quiz NoJS ${Date.now()}`;
-  await seedQuiz(page, title);
+  // A published quiz cannot be deleted (#1192), so keep this one a draft.
+  await seedQuiz(page, title, undefined, { publish: false });
 
   await page.goto('/admin/quizzes');
   const href = await page.getByRole('link', { name: title }).first().getAttribute('href');

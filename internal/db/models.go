@@ -32,6 +32,7 @@ type Game struct {
 	QuizID    int64
 	CreatedAt time.Time
 	StartedAt sql.NullTime
+	IsPreview int64
 }
 
 type GameAnswer struct {
@@ -157,6 +158,7 @@ type Quiz struct {
 	Visibility        string
 	Mode              string
 	PlayCount         int64
+	Published         int64
 }
 
 type Round struct {

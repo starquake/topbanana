@@ -71,7 +71,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 
 	quiz1 := &quiz.Quiz{
 		Title: "Q1", Slug: "q1", Description: "Q1 desc",
-		CreatedByPlayerID: seededAdminID,
+		CreatedByPlayerID: seededAdminID, Published: true,
 		Questions: []*quiz.Question{
 			{Text: "Q1-Q1", Position: 1, Options: []*quiz.Option{{Text: "a"}, {Text: "b", Correct: true}}},
 			{Text: "Q1-Q2", Position: 2, Options: []*quiz.Option{{Text: "c"}, {Text: "d", Correct: true}}},
@@ -82,7 +82,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 	}
 	quiz2 := &quiz.Quiz{
 		Title: "Q2", Slug: "q2", Description: "Q2 desc",
-		CreatedByPlayerID: seededAdminID,
+		CreatedByPlayerID: seededAdminID, Published: true,
 		Questions: []*quiz.Question{
 			{Text: "Q2-Q1", Position: 1, Options: []*quiz.Option{{Text: "e", Correct: true}}},
 		},
@@ -189,6 +189,63 @@ func TestHomeStore_ListPopularQuizzes(t *testing.T) {
 	}
 }
 
+// TestHomeStore_ListPopularQuizzes_ExcludesDraft pins that a draft never surfaces on the Popular tab even with finished plays (#1192).
+func TestHomeStore_ListPopularQuizzes_ExcludesDraft(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	logger := slog.Default()
+	quizzes := NewQuizStore(db, logger)
+	games := NewGameStore(db, logger)
+	players := NewPlayerStore(db, logger)
+	hs := NewHomeStore(db)
+
+	withQuestion := func() []*quiz.Question {
+		return []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "a", Correct: true}}},
+		}
+	}
+
+	published := &quiz.Quiz{
+		Title: "Published Popular", Slug: "published-popular", Description: "x",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Mode: quiz.ModeSolo, Published: true, Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), published); err != nil {
+		t.Fatalf("CreateQuiz published err = %v, want nil", err)
+	}
+	draft := &quiz.Quiz{
+		Title: "Draft Popular", Slug: "draft-popular", Description: "x",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Mode: quiz.ModeSolo, Published: false, Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), draft); err != nil {
+		t.Fatalf("CreateQuiz draft err = %v, want nil", err)
+	}
+
+	pubPlayer, err := players.CreateAnonymousPlayer(t.Context(), "pub-player")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer pub err = %v, want nil", err)
+	}
+	draftPlayer, err := players.CreateAnonymousPlayer(t.Context(), "draft-player")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer draft err = %v, want nil", err)
+	}
+	finishGameFor(t, games, pubPlayer.ID, published, published.ID)
+	finishGameFor(t, games, draftPlayer.ID, draft, draft.ID)
+
+	rows, err := hs.ListPopularQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListPopularQuizzes err = %v, want nil", err)
+	}
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("len(rows) = %d, want %d (rows=%+v)", got, want, rows)
+	}
+	if got, want := rows[0].ID, published.ID; got != want {
+		t.Errorf("rows[0].ID = %d, want %d (only the published quiz)", got, want)
+	}
+}
+
 // TestHomeStore_ListNewestQuizzes pins the "Newest" tab data source:
 // most-recently-created public quizzes first, with private/unlisted and
 // zero-question quizzes excluded so only playable public quizzes surface.
@@ -210,7 +267,7 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 	// first, newer second; the query must return newer before older.
 	older := &quiz.Quiz{
 		Title: "Older Public", Slug: "older-public", Description: "first",
-		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic, Published: true,
 		Questions: withQuestion(),
 	}
 	if err := quizzes.CreateQuiz(t.Context(), older); err != nil {
@@ -218,7 +275,7 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 	}
 	newer := &quiz.Quiz{
 		Title: "Newer Public", Slug: "newer-public", Description: "second",
-		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic, Published: true,
 		Questions: withQuestion(),
 	}
 	if err := quizzes.CreateQuiz(t.Context(), newer); err != nil {
@@ -229,7 +286,7 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 	// gate even though it is the most recently created.
 	private := &quiz.Quiz{
 		Title: "Private", Slug: "private", Description: "hidden",
-		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPrivate,
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPrivate, Published: true,
 		Questions: withQuestion(),
 	}
 	if err := quizzes.CreateQuiz(t.Context(), private); err != nil {
@@ -240,10 +297,20 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 	// excluded by the EXISTS gate.
 	empty := &quiz.Quiz{
 		Title: "Empty Public", Slug: "empty-public", Description: "no questions",
-		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic, Published: true,
 	}
 	if err := quizzes.CreateQuiz(t.Context(), empty); err != nil {
 		t.Fatalf("CreateQuiz empty err = %v, want nil", err)
+	}
+
+	// A public draft with questions: excluded by the published gate despite being the most recent (#1192).
+	draft := &quiz.Quiz{
+		Title: "Draft Public", Slug: "draft-public", Description: "not yet published",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic, Published: false,
+		Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), draft); err != nil {
+		t.Fatalf("CreateQuiz draft err = %v, want nil", err)
 	}
 
 	// CreateQuiz stamps created_at via the DB default, so all four rows
@@ -280,6 +347,9 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 		}
 		if r.ID == empty.ID {
 			t.Errorf("empty public quiz surfaced in newest list: %+v", r)
+		}
+		if r.ID == draft.ID {
+			t.Errorf("unpublished draft surfaced in newest list: %+v", r)
 		}
 	}
 }

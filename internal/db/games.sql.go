@@ -53,24 +53,27 @@ func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Gam
 }
 
 const createGame = `-- name: CreateGame :one
-INSERT INTO games (id, quiz_id)
-VALUES (?, ?)
-RETURNING id, quiz_id, created_at, started_at
+INSERT INTO games (id, quiz_id, is_preview)
+VALUES (?, ?, ?)
+RETURNING id, quiz_id, created_at, started_at, is_preview
 `
 
 type CreateGameParams struct {
-	ID     string
-	QuizID int64
+	ID        string
+	QuizID    int64
+	IsPreview int64
 }
 
+// is_preview marks an owner preview game that stays off the leaderboard and play_count (#1192).
 func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, error) {
-	row := q.db.QueryRowContext(ctx, createGame, arg.ID, arg.QuizID)
+	row := q.db.QueryRowContext(ctx, createGame, arg.ID, arg.QuizID, arg.IsPreview)
 	var i Game
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
@@ -282,7 +285,7 @@ func (q *Queries) DeleteGamesByIDs(ctx context.Context, ids []string) error {
 }
 
 const getGame = `-- name: GetGame :one
-SELECT id, quiz_id, created_at, started_at
+SELECT id, quiz_id, created_at, started_at, is_preview
 FROM games
 WHERE id = ?
 `
@@ -295,12 +298,13 @@ func (q *Queries) GetGame(ctx context.Context, id string) (Game, error) {
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
 
 const getGameByPlayerAndQuiz = `-- name: GetGameByPlayerAndQuiz :one
-SELECT g.id, g.quiz_id, g.created_at, g.started_at
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
 FROM games g
          JOIN game_participants gp ON gp.game_id = g.id
 WHERE gp.player_id = ?
@@ -326,6 +330,7 @@ func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlaye
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
@@ -377,6 +382,37 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+	)
+	return i, err
+}
+
+const getRealGameByPlayerAndQuiz = `-- name: GetRealGameByPlayerAndQuiz :one
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+  AND g.is_preview = 0
+ORDER BY g.created_at DESC
+LIMIT 1
+`
+
+type GetRealGameByPlayerAndQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Returns the most-recent non-preview game for the (player, quiz) pair, so the
+// resume flow skips a stale owner-preview and the owner can still record a real run (#1192).
+func (q *Queries) GetRealGameByPlayerAndQuiz(ctx context.Context, arg GetRealGameByPlayerAndQuizParams) (Game, error) {
+	row := q.db.QueryRowContext(ctx, getRealGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }
@@ -477,6 +513,7 @@ FROM game_answers ga
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
 WHERE g.quiz_id = ?
+  AND g.is_preview = 0
 `
 
 type ListAnswersForQuizLeaderboardRow struct {
@@ -732,6 +769,7 @@ FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id
 WHERE g.quiz_id = ?2
+  AND g.is_preview = 0
 `
 
 type ListParticipantsForQuizLeaderboardParams struct {

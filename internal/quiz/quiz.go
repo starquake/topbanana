@@ -55,6 +55,12 @@ type Store interface {
 	// ModeLive without touching its questions (#830). Returns ErrInvalidMode
 	// when mode is neither, and ErrQuizNotFound when no row matches the id.
 	SetQuizMode(ctx context.Context, id int64, mode string) error
+	// SetQuizPublished flips just the published flag without touching the questions (#1192). Returns ErrQuizNotFound when no row matches the id.
+	SetQuizPublished(ctx context.Context, id int64, published bool) error
+	// QuizHasRealPlays reports whether the quiz has at least one non-preview game (#1192); preview games do not count.
+	QuizHasRealPlays(ctx context.Context, id int64) (bool, error)
+	// UnpublishQuizIfUnplayed atomically returns a quiz to draft only while it has no real (non-preview) game (#1192). Reports whether a row was updated; false means the quiz is gone or has been played.
+	UnpublishQuizIfUnplayed(ctx context.Context, id int64) (bool, error)
 	// ListQuestions returns all questions for a quiz by its ID.
 	ListQuestions(ctx context.Context, quizID int64) ([]*Question, error)
 	// GetQuestion returns a question with options, by its question ID.
@@ -338,6 +344,8 @@ type Quiz struct {
 	// the session to intermission) and never decremented, so the surfaced
 	// "times played" number survives any later retention sweep of old games.
 	PlayCount int64
+	// Published reports whether the quiz is playable by real players (#1192): a draft is previewable only by its owner, stays out of the public and live-host listings, and is editable; a published quiz is locked from content edits. New quizzes default to draft.
+	Published bool
 	Questions []*Question
 	// Rounds, when non-empty, tells the create path to author the quiz's
 	// rounds explicitly instead of dropping every question in the single

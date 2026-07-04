@@ -294,6 +294,14 @@ func twoQuestionQuiz(title, slug string) *quiz.Quiz {
 	return qz
 }
 
+// publishedTwoQuestionQuiz is twoQuestionQuiz already published, so a real play-through is allowed (#1192); edit-lock tests use the draft twoQuestionQuiz instead.
+func publishedTwoQuestionQuiz(title, slug string) *quiz.Quiz {
+	qz := twoQuestionQuiz(title, slug)
+	qz.Published = true
+
+	return qz
+}
+
 // correctOptionID returns the question id and the id of its correct
 // option for the question at the given zero-based position in the seeded
 // quiz, so a play-through can answer correctly without re-deriving it.
@@ -319,7 +327,7 @@ func (e *adminEnv) playThrough(t *testing.T, qz *quiz.Quiz, playerID int64) {
 
 	ctx := t.Context()
 
-	g, err := e.service.CreateGame(ctx, qz.ID, playerID)
+	g, err := e.service.CreateGame(ctx, qz.ID, playerID, false)
 	if err != nil {
 		t.Fatalf("CreateGame err = %v, want nil", err)
 	}

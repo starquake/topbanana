@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // HostHasRunningGame reports whether the host has an active session with a game
@@ -37,8 +35,8 @@ func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz for restart: %w", err)
 	}
-	if qz.Mode != quiz.ModeLive {
-		return nil, ErrNotLiveQuiz
+	if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+		return nil, gerr
 	}
 
 	active, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)

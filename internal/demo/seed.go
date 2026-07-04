@@ -125,6 +125,12 @@ func ensureDemoQuiz(
 		return nil, fmt.Errorf("import quiz archive: %w", err)
 	}
 
+	// The import lands as a draft; publish so the demo quiz is playable (#1192).
+	if err := quizzes.SetQuizPublished(ctx, qz.ID, true); err != nil {
+		return nil, fmt.Errorf("publish demo quiz: %w", err)
+	}
+	qz.Published = true
+
 	return qz, nil
 }
 

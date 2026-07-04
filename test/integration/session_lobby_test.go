@@ -52,6 +52,7 @@ func seedLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, slug st
 	t.Helper()
 	qz := &quiz.Quiz{
 		Title:             "Live " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "hosted only",
 		CreatedByPlayerID: seededAdminID,
@@ -392,6 +393,7 @@ func TestSessionLobby_Authz(t *testing.T) {
 
 	soloQz := &quiz.Quiz{
 		Title:             "Authz Solo",
+		Published:         true,
 		Slug:              "authz-solo",
 		Description:       "solo",
 		CreatedByPlayerID: seededAdminID,

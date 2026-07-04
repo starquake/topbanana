@@ -1,7 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, publishQuiz, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -83,6 +83,9 @@ test('a host attaches an uploaded image to a question and the player sees it on 
 
   // ---- Author the quiz, upload an image, and attach it to the question.
   await authorQuizWithImageQuestion(page, quizTitle);
+  // Publish after the UI authoring so the quiz shows in the public solo list
+  // (#1192); a draft is filtered out there.
+  publishQuiz(quizTitle);
 
   // ---- Play anonymously and assert the question image renders.
   await page.context().clearCookies();

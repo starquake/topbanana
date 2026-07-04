@@ -108,6 +108,10 @@ type QuizData struct {
 	// PlayCount is the durable "times played" counter surfaced on the
 	// admin quiz list footer (#891).
 	PlayCount int64
+	// Published reports whether the quiz is finished and locked from content edits (#1192).
+	Published bool
+	// CanUnpublish reports whether a published quiz may still be unpublished (no real plays yet); only the quiz-view handler computes it (#1192).
+	CanUnpublish bool
 	// ActionVariant selects which action cluster the shared quiz_card
 	// partial renders ("admin" Edit/Delete vs. a future host variant);
 	// html/template has no block/yield, so the card picks a named
@@ -247,6 +251,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		Mode:                 mode,
 		ModeOptions:          quiz.ModeValues(),
 		PlayCount:            qz.PlayCount,
+		Published:            qz.Published,
 		ActionVariant:        actionVariantAdmin,
 		Questions:            questionDataFromQuestions(qz.Questions),
 	}
@@ -425,6 +430,25 @@ func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	renderer.Render(w, r, http.StatusForbidden, data)
 }
 
+// render409 renders the 409 conflict error page with the given message.
+func render409(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
+	renderer := render.New(
+		logger,
+		csrfMgr,
+		parseTemplate("admin/errors/409.gohtml"),
+		baseLayout,
+		adminPerRequestFuncs,
+	)
+	data := struct {
+		Title   string
+		Message string
+	}{
+		Title:   "Conflict",
+		Message: msg,
+	}
+	renderer.Render(w, r, http.StatusConflict, data)
+}
+
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
@@ -473,6 +497,30 @@ func requireQuizOwner(
 	))
 
 	return nil, false
+}
+
+// requireEditableQuizOwner is requireQuizOwner plus the publish edit-lock: it 409s an owned but published quiz, which is locked from content edits (#1192).
+func requireEditableQuizOwner(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	id int64,
+) (*quiz.Quiz, bool) {
+	qz, ok := requireQuizOwner(w, r, logger, csrfMgr, quizStore, id)
+	if !ok {
+		return nil, false
+	}
+
+	if qz.Published {
+		render409(w, r, logger, csrfMgr,
+			"This quiz is published and locked from edits. Unpublish it first to make changes.")
+
+		return nil, false
+	}
+
+	return qz, true
 }
 
 // quizByID returns the quiz with the given ID from the store. It includes the questions.
@@ -1087,6 +1135,17 @@ func HandleQuizView(
 
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
+		if quizData.Published {
+			// A published quiz can be unpublished only until a real (non-preview) game has started (#1192).
+			hasPlays, err := quizStore.QuizHasRealPlays(r.Context(), id)
+			if err != nil {
+				logger.ErrorContext(r.Context(), "error checking quiz real plays", slog.Any("err", err))
+				render500(w, r, logger, csrfMgr)
+
+				return
+			}
+			quizData.CanUnpublish = !hasPlays
+		}
 		data := newQuizViewData(quizData, players, rounds)
 		data.Images = images
 		data.Sounds = sounds
@@ -1546,9 +1605,8 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 				qz.CreatedByPlayerID = p.ID
 			}
 		} else {
-			// UPDATE: only the creator may save. requireQuizOwner
-			// loads the quiz and 403s anyone else (#281).
-			if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			// UPDATE: only the creator may save (403s others, #281), and only while the quiz is a draft (409s a published quiz, #1192).
+			if qz, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 				return
 			}
 		}
@@ -1808,7 +1866,7 @@ func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -1852,6 +1910,7 @@ func HandleQuizDelete(
 			return
 		}
 
+		// Delete is removal, not a content edit, so the publish lock does not apply here.
 		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
@@ -1946,7 +2005,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			return
 		}
 
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -1984,7 +2043,7 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -2093,7 +2152,7 @@ func loadQuestionForSave(
 	if !ok {
 		return nil, false
 	}
-	qz, ok := requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID)
+	qz, ok := requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID)
 	if !ok {
 		return nil, false
 	}

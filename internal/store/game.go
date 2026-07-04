@@ -55,6 +55,7 @@ func (s *GameStore) GetGame(ctx context.Context, id string) (*game.Game, error) 
 	g := &game.Game{
 		ID:        row.ID,
 		QuizID:    row.QuizID,
+		Preview:   row.IsPreview != 0,
 		CreatedAt: row.CreatedAt,
 	}
 
@@ -92,29 +93,35 @@ func (s *GameStore) GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID
 		return nil, fmt.Errorf("failed to get game by player %d and quiz %d: %w", playerID, quizID, err)
 	}
 
-	g := &game.Game{
-		ID:        row.ID,
-		QuizID:    row.QuizID,
-		CreatedAt: row.CreatedAt,
-	}
+	return s.resumeGameFromRow(ctx, row)
+}
 
-	if row.StartedAt.Valid {
-		g.StartedAt = &row.StartedAt.Time
-	}
-
-	g.Questions, err = s.listGameQuestions(ctx, g.ID)
+// GetRealGameByPlayerAndQuiz returns the most-recent non-preview game for the (player, quiz) pair with Questions populated, so a stale owner-preview never surfaces in the resume flow (#1192). Returns [game.ErrGameNotFound] if the player has no real game for the quiz.
+func (s *GameStore) GetRealGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*game.Game, error) {
+	row, err := s.q.GetRealGameByPlayerAndQuiz(ctx, db.GetRealGameByPlayerAndQuizParams{
+		PlayerID: playerID,
+		QuizID:   quizID,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list game questions for game %q: %w", g.ID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, game.ErrGameNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get real game by player %d and quiz %d: %w", playerID, quizID, err)
 	}
 
-	return g, nil
+	return s.resumeGameFromRow(ctx, row)
 }
 
 // CreateGame creates a new game record in the database using the provided game details and updates the game with generated data.
 func (s *GameStore) CreateGame(ctx context.Context, g *game.Game) error {
 	var err error
 	id := xid.New()
-	row, err := s.q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
+	row, err := s.q.CreateGame(ctx, db.CreateGameParams{
+		ID:        id.String(),
+		QuizID:    g.QuizID,
+		IsPreview: boolToInt64(g.Preview),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create game: %w", err)
 	}
@@ -205,7 +212,11 @@ func execCreateGameAndParticipant(
 	ctx context.Context, q *db.Queries, g *game.Game, p *game.Participant,
 ) error {
 	id := xid.New()
-	gameRow, err := q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
+	gameRow, err := q.CreateGame(ctx, db.CreateGameParams{
+		ID:        id.String(),
+		QuizID:    g.QuizID,
+		IsPreview: boolToInt64(g.Preview),
+	})
 	if err != nil {
 		return fmt.Errorf("create game: %w", err)
 	}
@@ -546,6 +557,28 @@ func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayer
 	}
 
 	return movedParticipants, nil
+}
+
+// resumeGameFromRow maps a games row into a [game.Game] with Questions populated, shared by the real and preview-inclusive resume lookups.
+func (s *GameStore) resumeGameFromRow(ctx context.Context, row db.Game) (*game.Game, error) {
+	g := &game.Game{
+		ID:        row.ID,
+		QuizID:    row.QuizID,
+		Preview:   row.IsPreview != 0,
+		CreatedAt: row.CreatedAt,
+	}
+
+	if row.StartedAt.Valid {
+		g.StartedAt = &row.StartedAt.Time
+	}
+
+	var err error
+	g.Questions, err = s.listGameQuestions(ctx, g.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list game questions for game %q: %w", g.ID, err)
+	}
+
+	return g, nil
 }
 
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {

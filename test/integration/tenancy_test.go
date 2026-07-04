@@ -40,6 +40,7 @@ func TestGameTenancy_Integration(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Tenancy Quiz",
+		Published:         true,
 		Slug:              "tenancy-quiz",
 		Description:       "for the tenancy integration test",
 		CreatedByPlayerID: seededAdminID,

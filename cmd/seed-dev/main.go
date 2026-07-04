@@ -347,6 +347,12 @@ func seedDemoQuiz(
 		return nil, fmt.Errorf("import demo quiz archive: %w", err)
 	}
 
+	// The import lands as a draft; publish so the demo quiz is playable (#1192).
+	if err := stores.Quizzes.SetQuizPublished(ctx, qz.ID, true); err != nil {
+		return nil, fmt.Errorf("publish demo quiz: %w", err)
+	}
+	qz.Published = true
+
 	return qz, nil
 }
 
@@ -483,6 +489,8 @@ func quizFromFixture(f *quizFixture) (*quiz.Quiz, error) {
 		Slug:              slug.Make(f.Title),
 		Description:       f.Description,
 		CreatedByPlayerID: seededAdminID,
+		// Seed fixtures are published so they are playable (#1192).
+		Published: true,
 	}
 
 	if len(f.Rounds) > 0 {

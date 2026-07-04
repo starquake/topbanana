@@ -44,6 +44,7 @@ func seedSoloQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, slug st
 	t.Helper()
 	qz := &quiz.Quiz{
 		Title:             "Solo " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "self-paced",
 		CreatedByPlayerID: seededAdminID,

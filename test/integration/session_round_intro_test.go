@@ -146,6 +146,7 @@ func seedRoundIntroLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Stor
 	}
 	qz := &quiz.Quiz{
 		Title:             "Round intro " + slug,
+		Published:         true,
 		Slug:              slug,
 		Description:       "two titled rounds",
 		CreatedByPlayerID: seededAdminID,

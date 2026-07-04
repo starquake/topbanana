@@ -4,8 +4,9 @@ FROM games
 WHERE id = ?;
 
 -- name: CreateGame :one
-INSERT INTO games (id, quiz_id)
-VALUES (?, ?)
+-- is_preview marks an owner preview game that stays off the leaderboard and play_count (#1192).
+INSERT INTO games (id, quiz_id, is_preview)
+VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: StartGame :execresult
@@ -123,7 +124,8 @@ FROM game_answers ga
          JOIN game_questions gq ON gq.id = ga.game_question_id
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
-WHERE g.quiz_id = ?;
+WHERE g.quiz_id = ?
+  AND g.is_preview = 0;
 
 -- name: ListParticipantsForQuizLeaderboard :many
 -- One row per player joined to the quiz, flagged with is_completed
@@ -155,18 +157,31 @@ SELECT gp.player_id AS player_id,
 FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id
-WHERE g.quiz_id = sqlc.arg('quiz_id');
+WHERE g.quiz_id = sqlc.arg('quiz_id')
+  AND g.is_preview = 0;
 
 -- name: GetGameByPlayerAndQuiz :one
 -- Returns the most-recent game for the given (player, quiz) pair. Used by the
 -- player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
 -- defensive backstop in CreateGame so the same player cannot start a second
 -- attempt at a quiz they have already played.
-SELECT g.id, g.quiz_id, g.created_at, g.started_at
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
 FROM games g
          JOIN game_participants gp ON gp.game_id = g.id
 WHERE gp.player_id = ?
   AND g.quiz_id = ?
+ORDER BY g.created_at DESC
+LIMIT 1;
+
+-- name: GetRealGameByPlayerAndQuiz :one
+-- Returns the most-recent non-preview game for the (player, quiz) pair, so the
+-- resume flow skips a stale owner-preview and the owner can still record a real run (#1192).
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+  AND g.is_preview = 0
 ORDER BY g.created_at DESC
 LIMIT 1;
 

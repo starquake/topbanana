@@ -21,6 +21,7 @@ func TestRegister_PreservesAnonymousGame(t *testing.T) {
 
 	quizRow := &quiz.Quiz{
 		Title: "Register Claim Quiz", Slug: "register-claim-quiz",
+		Published:         true,
 		Description:       "Played as a guest, then registered.",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{

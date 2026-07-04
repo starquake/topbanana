@@ -62,7 +62,7 @@ func HandleMediaDescriptionSave(
 			return
 		}
 
-		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 

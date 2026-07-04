@@ -99,6 +99,7 @@ func TestQuestionImage_SoloWire(t *testing.T) {
 
 	qz := &quiz.Quiz{
 		Title:             "Image Solo Quiz",
+		Published:         true,
 		Slug:              "image-solo-quiz",
 		Description:       "solo image fixture",
 		CreatedByPlayerID: seededAdminID,

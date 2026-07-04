@@ -141,6 +141,7 @@ FROM game_participants gp
 JOIN games g ON g.id = gp.game_id
 JOIN quizzes q ON q.id = g.quiz_id
 WHERE gp.player_id = sqlc.arg('player_id')
+  AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)

@@ -43,6 +43,7 @@ func TestHostQuizList_ListsRunnableLiveQuizzes(t *testing.T) {
 	solo := seedSoloQuiz(ctx, t, setup.Stores.Quizzes, "host-list-solo")
 	emptyLive := &quiz.Quiz{
 		Title:             "Empty live host-list",
+		Published:         true,
 		Slug:              "host-list-empty",
 		Description:       "no questions yet",
 		CreatedByPlayerID: seededAdminID,

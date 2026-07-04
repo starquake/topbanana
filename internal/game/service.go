@@ -137,20 +137,24 @@ func (s *Service) PublishLeaderboardForPlayer(ctx context.Context, playerID int6
 	return nil
 }
 
-// CreateGame creates a game for the given quiz and player. Returns
-// [ErrGameAlreadyExists] when the player already has one - enforced
-// both by the fast-path check and the UNIQUE INDEX on
-// game_participants, so a concurrent race surfaces the same error.
-func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game, error) {
+// CreateGame creates a solo game for the given quiz and player. When preview is
+// true it delegates to [Service.CreatePreviewGame]; otherwise a draft or live
+// quiz 404s as [quiz.ErrQuizNotFound] and an existing real game returns
+// [ErrGameAlreadyExists] (also enforced by the game_participants UNIQUE index).
+//
+//nolint:revive // preview selects the preview-play path (a distinct create flow), not a behavioural mode switch inside one flow.
+func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64, preview bool) (*Game, error) {
 	qz, err := s.quizStore.GetQuiz(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
 	}
-	// Live quizzes are hosted-only (MP-0 / #677): a solo game can never be
-	// created for one. Surface ErrQuizNotFound so the handler returns 404,
-	// keeping a live quiz indistinguishable from a missing one and giving
-	// no spoiler that a hosted quiz exists at this id.
-	if qz.Mode == quiz.ModeLive {
+
+	if preview {
+		return s.CreatePreviewGame(ctx, qz, playerID)
+	}
+
+	// Live quizzes are hosted-only (#677) and drafts are not real-playable (#1192); surface ErrQuizNotFound so neither is distinguishable from a missing quiz.
+	if qz.Mode == quiz.ModeLive || !qz.Published {
 		return nil, quiz.ErrQuizNotFound
 	}
 
@@ -159,7 +163,13 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 		return nil, fmt.Errorf("failed to check existing game: %w", err)
 	}
 	if existing != nil {
-		return nil, ErrGameAlreadyExists
+		// A prior preview game does not consume the one real attempt (#1192); reset it. A real prior game still blocks.
+		if !existing.Preview {
+			return nil, ErrGameAlreadyExists
+		}
+		if err = s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, qz.ID); err != nil {
+			return nil, fmt.Errorf("failed to reset prior preview game: %w", err)
+		}
 	}
 
 	// CreateGame + CreateParticipant + StartGame run in a single
@@ -204,7 +214,8 @@ func (s *Service) GetGameForPlayerOnQuiz(ctx context.Context, playerID, quizID i
 		return nil, fmt.Errorf("failed to load quiz for player resume: %w", err)
 	}
 
-	g, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, quizID)
+	// Resume only the real (non-preview) game so an owner-preview never surfaces as resumable (#1192).
+	g, err := s.store.GetRealGameByPlayerAndQuiz(ctx, playerID, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load game for player resume: %w", err)
 	}
@@ -565,6 +576,30 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 	}
 
 	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
+}
+
+// CreatePreviewGame creates an owner preview game from an already-loaded quiz: a
+// solo-only, off-leaderboard test-play of a draft (#1192). A live or published
+// quiz returns [ErrPreviewNotAllowed]; any prior game for the pair is reset first
+// so re-previewing works. Ownership is enforced by the caller.
+func (s *Service) CreatePreviewGame(ctx context.Context, qz *quiz.Quiz, playerID int64) (*Game, error) {
+	// Solo drafts only. Rejecting a published quiz is load-bearing: the reset below would otherwise hard-delete the requester's real game and destroy their leaderboard entry (#1192).
+	if qz.Mode != quiz.ModeSolo || qz.Published {
+		return nil, ErrPreviewNotAllowed
+	}
+
+	if err := s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, qz.ID); err != nil {
+		return nil, fmt.Errorf("failed to reset prior game for preview: %w", err)
+	}
+
+	g := &Game{QuizID: qz.ID, Preview: true}
+	pa := &Participant{PlayerID: playerID, QuizID: qz.ID}
+	if err := s.store.CreateGameAndParticipant(ctx, g, pa); err != nil {
+		return nil, fmt.Errorf("failed to create preview game and participant: %w", err)
+	}
+	g.Quiz = qz
+
+	return g, nil
 }
 
 // resolveAnswerTarget finds the issued game_question for the supplied
