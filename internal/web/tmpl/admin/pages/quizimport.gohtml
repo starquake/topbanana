@@ -144,6 +144,7 @@ A question may mark more than one option correct. The player picks one option, a
 Fields:
 - title (string, required)
 - description (string, required)
+- language (string, optional) - "en" or "nl", the language the questions are written in; default "en". Set it to match the language you write the questions in.
 - timeLimitSeconds (integer, optional) - default answer window in seconds; per-question override below wins
 - rounds (array, in play order, required) - each named round has:
     - title (string, required)
@@ -168,6 +169,7 @@ Give me X rounds of Y questions.</code></pre>
         <ul class="text-text-dim text-[0.9rem] space-y-1 list-disc pl-5">
             <li><code class="font-mono text-[0.8rem]">title</code> - string, required. Slug is derived server-side.</li>
             <li><code class="font-mono text-[0.8rem]">description</code> - string, required.</li>
+            <li><code class="font-mono text-[0.8rem]">language</code> - string, optional. <code class="font-mono text-[0.8rem]">"en"</code> or <code class="font-mono text-[0.8rem]">"nl"</code>, the language the questions are written in; default <code class="font-mono text-[0.8rem]">"en"</code>. A label only - it does not translate the quiz.</li>
             <li><code class="font-mono text-[0.8rem]">timeLimitSeconds</code> - integer, optional. Quiz-wide default answer window.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[]</code> or <code class="font-mono text-[0.8rem]">questions[]</code> - array, required. Supply exactly one: <code class="font-mono text-[0.8rem]">rounds[]</code> for named rounds (the prompt above), or a top-level <code class="font-mono text-[0.8rem]">questions[]</code> for a single flat round. Not both, not neither. A top-level question takes the same shape as a round's question.</li>
             <li><code class="font-mono text-[0.8rem]">rounds[].title</code> - string, required. Names the round.</li>

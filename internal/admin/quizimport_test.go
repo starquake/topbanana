@@ -89,6 +89,40 @@ func TestQuizFromImportPayload_MapsQuestions(t *testing.T) {
 	}
 }
 
+// TestQuizFromImportPayload_MapsLanguage pins the #1115 language field: a
+// payload language carries onto the domain quiz, and an omitted language
+// leaves it empty for the store to default to English.
+func TestQuizFromImportPayload_MapsLanguage(t *testing.T) {
+	t.Parallel()
+
+	withLang, err := admin.QuizFromImportPayload(admin.QuizImportPayload{
+		Title:    "Hoofdsteden",
+		Language: "nl",
+		Questions: []admin.QuizImportQuestionPayload{
+			{Text: "Q", Options: []admin.QuizImportOptionPayload{{Text: "a", Correct: true}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("QuizFromImportPayload err = %v, want nil", err)
+	}
+	if got, want := withLang.Language, "nl"; got != want {
+		t.Errorf("language = %q, want %q", got, want)
+	}
+
+	noLang, err := admin.QuizFromImportPayload(admin.QuizImportPayload{
+		Title: "Capitals",
+		Questions: []admin.QuizImportQuestionPayload{
+			{Text: "Q", Options: []admin.QuizImportOptionPayload{{Text: "a", Correct: true}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("QuizFromImportPayload err = %v, want nil", err)
+	}
+	if got, want := noLang.Language, ""; got != want {
+		t.Errorf("language = %q, want empty (store defaults to English)", got)
+	}
+}
+
 // TestQuizFromImportPayload_MapsRounds pins the rounds[] path (#546):
 // each round maps onto Quiz.Rounds with its title, summary, and
 // position, the questions land on both the round and the flat

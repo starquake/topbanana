@@ -18,14 +18,18 @@ const archiveFormatVersion = 1
 // a quiz with authored rounds exports Rounds; a flat quiz exports a top-level
 // Questions list.
 type quizArchiveManifest struct {
-	FormatVersion    int                   `json:"formatVersion"`
-	Title            string                `json:"title"`
-	Description      string                `json:"description"`
-	TimeLimitSeconds *int                  `json:"timeLimitSeconds,omitempty"`
-	Visibility       string                `json:"visibility"`
-	Mode             string                `json:"mode"`
-	Questions        []quizArchiveQuestion `json:"questions,omitempty"`
-	Rounds           []quizArchiveRound    `json:"rounds,omitempty"`
+	FormatVersion    int    `json:"formatVersion"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	TimeLimitSeconds *int   `json:"timeLimitSeconds,omitempty"`
+	Visibility       string `json:"visibility"`
+	Mode             string `json:"mode"`
+	// Language is the advisory content-language label (#1115): "en" or "nl".
+	// Empty in archives written before it was added; the importer treats an
+	// empty value as the store default (English).
+	Language  string                `json:"language,omitempty"`
+	Questions []quizArchiveQuestion `json:"questions,omitempty"`
+	Rounds    []quizArchiveRound    `json:"rounds,omitempty"`
 }
 
 // quizArchiveRound is one authored round in the manifest.

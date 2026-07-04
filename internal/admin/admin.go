@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/reltime"
@@ -105,6 +106,11 @@ type QuizData struct {
 	// ModeOptions feeds the admin form's play-mode selector (MP-0 /
 	// #677) - pulled straight from the domain constants.
 	ModeOptions []string
+	// Language is the advisory content-language label (#1115).
+	Language string
+	// LanguageOptions feeds the admin form's language selector (#1115) -
+	// pulled straight from the domain constants.
+	LanguageOptions []string
 	// PlayCount is the durable "times played" counter surfaced on the
 	// admin quiz list footer (#891).
 	PlayCount int64
@@ -235,6 +241,10 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	if mode == "" {
 		mode = quiz.ModeSolo
 	}
+	language := qz.Language
+	if language == "" {
+		language = quiz.LanguageEN
+	}
 
 	return &QuizData{
 		ID:                   qz.ID,
@@ -250,6 +260,8 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		VisibilityOptions:    quiz.VisibilityValues(),
 		Mode:                 mode,
 		ModeOptions:          quiz.ModeValues(),
+		Language:             language,
+		LanguageOptions:      quiz.LanguageValues(),
 		PlayCount:            qz.PlayCount,
 		Published:            qz.Published,
 		ActionVariant:        actionVariantAdmin,
@@ -360,6 +372,12 @@ func parseTemplate(path string) *template.Template {
 		"versionLabel":      version.Label,
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
+		// The shared client_footer component uses t/lang (#1115); the admin
+		// surface stays English but still parses the components glob, so these
+		// placeholders keep it parseable. render.Renderer rebinds them per
+		// request.
+		"t":    func(string) string { return "" },
+		"lang": func() string { return locale.LocaleEN },
 	}
 	// Partials are parsed alongside layouts so any page (or any HTMX-fragment
 	// handler) can {{template "name" .}} a shared block without re-listing it.
@@ -660,6 +678,14 @@ func fillQuizFromForm(
 		qz.Mode = m
 	} else {
 		qz.Mode = quiz.ModeSolo
+	}
+	// Content language (#1115). Defaults to English if the form omits it; an
+	// unrecognised value is passed through verbatim so Quiz.Valid surfaces an
+	// inline error.
+	if l := r.PostFormValue("language"); l != "" {
+		qz.Language = l
+	} else {
+		qz.Language = quiz.LanguageEN
 	}
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
 		return problems, true
@@ -1539,6 +1565,8 @@ func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 				VisibilityOptions: quiz.VisibilityValues(),
 				Mode:              quiz.ModeSolo,
 				ModeOptions:       quiz.ModeValues(),
+				Language:          quiz.LanguageEN,
+				LanguageOptions:   quiz.LanguageValues(),
 			},
 		})
 	})

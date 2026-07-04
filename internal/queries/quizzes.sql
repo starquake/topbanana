@@ -22,6 +22,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -46,6 +47,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -71,6 +73,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -103,6 +106,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.language,
        q.play_count,
        q.published,
        p.display_name AS created_by_display_name
@@ -132,8 +136,8 @@ LIMIT 1;
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
 -- ErrCreatorRequired when the caller forgot to stamp the session
 -- admin, so the FK constraint is the second line of defence.
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, published, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, language, published, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
@@ -144,6 +148,7 @@ SET title              = ?,
     time_limit_seconds = ?,
     visibility         = ?,
     mode               = ?,
+    language           = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
