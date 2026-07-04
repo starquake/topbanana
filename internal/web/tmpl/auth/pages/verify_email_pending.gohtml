@@ -15,8 +15,8 @@
 
         <form action="/verify-email/resend" method="POST" class="mb-6">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-            <button type="submit" class="btn-primary" data-cooldown="{{.ResendWaitSeconds}}" data-cooldown-label="{{t "verifyEmailPending.resend"}}" {{if .ResendDisabled}}disabled aria-disabled="true"{{end}}>
-                {{if .ResendDisabled}}{{t "common.wait"}} {{.ResendWaitSeconds}}s{{else}}{{t "verifyEmailPending.resend"}}{{end}}
+            <button type="submit" class="btn-primary" data-cooldown="{{.ResendWaitSeconds}}" data-cooldown-label="{{t "verifyEmailPending.resend"}}" data-wait-label="{{t "common.waitSeconds"}}" {{if .ResendDisabled}}disabled aria-disabled="true"{{end}}>
+                {{if .ResendDisabled}}{{tCount "common.waitSeconds" .ResendWaitSeconds}}{{else}}{{t "verifyEmailPending.resend"}}{{end}}
             </button>
         </form>
 

@@ -11,7 +11,7 @@
   "common.backToProfile": "Back to profile",
   "common.save": "Save",
   "common.signOut": "Sign out",
-  "common.wait": "Wait",
+  "common.waitSeconds": "Wait {n}s",
   "common.rememberedIt": "Remembered it?",
   "common.submissionNotUnderstood": "Your submission was not understood. Try again.",
   "common.slowDownSubmit": "Slow down: wait a moment before submitting again.",

@@ -75,3 +75,41 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   await expect(submit).toHaveText('Send reset link');
   await expect(submit).not.toHaveAttribute('aria-disabled', /.*/);
 });
+
+// With Dutch selected, the per-second countdown must stay Dutch: cooldown.js
+// ticks from the server-rendered data-wait-label ("Wacht {n}s"), so it must
+// never flip to the English "Wait Ns" after the first second.
+test('forgot-password cooldown countdown stays in the page language', async ({ page }) => {
+  await page.clock.install();
+
+  // Set the language cookie via the lang route, then load the localized page.
+  await page.goto('/lang/nl');
+  await page.goto('/forgot-password');
+
+  const submit = page.locator('button[type="submit"]');
+  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveText('Resetlink versturen');
+
+  // Trip the shared per-IP cooldown (see the English spec above for why this
+  // polls instead of a fixed submit count).
+  await expect(async () => {
+    if (await submit.isEnabled()) {
+      await page.locator('input[name=identifier]').fill('nobody@example.test');
+      await submit.click();
+      await page.waitForURL(/\/forgot-password$/);
+    }
+    await expect(submit).toBeDisabled({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+
+  // Initial server-rendered label is Dutch.
+  await expect(submit).toHaveText(/^Wacht \d+s$/, { timeout: 15_000 });
+
+  // After ticks fire it stays Dutch, never the English "Wait Ns".
+  await page.clock.runFor(2_000);
+  await expect(submit).toHaveText(/^Wacht \d+s$/);
+
+  // At zero it re-enables with the Dutch active label restored.
+  await page.clock.runFor(61_000);
+  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveText('Resetlink versturen');
+});

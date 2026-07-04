@@ -121,6 +121,7 @@ func (re *Renderer) prepare(w http.ResponseWriter, r *http.Request) (*template.T
 	funcs := template.FuncMap{
 		"csrfToken": func() string { return csrfToken },
 		"t":         func(key string) string { return locale.Translate(loc, key) },
+		"tCount":    func(key string, n int) string { return locale.TranslateCount(loc, key, n) },
 		"lang":      func() string { return loc },
 	}
 	if re.funcs != nil {

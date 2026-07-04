@@ -19,8 +19,8 @@
                 <input type="email" name="email" value="{{.Email}}" autocomplete="email" required
                        class="form-input">
             </label>
-            <button type="submit" class="btn-primary" data-cooldown="{{.SubmitWaitSecs}}" data-cooldown-label="{{t "verifyEmailRequest.submit"}}" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
-                {{if .SubmitDisabled}}{{t "common.wait"}} {{.SubmitWaitSecs}}s{{else}}{{t "verifyEmailRequest.submit"}}{{end}}
+            <button type="submit" class="btn-primary" data-cooldown="{{.SubmitWaitSecs}}" data-cooldown-label="{{t "verifyEmailRequest.submit"}}" data-wait-label="{{t "common.waitSeconds"}}" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
+                {{if .SubmitDisabled}}{{tCount "common.waitSeconds" .SubmitWaitSecs}}{{else}}{{t "verifyEmailRequest.submit"}}{{end}}
             </button>
         </form>
 

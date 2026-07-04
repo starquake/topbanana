@@ -11,7 +11,7 @@
   "common.backToProfile": "Terug naar profiel",
   "common.save": "Opslaan",
   "common.signOut": "Uitloggen",
-  "common.wait": "Wacht",
+  "common.waitSeconds": "Wacht {n}s",
   "common.rememberedIt": "Weet je het weer?",
   "common.submissionNotUnderstood": "Je invoer werd niet begrepen. Probeer het opnieuw.",
   "common.slowDownSubmit": "Rustig aan: wacht even voordat je opnieuw verzendt.",
