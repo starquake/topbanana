@@ -26,11 +26,9 @@ const forgotPasswordCooldown = 60 * time.Second
 // handler logs against. Same pattern VerifyResendCooldown uses.
 func ForgotPasswordCooldown() time.Duration { return forgotPasswordCooldown }
 
-// forgotPasswordSuccessMsgKey is the catalog key for the
-// account-existence-opaque flash the POST handler always sets on success
-// or no-match. The phrasing deliberately does not confirm a match: an
-// attacker who probes a list of emails cannot tell from the response or
-// the timing whether any given address is registered.
+// forgotPasswordSuccessMsgKey is the account-existence-opaque success flash the
+// POST handler always sets: the phrasing never confirms a match, so probing a
+// list of emails reveals nothing from the response or timing.
 const forgotPasswordSuccessMsgKey = "forgotPassword.sentNotice"
 
 // forgotPageData backs the forgot-password.gohtml template.

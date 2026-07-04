@@ -95,7 +95,7 @@ func TestTranslate(t *testing.T) {
 func TestTranslateWith(t *testing.T) {
 	t.Parallel()
 
-	// Every {token} is substituted, in both locales.
+	// Every {token} in the message is substituted.
 	if got, want := TranslateWith(LocaleEN, "common.passwordHelp", map[string]string{
 		"min": "13", "max": "72",
 	}), "Must be 13-72 characters."; got != want {

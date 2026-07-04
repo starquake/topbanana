@@ -82,7 +82,6 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
 test('forgot-password cooldown countdown stays in the page language', async ({ page }) => {
   await page.clock.install();
 
-  // Set the language cookie via the lang route, then load the localized page.
   await page.goto('/lang/nl');
   await page.goto('/forgot-password');
 

@@ -13,9 +13,8 @@
 
 import { onDomReady } from '@shared/domReady.js';
 
-// waitLabel substitutes {n} in the server-rendered countdown template. The
-// English default is a safety net for a button missing data-wait-label; the
-// server always renders it on the cooldown pages.
+// waitLabel fills {n} in the button's server-rendered countdown template; the
+// English default only guards a button missing data-wait-label.
 function waitLabel(button, remaining) {
     const template = button.dataset.waitLabel || 'Wait {n}s';
 

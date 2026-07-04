@@ -19,11 +19,9 @@ import (
 // flash cookie path, and the discovery affordances share one string.
 const verifyEmailRequestPath = "/verify-email/request"
 
-// verifyRequestSuccessMsgKey is the catalog key for the
-// account-existence-opaque flash the POST handler always sets, identical
-// in shape to the forgot-password banner. Phrased so an attacker probing
-// a list of addresses cannot tell from the response whether any given
-// address is registered or already verified.
+// verifyRequestSuccessMsgKey is the account-existence-opaque flash the POST
+// handler always sets, like the forgot-password banner: the phrasing never
+// reveals whether an address is registered or already verified.
 const verifyRequestSuccessMsgKey = "verifyEmailRequest.sentNotice"
 
 // verifyEmailRequestData backs the verify_email_request.gohtml template.
