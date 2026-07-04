@@ -82,7 +82,9 @@ function twoRoundQuiz(title: string) {
 // workers and the four tests in this file never collide.
 async function openQuiz(page: Page, title: string): Promise<void> {
   const doc = twoRoundQuiz(title);
-  await importQuiz(page, doc);
+  // Reordering rounds/questions is an edit, blocked once published (#1192),
+  // so keep this quiz a draft.
+  await importQuiz(page, doc, 'solo', { publish: false });
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: doc.title }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);

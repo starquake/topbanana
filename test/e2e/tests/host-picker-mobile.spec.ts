@@ -31,6 +31,8 @@ async function seedLiveQuiz(host: import('./fixtures').Page, title: string): Pro
       },
     ],
   });
+  // importQuiz publishes by default (#1192), so the quiz shows in the shared
+  // host picker once flipped to live below.
   setQuizMode(title, 'live');
 
   await host.goto('/host/quizzes');

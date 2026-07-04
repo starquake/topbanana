@@ -42,7 +42,9 @@ function twoRoundQuiz(title: string) {
 }
 
 async function openQuiz(page: Page, title: string): Promise<void> {
-  await importQuiz(page, twoRoundQuiz(title));
+  // Deleting a question is an edit, blocked once published (#1192), so keep
+  // this quiz a draft.
+  await importQuiz(page, twoRoundQuiz(title), 'solo', { publish: false });
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: title }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);

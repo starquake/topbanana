@@ -140,6 +140,28 @@ export function setQuizMode(title: string, mode: 'solo' | 'live'): void {
   }
 }
 
+// publishQuiz flips a quiz to published by title, shelling out to the sqlite3
+// CLI the same way setQuizMode does (#1192). New quizzes created through the
+// admin importer / UI default to draft, and a draft is filtered out of the
+// public solo list and the shared live picker; a spec that plays or lists a
+// seeded quiz publishes it first so it behaves like a finished quiz.
+export function publishQuiz(title: string): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot publish quiz');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const output = execSqlite(
+    dbFile,
+    `UPDATE quizzes SET published = 1 WHERE title = '${escapedTitle}'; SELECT changes();`,
+  );
+  const changed = Number.parseInt(output, 10);
+  if (changed !== 1) {
+    throw new Error(`publishQuiz(${title}): expected 1 row updated, got ${changed}`);
+  }
+}
+
 // attachQuizAudio stamps an audio clip onto every question of a quiz by title,
 // shelling out to the sqlite3 CLI (#1088). The admin authoring UI has no audio
 // upload in the E2E flow, so this seeds one audio media row for the quiz and
@@ -235,6 +257,7 @@ export async function importQuiz(
   page: Page,
   doc: ImportDoc,
   mode: 'solo' | 'live' = 'solo',
+  { publish = true }: { publish?: boolean } = {},
 ): Promise<void> {
   const formResp = await page.request.get('/admin/quizzes/import');
   if (!formResp.ok()) {
@@ -256,16 +279,28 @@ export async function importQuiz(
   if (postResp.status() !== 303) {
     throw new Error(`POST /admin/quizzes/import failed: ${postResp.status()} ${await postResp.text()}`);
   }
+  // The importer creates a draft (#1192), hidden from the public solo list and
+  // the shared live picker; publish it by default so a seeded quiz behaves like
+  // a finished one. A spec that keeps the quiz editable (reorder, delete a
+  // question) passes { publish: false }.
+  if (publish) publishQuiz(doc.title);
 }
 
 // seedQuiz creates a quiz with the given questions via the admin JSON
 // importer instead of driving the authoring UI. Specs that previously
 // called createQuizWithQuestions only to have a quiz exist use this; the
 // playthrough is then found by title via startQuizAsAnonymous.
+//
+// The importer creates a draft (#1192), which is hidden from the public solo
+// list, so seedQuiz publishes it by default (via importQuiz) so the quiz plays
+// like a finished one. A spec that needs the quiz to stay editable (e.g. a
+// delete-from-list test, since a published quiz cannot be deleted) passes
+// { publish: false }.
 export async function seedQuiz(
   page: Page,
   title: string,
   questions: readonly QuestionSpec[] = QUIZ_QUESTIONS,
+  { publish = true }: { publish?: boolean } = {},
 ): Promise<void> {
   await importQuiz(page, {
     title,
@@ -274,7 +309,7 @@ export async function seedQuiz(
       text: q.text,
       options: q.options.map((text, i) => ({ text, correct: q.correctIndices.includes(i) })),
     })),
-  });
+  }, 'solo', { publish });
 }
 
 // submitNewQuizForm fills and submits the create-quiz form, binding the wait to
