@@ -21,10 +21,11 @@ authoritative styling + constraints rule and this file defers to it.
 |---|---|
 | Reactivity | Alpine.js 3.x (vendored, self-hosted, `window.Alpine`) |
 | CSS | Tailwind CSS v4, CSS-first (no `tailwind.config.js`); source `frontend/web/css/tailwind.css`, built via `make tailwind` to `internal/assets/static/css/app.css` (committed) |
-| Animations | anime.js 4.4.1 (vendored, self-hosted, global `window.anime`) — only via the `runAnim` wrapper in `frontend/shared/anim.js` |
+| Animations | anime.js (vendored, self-hosted, global `window.anime`) — only via the `runAnim` wrapper in `frontend/shared/anim.js` |
 | App JS | plain ES modules under `frontend/`, **bundled with esbuild** (`make js`); built bundles committed to `internal/*/static/js/dist/` |
 | HTTP | `fetch()` with relative paths — no Axios or other wrapper |
-| Drag-and-drop | SortableJS (admin-only, vendored at `internal/assets/static/js/vendor/sortable.min.js`) — the one allowed extra lib, for reorder only (#199) |
+| Drag-and-drop | SortableJS (admin-only, vendored at `internal/assets/static/js/vendor/sortable.min.js`) — an allowed extra lib, for reorder only (#199) |
+| Audio | Howler.js (vendored at `internal/assets/static/js/vendor/howler.min.js`) — an allowed extra lib, for per-question audio playback only (#1088) |
 | Serving | Go `embed.FS` (compiled in); the static trees hold only built output + vendored libs |
 
 No TypeScript. No runtime npm dependency (esbuild + the Tailwind CLI are dev-only build tools). No CDN.
@@ -180,4 +181,4 @@ Anchor Playwright locators on stable `data-testid` attributes, not regex matches
 
 ## What to avoid
 
-See `.claude/rules/frontend-style.md`. In short: **esbuild is the only bundler** (don't add another, and no runtime npm package); no TypeScript; no framework beyond Alpine + anime.js (SortableJS is the sole drag-and-drop exception, admin-only); no inline `style="..."`; no hand-written `.css` files (styling goes through `frontend/web/css/tailwind.css` tokens / `@layer`); no CDN-loaded libraries; relative fetch paths only; no reactive state added outside an Alpine component constructor.
+See `.claude/rules/frontend-style.md`. In short: **esbuild is the only bundler** (don't add another, and no runtime npm package); no TypeScript; avoid libraries -- default to the platform and vendor one only for a clear advantage it can't match (as SortableJS did for admin drag-and-drop #199, and Howler.js for cross-browser audio reliability #1088), never a full framework; no inline `style="..."`; no hand-written `.css` files (styling goes through `frontend/web/css/tailwind.css` tokens / `@layer`); no CDN-loaded libraries; relative fetch paths only; no reactive state added outside an Alpine component constructor.
