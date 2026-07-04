@@ -505,11 +505,9 @@ func isPipelineRejection(err error) bool {
 		errors.Is(err, media.ErrUnsupportedImage)
 }
 
-// authorizeQuizEdit loads the quiz and gates the request on the creator-or-admin
-// edit rule (mirrors admin.canEditQuiz) plus the publish edit-lock (#1192): the
-// player must be the quiz's creator or an admin, and the quiz must still be a
-// draft. A missing quiz yields 404, a non-owner non-admin a 403, and a published
-// (locked) quiz a 409. Returns whether to proceed.
+// authorizeQuizEdit gates the request on the creator-or-admin edit rule (mirrors
+// admin.canEditQuiz) plus the publish edit-lock: a missing quiz 404s, a non-owner
+// non-admin 403s, and a published (locked) quiz 409s (#1192). Returns whether to proceed.
 func authorizeQuizEdit(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, quizzes QuizEditLookup, quizID int64, player *auth.Player,
@@ -533,8 +531,7 @@ func authorizeQuizEdit(
 		return false
 	}
 
-	// A published quiz is locked from content edits (#1192); media uploads and
-	// deletes are content edits, so reject them until the quiz is unpublished.
+	// Media uploads/deletes are content edits, locked once published (#1192).
 	if qz.Published {
 		http.Error(w, "this quiz is published and locked from edits", http.StatusConflict)
 

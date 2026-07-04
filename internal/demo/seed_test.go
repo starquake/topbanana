@@ -70,8 +70,7 @@ func TestSeedIfEnabled(t *testing.T) {
 		t.Errorf("quiz count = %d, want %d", got, want)
 	}
 
-	// The archive-imported demo quiz must be published, not left a draft, or
-	// it would be hidden from the public listing and 404 on play (#1192).
+	// The imported demo quiz must be published, not left a draft, or it 404s on play (#1192).
 	demoQuiz, err := stores.Quizzes.GetQuiz(t.Context(), quizzes[0].ID)
 	if err != nil {
 		t.Fatalf("GetQuiz() err = %v, want nil", err)

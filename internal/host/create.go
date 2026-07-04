@@ -87,9 +87,7 @@ func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, play
 		case errors.Is(err, quiz.ErrQuizNotFound),
 			errors.Is(err, livesession.ErrNotLiveQuiz),
 			errors.Is(err, livesession.ErrQuizNotPublished):
-			// A missing, solo, or unpublished-and-not-owned quiz is not
-			// hostable; bounce back to the quiz list rather than surfacing a
-			// raw error.
+			// A missing, solo, or unpublished-and-not-owned quiz is not hostable; bounce to the quiz list instead of a raw error.
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error hosting live quiz", slog.Any("err", err))

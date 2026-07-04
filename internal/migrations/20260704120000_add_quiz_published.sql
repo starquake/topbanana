@@ -1,18 +1,13 @@
 -- +goose Up
 -- +goose StatementBegin
--- published marks whether a quiz is finished and playable by real players
--- (#1192): a quiz starts as a draft (published=0), previewable only by its
--- owner, and is locked from edits once published. A nullable-free ADD COLUMN
--- with a constant DEFAULT is an in-place change in SQLite, so there is no
--- FK-rebuild dance here even though quizzes is a parent table.
+-- published marks whether a quiz is playable by real players; drafts (0) are owner-preview-only and editable (#1192).
+-- Constant-default ADD COLUMN is in-place in SQLite, so no FK rebuild despite quizzes being a parent table.
 ALTER TABLE quizzes ADD COLUMN published INTEGER NOT NULL DEFAULT 0
     CHECK (published IN (0, 1));
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Backfill every existing quiz to published so nothing that was already live
--- (all quizzes were playable before this migration) stops working. New quizzes
--- default 0 (draft).
+-- Backfill existing quizzes to published so nothing already playable stops working (#1192).
 UPDATE quizzes SET published = 1;
 -- +goose StatementEnd
 

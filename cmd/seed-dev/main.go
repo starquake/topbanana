@@ -347,9 +347,7 @@ func seedDemoQuiz(
 		return nil, fmt.Errorf("import demo quiz archive: %w", err)
 	}
 
-	// The archive import creates the quiz as a draft (published defaults to 0),
-	// which would hide it from the public listing and 404 on play; the seeded
-	// demo quiz is ready to play, so publish it (#1192).
+	// The import lands as a draft; publish so the demo quiz is playable (#1192).
 	if err := stores.Quizzes.SetQuizPublished(ctx, qz.ID, true); err != nil {
 		return nil, fmt.Errorf("publish demo quiz: %w", err)
 	}
@@ -491,8 +489,7 @@ func quizFromFixture(f *quizFixture) (*quiz.Quiz, error) {
 		Slug:              slug.Make(f.Title),
 		Description:       f.Description,
 		CreatedByPlayerID: seededAdminID,
-		// Seed fixtures are ready to play, so publish them (#1192); a draft
-		// would be hidden from the public listing and not solo-playable.
+		// Seed fixtures are published so they are playable (#1192).
 		Published: true,
 	}
 

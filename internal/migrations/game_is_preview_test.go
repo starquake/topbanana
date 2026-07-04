@@ -11,8 +11,7 @@ import (
 // gameIsPreviewVersion is the #1192 ADD COLUMN migration adding games.is_preview.
 const gameIsPreviewVersion = 20260704130000
 
-// TestGameIsPreviewMigration_Column pins the #1192 schema addition: games gains
-// an is_preview column.
+// TestGameIsPreviewMigration_Column pins the #1192 schema addition: games gains an is_preview column.
 func TestGameIsPreviewMigration_Column(t *testing.T) {
 	t.Parallel()
 
@@ -28,9 +27,7 @@ func TestGameIsPreviewMigration_Column(t *testing.T) {
 	}
 }
 
-// TestGameIsPreviewMigration_DefaultAndRoundTrip pins that a freshly inserted
-// game reads back the non-preview default (0) and that flagging a game as a
-// preview stores and reads back as 1.
+// TestGameIsPreviewMigration_DefaultAndRoundTrip pins the non-preview default (0) and a round-trip of is_preview=1.
 func TestGameIsPreviewMigration_DefaultAndRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -74,9 +71,7 @@ func TestGameIsPreviewMigration_DefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGameIsPreviewMigration_DownUpRoundTrips pins that the #1192 migration runs
-// both directions against a populated DB: Down drops the column and Up re-adds
-// it with the non-preview default.
+// TestGameIsPreviewMigration_DownUpRoundTrips pins Down/Up against a populated DB: Down drops the column, Up re-adds it with the default.
 func TestGameIsPreviewMigration_DownUpRoundTrips(t *testing.T) {
 	t.Parallel()
 
@@ -119,8 +114,7 @@ func TestGameIsPreviewMigration_DownUpRoundTrips(t *testing.T) {
 	}
 }
 
-// TestGameIsPreviewMigration_CheckConstraintRejectsInvalid pins the CHECK on
-// is_preview: the column refuses a value outside {0, 1}.
+// TestGameIsPreviewMigration_CheckConstraintRejectsInvalid pins the CHECK on is_preview: it refuses a value outside {0, 1}.
 func TestGameIsPreviewMigration_CheckConstraintRejectsInvalid(t *testing.T) {
 	t.Parallel()
 

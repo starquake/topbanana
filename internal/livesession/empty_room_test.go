@@ -337,10 +337,7 @@ func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
 	}
 }
 
-// TestService_CreateSession_DraftLiveQuizOwnerGate pins the owner-or-published
-// hosting gate (#1192): the owner may host their own draft live quiz to test it,
-// but another host cannot host an unpublished quiz (the shared picker only lists
-// published live quizzes).
+// TestService_CreateSession_DraftLiveQuizOwnerGate pins the owner-or-published hosting gate: the owner may host their own draft, another host cannot (#1192).
 func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
 	t.Parallel()
 
@@ -348,8 +345,7 @@ func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
 	h := newEmptyRoomHarness(t, start)
 	ctx := t.Context()
 
-	// seedRunnerQuizSlug creates a live quiz owned by player 1 and left as a
-	// draft (CreateQuiz defaults to draft).
+	// seedRunnerQuizSlug creates a live quiz owned by player 1, left as a draft.
 	const ownerID int64 = 1
 	qz := seedRunnerQuizSlug(t, h.quizStore, "draft-live-owner-gate", [][]bool{{true}})
 

@@ -16,9 +16,7 @@
                 {{/* Visibility is not yet modelled; show a default Public pill
                      so the structure is in place for #103. */}}
                 <span class="pill pill-public">Public</span>
-                {{/* Draft / Published status (#1192). Draft quizzes are
-                     editable and host-preview-only; published quizzes are
-                     playable by real players and locked from edits. */}}
+                {{/* Draft / Published status pill (#1192). */}}
                 {{if .Quiz.Published}}
                     <span class="pill pill-published" data-testid="quiz-status">Published</span>
                 {{else}}
@@ -36,9 +34,7 @@
                  owns the quiz (or is an admin); the rest of this
                  template treats it as opaque. */}}
             {{$canEdit := .Quiz.CanEdit}}
-            {{/* Content-editing affordances (add/edit/delete rounds, questions,
-                 and media) are locked once the quiz is published (#1192); Export,
-                 Unpublish, and Delete stay under $canEdit so they remain available. */}}
+            {{/* Content edits (rounds/questions/media) lock once published; Export/Unpublish/Delete stay under $canEdit (#1192). */}}
             {{$canEditContent := and $canEdit (not .Quiz.Published)}}
             <h1 class="mb-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
                 <span>{{.Quiz.Title}}</span>
@@ -99,9 +95,7 @@
                     <span>Share</span>
                 </button>
                 {{if $canEdit}}
-                {{/* Export bundles the quiz tree plus its referenced media into
-                     a downloadable .zip (#1113). Read-only, so it is available in
-                     both draft and published states. */}}
+                {{/* Export bundles the quiz tree + media into a .zip (#1113); read-only, so available in both states. */}}
                 <a href="/admin/quizzes/{{.Quiz.ID}}/export"
                    data-testid="export-quiz"
                    class="btn-ghost gap-2">
@@ -109,9 +103,7 @@
                     <span>Export</span>
                 </a>
                 {{if .Quiz.Published}}
-                {{/* Published: the quiz is locked from edits (#1192). Offer
-                     Unpublish only while it has not been played; otherwise show a
-                     disabled control explaining why. */}}
+                {{/* Published: offer Unpublish only while unplayed, else a disabled control (#1192). */}}
                 {{if .Quiz.CanUnpublish}}
                 <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/unpublish" class="inline-flex">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
@@ -127,8 +119,7 @@
                 </button>
                 {{end}}
                 {{else}}
-                {{/* Draft: publish, preview (solo only), and the content-edit
-                     controls, all hidden once published. */}}
+                {{/* Draft-only controls: publish, preview, and content edits. */}}
                 <a href="/admin/quizzes/{{.Quiz.ID}}/publish" data-testid="publish-quiz" class="btn-primary gap-2">
                     <span>Publish</span>
                 </a>
@@ -155,8 +146,7 @@
                     <span>Edit quiz</span>
                 </a>
                 {{end}}
-                {{/* Delete stays available regardless of published state (#1192):
-                     publishing locks content edits, not deletion. */}}
+                {{/* Delete stays available in both states; publishing locks content edits, not deletion (#1192). */}}
                 <button type="button"
                         data-testid="delete-quiz"
                         onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
@@ -167,9 +157,7 @@
                 {{end}}
             </div>
 
-            {{/* Lock notice (#1192): once published the quiz is locked from
-                 content edits, but can still be unpublished (while unplayed) or
-                 deleted. Show why, and whether it can still be returned to draft. */}}
+            {{/* Lock notice shown once published (#1192). */}}
             {{if and $canEdit .Quiz.Published}}
             <p class="mt-4 inline-flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.8rem] text-text-dim" data-testid="publish-lock-notice">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 shrink-0 text-text-mute" aria-hidden="true"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
@@ -225,8 +213,7 @@
              room hosting this quiz. */}}
         {{if .HostHasRunningGame}}{{template "restart_modal" .Quiz.ID}}{{end}}
 
-        {{/* Delete-quiz modal - only mounted for the owner (#1192); available
-             in both draft and published states. */}}
+        {{/* Delete-quiz modal, mounted for the owner only. */}}
         {{if $canEdit}}
         <div id="modal-delete-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
             <div class="absolute inset-0" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></div>

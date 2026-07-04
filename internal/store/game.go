@@ -96,11 +96,7 @@ func (s *GameStore) GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID
 	return s.resumeGameFromRow(ctx, row)
 }
 
-// GetRealGameByPlayerAndQuiz returns the most-recent NON-preview game for the
-// given (player, quiz) pair, with Questions populated so callers can call
-// IsCompleted once they wire the Quiz onto the returned game. A stale
-// owner-preview game is skipped so the resume flow never surfaces it (#1192).
-// Returns [game.ErrGameNotFound] if the player has no real game for the quiz.
+// GetRealGameByPlayerAndQuiz returns the most-recent non-preview game for the (player, quiz) pair with Questions populated, so a stale owner-preview never surfaces in the resume flow (#1192). Returns [game.ErrGameNotFound] if the player has no real game for the quiz.
 func (s *GameStore) GetRealGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*game.Game, error) {
 	row, err := s.q.GetRealGameByPlayerAndQuiz(ctx, db.GetRealGameByPlayerAndQuizParams{
 		PlayerID: playerID,
@@ -563,9 +559,7 @@ func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayer
 	return movedParticipants, nil
 }
 
-// resumeGameFromRow maps a games row into a [game.Game] with Questions
-// populated, shared by the (real and preview-inclusive) resume lookups so their
-// row-to-domain mapping stays in one place.
+// resumeGameFromRow maps a games row into a [game.Game] with Questions populated, shared by the real and preview-inclusive resume lookups.
 func (s *GameStore) resumeGameFromRow(ctx context.Context, row db.Game) (*game.Game, error) {
 	g := &game.Game{
 		ID:        row.ID,

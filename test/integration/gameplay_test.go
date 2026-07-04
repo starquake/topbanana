@@ -1140,11 +1140,7 @@ func TestGameplay_Integration(t *testing.T) {
 	})
 
 	t.Run("published quiz question delete is blocked by the edit lock", func(t *testing.T) {
-		// #1192: this quiz has been played by a real player, so it is published
-		// and locked from content edits. Deleting one of its questions is a
-		// content edit, so the route rejects it with 409 rather than mutating a
-		// live quiz. (The FK-cascade-on-delete path itself is covered by the
-		// store-layer TestQuizStore_DeleteQuestion tests against a draft.)
+		// The quiz is published (a real player has played it), so deleting a question is a locked content edit -> 409 (#1192).
 		questionDeleteToken := fetchCSRFToken(
 			ctx, t, adminClient, fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID),
 		)
@@ -1224,10 +1220,7 @@ func TestGameplay_Integration(t *testing.T) {
 	})
 
 	t.Run("published quiz delete is allowed", func(t *testing.T) {
-		// #1192: deleting a quiz is removal, not a content edit, so the publish
-		// edit-lock does not apply - an owner/admin can delete a published quiz
-		// even after real plays. The route returns 303 and the quiz drops from
-		// the listing.
+		// Deleting a quiz is removal, not a content edit, so the publish lock does not apply even after real plays (#1192).
 		quizDetailURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID)
 		deleteToken := fetchCSRFToken(ctx, t, adminClient, quizDetailURL)
 

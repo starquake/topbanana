@@ -1,10 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
--- is_preview marks a host preview game (#1192): the owner test-plays a draft
--- solo quiz to verify it without their run reaching the quiz leaderboard or
--- bumping the durable play_count. Defaults 0 so every real game counts. An
--- in-place constant-default ADD COLUMN, so no FK rebuild even though games is
--- a parent table.
+-- is_preview marks an owner preview game that stays off the leaderboard and play_count; defaults 0 so every real game counts (#1192).
+-- Constant-default ADD COLUMN is in-place in SQLite, so no FK rebuild despite games being a parent table.
 ALTER TABLE games ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0
     CHECK (is_preview IN (0, 1));
 -- +goose StatementEnd

@@ -8,12 +8,10 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 )
 
-// quizPublishedVersion is the #1192 ADD COLUMN + backfill migration adding
-// quizzes.published.
+// quizPublishedVersion is the #1192 ADD COLUMN + backfill migration adding quizzes.published.
 const quizPublishedVersion = 20260704120000
 
-// TestQuizPublishedMigration_Column pins the #1192 schema addition: quizzes
-// gains a published column.
+// TestQuizPublishedMigration_Column pins the #1192 schema addition: quizzes gains a published column.
 func TestQuizPublishedMigration_Column(t *testing.T) {
 	t.Parallel()
 
@@ -29,9 +27,7 @@ func TestQuizPublishedMigration_Column(t *testing.T) {
 	}
 }
 
-// TestQuizPublishedMigration_DefaultAndRoundTrip pins that a freshly inserted
-// quiz reads back the draft default (0) and that publishing stores and reads
-// back as 1.
+// TestQuizPublishedMigration_DefaultAndRoundTrip pins the draft default (0) and a round-trip of published=1.
 func TestQuizPublishedMigration_DefaultAndRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -70,10 +66,7 @@ func TestQuizPublishedMigration_DefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
-// TestQuizPublishedMigration_BackfillsExistingQuizzes pins the #1192 backfill:
-// a quiz that existed before the migration lands at published=1 so nothing that
-// was already playable stops working. Seed below the version via DownTo, then
-// re-Up to run the backfill against populated data the fresh-DB run cannot.
+// TestQuizPublishedMigration_BackfillsExistingQuizzes pins that a pre-existing quiz lands at published=1 (#1192); it seeds below the version via DownTo then re-Ups to run the backfill against populated data.
 func TestQuizPublishedMigration_BackfillsExistingQuizzes(t *testing.T) {
 	t.Parallel()
 
@@ -105,9 +98,7 @@ func TestQuizPublishedMigration_BackfillsExistingQuizzes(t *testing.T) {
 	}
 }
 
-// TestQuizPublishedMigration_DownUpRoundTrips pins that the #1192 migration runs
-// both directions against a populated DB: Down drops the column and Up re-adds
-// it, backfilling existing rows to published.
+// TestQuizPublishedMigration_DownUpRoundTrips pins Down/Up against a populated DB: Down drops the column, Up re-adds and backfills it to published.
 func TestQuizPublishedMigration_DownUpRoundTrips(t *testing.T) {
 	t.Parallel()
 
@@ -145,8 +136,7 @@ func TestQuizPublishedMigration_DownUpRoundTrips(t *testing.T) {
 	}
 }
 
-// TestQuizPublishedMigration_CheckConstraintRejectsInvalid pins the CHECK on
-// published: the column refuses a value outside {0, 1}.
+// TestQuizPublishedMigration_CheckConstraintRejectsInvalid pins the CHECK on published: it refuses a value outside {0, 1}.
 func TestQuizPublishedMigration_CheckConstraintRejectsInvalid(t *testing.T) {
 	t.Parallel()
 

@@ -7,10 +7,7 @@ import { ApiError, jsonOrThrow } from './api.js';
 // short-circuit before jsonOrThrow so callers keep the existing
 // null return signal.
 export class GameService {
-    // startGame creates a game for the quiz. preview=true marks it a host
-    // preview (#1192): the server owner-gates it and excludes the game from
-    // the leaderboard and play count, so a host can test a draft without
-    // recording a score.
+    // startGame creates a game for the quiz; preview=true requests an owner preview that the server keeps off the leaderboard (#1192).
     async startGame(quizId, preview = false) {
         const body = { quizId: parseInt(quizId) };
         if (preview) body.preview = true;

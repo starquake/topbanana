@@ -179,14 +179,8 @@ func gateQuizRead(
 	return canReadQuiz(w, r, visibility)
 }
 
-// gatePreviewOwner enforces the preview & play ownership rule (#1192): only the
-// quiz's creator or an admin may open a preview game. It loads the quiz for its
-// creator id (a missing quiz 404s) and 403s a non-owner. The service enforces
-// the solo-only rule separately, so this handler concern is ownership alone.
-//
-// The loaded quiz is returned so the caller can create the preview game from it
-// via [game.Service.CreatePreviewGame] without a second load. Returns ok=false
-// with the response already written on any failure.
+// gatePreviewOwner 404s a missing quiz and 403s a non-owner, then returns the
+// loaded quiz so the caller can create the preview game without a second load (#1192).
 func gatePreviewOwner(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, service *game.Service, quizID int64, player *auth.Player,
@@ -581,9 +575,7 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	type createGameRequest struct {
 		QuizID int64 `json:"quizId"`
-		// Preview requests a host preview game (#1192): the owner test-plays a
-		// draft solo quiz without their run reaching the leaderboard. Only the
-		// quiz owner or an admin may set it; a non-owner is rejected with 403.
+		// Preview requests an owner preview game that stays off the leaderboard (#1192).
 		Preview bool `json:"preview"`
 	}
 
@@ -619,8 +611,6 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 
 		var g *game.Game
 		if req.Preview {
-			// The owner gate loads the quiz for the ownership check; pass it
-			// straight to CreatePreviewGame so the preview path loads it once.
 			qz, ok := gatePreviewOwner(w, r, logger, service, req.QuizID, player)
 			if !ok {
 				return
@@ -646,9 +636,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	})
 }
 
-// writeCreateGameError maps a [game.Service.CreateGame] failure onto the right
-// HTTP response: a missing/draft/live quiz 404s (opaque), a disallowed preview
-// 403s, an existing game 409s, and anything else 500s.
+// writeCreateGameError maps a [game.Service.CreateGame] failure to the right HTTP status: 404 (opaque), 403 (disallowed preview), 409 (existing game), else 500.
 func writeCreateGameError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, quiz.ErrQuizNotFound):

@@ -177,8 +177,7 @@ func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 			t.Fatalf("preview CreateGame err = %v, want nil", err)
 		}
 
-		// The resume probe must skip the owner-preview game so the owner can
-		// still start a real run once the quiz is published (#1192).
+		// The resume probe must skip the owner-preview game so the owner can still start a real run (#1192).
 		_, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, draft.ID)
 		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
@@ -296,9 +295,7 @@ func TestService_CreateGame_RejectsUnpublishedDraft(t *testing.T) {
 	quizStore := store.NewQuizStore(db, slog.Default())
 	gameStore := store.NewGameStore(db, slog.Default())
 
-	// A draft (Published false) is not playable by a real player (#1192): the
-	// service surfaces ErrQuizNotFound so a draft stays indistinguishable from a
-	// missing quiz.
+	// A draft is not real-playable; the service surfaces ErrQuizNotFound (#1192).
 	draft := newTestQuiz(t)
 	draft.Published = false
 	if err := quizStore.CreateQuiz(ctx, draft); err != nil {
@@ -344,8 +341,7 @@ func TestService_CreateGame_Preview(t *testing.T) {
 			t.Error("games.is_preview = 0 for a preview game, want 1")
 		}
 
-		// Re-previewing resets the prior game (a new game id) despite the
-		// one-attempt UNIQUE(player_id, quiz_id) index.
+		// Re-previewing resets the prior game (a new game id) despite the one-attempt UNIQUE(player_id, quiz_id) index.
 		second, err := svc.CreateGame(ctx, draft.ID, playerID, true)
 		if err != nil {
 			t.Fatalf("re-preview CreateGame err = %v, want nil", err)
@@ -378,8 +374,7 @@ func TestService_CreateGame_Preview(t *testing.T) {
 		if err != nil {
 			t.Fatalf("preview CreateGame err = %v, want nil", err)
 		}
-		// Issue every question so the final one triggers the (guarded)
-		// play-count bump, which must be a no-op for a preview game.
+		// Issue every question so the final one triggers the play-count bump, which must be a no-op for a preview game.
 		for {
 			_, nerr := svc.GetNextQuestion(ctx, g.ID, playerID)
 			if errors.Is(nerr, ErrNoMoreQuestions) {
@@ -419,8 +414,7 @@ func TestService_CreateGame_Preview(t *testing.T) {
 			t.Fatalf("real CreateGame err = %v, want nil", err)
 		}
 
-		// A preview on the published quiz must be refused, and it must NOT
-		// hard-delete the existing real game (that was a data-loss bug).
+		// A preview on a published quiz must be refused and must NOT hard-delete the real game (a data-loss bug).
 		_, err = svc.CreateGame(ctx, published.ID, playerID, true)
 		if got, want := err, ErrPreviewNotAllowed; !errors.Is(got, want) {
 			t.Errorf("CreateGame err = %v, want %v", got, want)

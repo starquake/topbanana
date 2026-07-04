@@ -189,9 +189,7 @@ func TestHomeStore_ListPopularQuizzes(t *testing.T) {
 	}
 }
 
-// TestHomeStore_ListPopularQuizzes_ExcludesDraft pins that an unpublished
-// draft never surfaces on the Popular tab even when it has finished plays
-// (#1192).
+// TestHomeStore_ListPopularQuizzes_ExcludesDraft pins that a draft never surfaces on the Popular tab even with finished plays (#1192).
 func TestHomeStore_ListPopularQuizzes_ExcludesDraft(t *testing.T) {
 	t.Parallel()
 
@@ -305,8 +303,7 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 		t.Fatalf("CreateQuiz empty err = %v, want nil", err)
 	}
 
-	// An unpublished public draft with questions: must be excluded by the
-	// published gate even though it is the most recently created (#1192).
+	// A public draft with questions: excluded by the published gate despite being the most recent (#1192).
 	draft := &quiz.Quiz{
 		Title: "Draft Public", Slug: "draft-public", Description: "not yet published",
 		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic, Published: false,

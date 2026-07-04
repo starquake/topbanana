@@ -4,9 +4,8 @@
 -- been issued, i.e. the count of game_questions rows for the game has
 -- caught up with the count of questions on the quiz. Same finisher
 -- condition as ListAnswersForQuizLeaderboard so the home page and the
--- per-quiz leaderboard agree on what "played" means. Host preview games
--- (is_preview = 1, #1192) are excluded so a draft an owner only previewed
--- never surfaces here and a preview never inflates the ranking.
+-- per-quiz leaderboard agree on what "played" means. Preview games
+-- (is_preview = 1) are excluded so a preview never inflates the ranking (#1192).
 --
 -- The EXISTS gate on questions excludes quizzes with zero questions:
 -- without it the finisher predicate above degenerates to 0 >= 0 and

@@ -28,11 +28,7 @@ var (
 	// quizzes are hostable (MP-0 / #677).
 	ErrNotLiveQuiz = errors.New("quiz is not a live quiz")
 
-	// ErrQuizNotPublished is returned when a host tries to host a draft live
-	// quiz they do not own (#1192). A live quiz is hostable only if it is
-	// published or owned by the host (owner-or-published): the shared picker
-	// lists only published live quizzes, but the owner may host their own draft
-	// to test it before publishing.
+	// ErrQuizNotPublished is returned when a host tries to host a live quiz they neither published nor own; an owner may host their own draft to test it (#1192).
 	ErrQuizNotPublished = errors.New("quiz is not published")
 
 	// ErrNotParticipant is returned by participant-gated reads/writes when
@@ -572,12 +568,7 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 	s.startCountdown = d
 }
 
-// hostableQuizErr reports why qz cannot be hosted live by hostPlayerID, or nil
-// when it can (#677, #1192). It must be a live quiz (else [ErrNotLiveQuiz]), and
-// it must be published or owned by the host (else [ErrQuizNotPublished]): the
-// shared picker lists only published live quizzes, but the owner may host their
-// own draft to test it. Shared by the two hosting entry points, CreateSession
-// (a new room) and armRoomForHost (arming an existing room).
+// hostableQuizErr reports why qz cannot be hosted live by hostPlayerID, or nil when it can: it must be a live quiz (else [ErrNotLiveQuiz]) that is published or owned by the host (else [ErrQuizNotPublished]) (#677, #1192).
 func hostableQuizErr(qz *quiz.Quiz, hostPlayerID int64) error {
 	if qz.Mode != quiz.ModeLive {
 		return ErrNotLiveQuiz

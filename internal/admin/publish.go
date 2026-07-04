@@ -11,22 +11,14 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// quizPublishData backs quizpublish.gohtml (#1192): the read-only overview a
-// host confirms before publishing. Rounds carries the quiz's questions grouped
-// into rounds in play order, mirroring the quiz view, so the host can review the
-// whole quiz (and its answers) before the lock.
+// quizPublishData backs quizpublish.gohtml: the read-only pre-publish review (#1192).
 type quizPublishData struct {
 	Title  string
 	Quiz   *QuizData
 	Rounds []RoundViewData
 }
 
-// HandleQuizPublishConfirm renders the publish overview + confirm page (#1192):
-// every round -> question -> options with the correct option marked, a warning
-// that a published quiz cannot be edited, and a Confirm (POST) button. Ownership
-// is gated by requireQuizOwner (not requireEditableQuizOwner: publishing is not
-// a content edit). An already-published quiz has nothing to confirm, so it
-// redirects back to the quiz view.
+// HandleQuizPublishConfirm renders the pre-publish review and confirm page for a draft quiz (#1192); an already-published quiz redirects to the quiz view.
 func HandleQuizPublishConfirm(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizpublish.gohtml")
 
@@ -62,10 +54,7 @@ func HandleQuizPublishConfirm(logger *slog.Logger, csrfMgr *csrf.Manager, quizSt
 	})
 }
 
-// HandleQuizPublish publishes the quiz (#1192): it flips published to true and
-// redirects back to the quiz view. Ownership is gated by requireQuizOwner. Once
-// published the quiz is locked from edits (enforced by requireEditableQuizOwner
-// on the content-mutating routes).
+// HandleQuizPublish flips the quiz to published and redirects to the quiz view; publishing then locks it from content edits (#1192).
 func HandleQuizPublish(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -93,10 +82,7 @@ func HandleQuizPublish(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 	})
 }
 
-// HandleQuizUnpublish returns a quiz to draft (#1192). It is allowed only until
-// a real (non-preview) game has started: once the quiz has real plays it can no
-// longer be unpublished, so a played quiz renders a 409. Ownership is gated by
-// requireQuizOwner.
+// HandleQuizUnpublish returns a quiz to draft, allowed only until a real (non-preview) game has started; a played quiz renders a 409 (#1192).
 func HandleQuizUnpublish(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -108,11 +94,7 @@ func HandleQuizUnpublish(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore q
 			return
 		}
 
-		// Atomic unpublish-if-unplayed closes the check-then-act race a
-		// QuizHasRealPlays read + SetQuizPublished(false) leaves open: a real
-		// game starting between the two calls could leave a played quiz as an
-		// editable draft (#1192). The quiz already exists (requireQuizOwner
-		// loaded it), so no update means it has been played -> 409.
+		// Atomic guard against the check-then-act race: the quiz is loaded, so no update means it has been played -> 409.
 		unpublished, err := quizStore.UnpublishQuizIfUnplayed(r.Context(), quizID)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error unpublishing quiz", slog.Any("err", err))

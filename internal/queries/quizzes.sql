@@ -59,9 +59,8 @@ ORDER BY q.updated_at DESC, q.id DESC;
 -- name: ListLiveQuizzes :many
 -- Live-mode variant of ListQuizzes (#836). Filters to mode = 'live' so the
 -- host intermission picker only offers hostable quizzes, and to published = 1
--- (#1192) so a draft live quiz stays out of the shared picker (its owner can
--- still host it to test via the owner-or-published gate in CreateSession).
--- Visibility is left unfiltered: a host can view any quiz.
+-- so a draft live quiz stays out of the shared picker (#1192). Visibility is
+-- left unfiltered: a host can view any quiz.
 SELECT q.id,
        q.title,
        q.slug,
@@ -158,21 +157,16 @@ SET mode       = ?,
 WHERE id = ?;
 
 -- name: SetQuizPublished :execresult
--- Flips just the published flag without touching the question tree (#1192),
--- so publishing / unpublishing cannot clobber a concurrent edit the way the
--- full UpdateQuiz would. Modelled on UpdateQuizMode.
+-- Flips just the published flag without touching the question tree, so it cannot clobber a concurrent edit (#1192). Modelled on UpdateQuizMode.
 UPDATE quizzes
 SET published  = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 
 -- name: UnpublishQuizIfUnplayed :execresult
--- Atomically returns a quiz to draft only while it has no real (non-preview)
--- game (#1192). The NOT EXISTS guard closes the check-then-act race a separate
--- QuizHasRealPlays read + SetQuizPublished(false) leaves open: a game starting
--- between the two calls could leave a played quiz as an editable draft. Zero
--- rows affected means either the quiz is gone or it has been played; the caller
--- distinguishes those (it already loaded the quiz) and renders the 409.
+-- Atomically returns a quiz to draft only while it has no real (non-preview) game;
+-- the NOT EXISTS guard closes the check-then-act race a read-then-write leaves open (#1192).
+-- Zero rows affected means the quiz is gone or has been played.
 UPDATE quizzes
 SET published  = 0,
     updated_at = CURRENT_TIMESTAMP
@@ -182,9 +176,7 @@ WHERE quizzes.id = ?
   );
 
 -- name: QuizHasRealPlays :one
--- Reports whether the quiz has at least one non-preview game (#1192). Once a
--- real player has started a game the quiz can no longer be unpublished; host
--- preview games (is_preview = 1) do not count.
+-- Reports whether the quiz has at least one non-preview game (#1192); preview games do not count.
 SELECT EXISTS(
     SELECT 1 FROM games WHERE quiz_id = ? AND is_preview = 0
 ) AS has_plays;
@@ -332,9 +324,8 @@ WHERE id = ?
 -- Increments the durable hit counter (#891) for the quiz that owns this solo
 -- game. Resolves the quiz from the game id so the caller only signals "this
 -- play completed" without threading the quiz id. Never decremented; the CHECK
--- on quizzes.play_count keeps it non-negative. A host preview game
--- (games.is_preview = 1, #1192) matches no row so the bump is a safe no-op:
--- previewing a draft never inflates the "times played" number.
+-- on quizzes.play_count keeps it non-negative. A preview game
+-- (games.is_preview = 1) matches no row, so previewing never inflates the count (#1192).
 UPDATE quizzes
 SET play_count = play_count + 1
 WHERE quizzes.id = (

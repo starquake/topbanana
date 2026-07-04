@@ -264,11 +264,7 @@ func TestOGMetadata_PrivateQuiz(t *testing.T) {
 	})
 }
 
-// TestOGMetadata_DraftQuiz pins the #1192 share-card tightening: a
-// /play/{slug} link for an unpublished draft must fall back to the sitewide
-// default OG card so a draft's title/description are not leaked into link
-// previews before it is published. A published quiz still surfaces its own
-// title/description.
+// TestOGMetadata_DraftQuiz pins that a draft's /play link falls back to the default OG card (no title/description leak), while a published quiz surfaces its own (#1192).
 func TestOGMetadata_DraftQuiz(t *testing.T) {
 	t.Parallel()
 

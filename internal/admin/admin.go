@@ -108,14 +108,9 @@ type QuizData struct {
 	// PlayCount is the durable "times played" counter surfaced on the
 	// admin quiz list footer (#891).
 	PlayCount int64
-	// Published reports whether the quiz is finished and locked from edits
-	// (#1192). Draft quizzes show a Publish control; published ones show the
-	// lock notice and an Unpublish control gated on CanUnpublish.
+	// Published reports whether the quiz is finished and locked from content edits (#1192).
 	Published bool
-	// CanUnpublish reports whether a published quiz may still be unpublished:
-	// true only while it has no real (non-preview) plays (#1192). The list
-	// handler leaves it false (it does not compute per-quiz play state); the
-	// quiz-view handler sets it from QuizHasRealPlays.
+	// CanUnpublish reports whether a published quiz may still be unpublished (no real plays yet); only the quiz-view handler computes it (#1192).
 	CanUnpublish bool
 	// ActionVariant selects which action cluster the shared quiz_card
 	// partial renders ("admin" Edit/Delete vs. a future host variant);
@@ -435,9 +430,7 @@ func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	renderer.Render(w, r, http.StatusForbidden, data)
 }
 
-// render409 renders the 409 conflict error page with the given message. Used
-// by the edit-lock gate (a published quiz cannot be edited, #1192) and the
-// unpublish gate (a played quiz can no longer be unpublished).
+// render409 renders the 409 conflict error page with the given message.
 func render409(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
 	renderer := render.New(
 		logger,
@@ -506,12 +499,7 @@ func requireQuizOwner(
 	return nil, false
 }
 
-// requireEditableQuizOwner is requireQuizOwner plus the publish edit-lock
-// (#1192): a published quiz is finished and locked from content edits, so every
-// content-mutating admin handler gates through this. It renders a 409 and
-// returns false when the (owned) quiz is published; the publish / unpublish
-// handlers deliberately keep plain requireQuizOwner so they can still flip the
-// flag.
+// requireEditableQuizOwner is requireQuizOwner plus the publish edit-lock: it 409s an owned but published quiz, which is locked from content edits (#1192).
 func requireEditableQuizOwner(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1148,8 +1136,7 @@ func HandleQuizView(
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
 		if quizData.Published {
-			// A published quiz can be unpublished only until a real (non-preview)
-			// game has started (#1192); the view gates the Unpublish control on it.
+			// A published quiz can be unpublished only until a real (non-preview) game has started (#1192).
 			hasPlays, err := quizStore.QuizHasRealPlays(r.Context(), id)
 			if err != nil {
 				logger.ErrorContext(r.Context(), "error checking quiz real plays", slog.Any("err", err))
@@ -1618,9 +1605,7 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 				qz.CreatedByPlayerID = p.ID
 			}
 		} else {
-			// UPDATE: only the creator may save, and only while the quiz is
-			// still a draft. requireEditableQuizOwner loads the quiz, 403s
-			// anyone else (#281), and 409s a published (locked) quiz (#1192).
+			// UPDATE: only the creator may save (403s others, #281), and only while the quiz is a draft (409s a published quiz, #1192).
 			if qz, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 				return
 			}
@@ -1925,8 +1910,7 @@ func HandleQuizDelete(
 			return
 		}
 
-		// Deleting a quiz is removal, not a content edit, so the publish
-		// edit-lock does not apply: an owner/admin can delete a published quiz.
+		// Delete is removal, not a content edit, so the publish lock does not apply here.
 		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}

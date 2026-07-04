@@ -67,8 +67,7 @@ func HandleSessionCreate(service *livesession.Service) http.Handler {
 			case errors.Is(err, quiz.ErrQuizNotFound),
 				errors.Is(err, livesession.ErrNotLiveQuiz),
 				errors.Is(err, livesession.ErrQuizNotPublished):
-				// A missing, solo, or unpublished-and-not-owned quiz all 404 so
-				// the id stays opaque (#1192).
+				// Missing, solo, or unpublished-and-not-owned all 404 so the id stays opaque (#1192).
 				http.NotFound(w, r)
 			default:
 				writeInternalError(w, r, logger, "error creating session", err)

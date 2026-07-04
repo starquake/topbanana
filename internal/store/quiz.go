@@ -42,7 +42,7 @@ func (s *QuizStore) Ping(ctx context.Context) error {
 // Includes rows of every visibility - use [QuizStore.ListPublicQuizzes] from
 // public-facing handlers.
 //
-//nolint:dupl // The three list methods are thin sqlc wrappers over distinct generated row types (ListQuizzesRow / ListPublicQuizzesRow / ListLiveQuizzesRow); the identical field mapping cannot be shared without reflection.
+//nolint:dupl // Distinct sqlc row types, identical mapping; cannot share without reflection.
 func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListQuizzes(ctx)
 	if err != nil {
@@ -810,9 +810,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		TimeLimitSeconds:  int64(timeLimit),
 		Visibility:        visibility,
 		Mode:              mode,
-		// New quizzes are drafts by default (#1192); the admin create path
-		// leaves Published false. Callers that seed a ready-to-play quiz
-		// (fixtures, importers) set it explicitly.
+		// New quizzes default to draft; seed callers (fixtures, importers) set Published explicitly (#1192).
 		Published: boolToInt64(qz.Published),
 	})
 	if err != nil {

@@ -143,9 +143,7 @@ func TestHandleQuizPublishConfirm(t *testing.T) {
 	})
 }
 
-// TestPublishedQuiz_EditLock pins that a published quiz rejects content edits
-// with 409 through requireEditableQuizOwner (#1192): the mode toggle and the
-// delete route stand in for the whole content-mutating cluster.
+// TestPublishedQuiz_EditLock pins that a published quiz rejects content edits with 409; the mode toggle and delete stand in for the whole cluster (#1192).
 func TestPublishedQuiz_EditLock(t *testing.T) {
 	t.Parallel()
 

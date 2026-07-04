@@ -125,9 +125,7 @@ func ensureDemoQuiz(
 		return nil, fmt.Errorf("import quiz archive: %w", err)
 	}
 
-	// The archive import creates the quiz as a draft (published defaults to 0),
-	// which would hide it from the public listing and 404 on play; the demo quiz
-	// is ready to play, so publish it (#1192).
+	// The import lands as a draft; publish so the demo quiz is playable (#1192).
 	if err := quizzes.SetQuizPublished(ctx, qz.ID, true); err != nil {
 		return nil, fmt.Errorf("publish demo quiz: %w", err)
 	}

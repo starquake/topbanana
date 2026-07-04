@@ -294,9 +294,7 @@ func twoQuestionQuiz(title, slug string) *quiz.Quiz {
 	return qz
 }
 
-// publishedTwoQuestionQuiz is twoQuestionQuiz already published (#1192), so a
-// real play-through (CreateGame) is allowed. Edit-lock tests use the draft
-// twoQuestionQuiz; view / reset tests that play through use this.
+// publishedTwoQuestionQuiz is twoQuestionQuiz already published, so a real play-through is allowed (#1192); edit-lock tests use the draft twoQuestionQuiz instead.
 func publishedTwoQuestionQuiz(title, slug string) *quiz.Quiz {
 	qz := twoQuestionQuiz(title, slug)
 	qz.Published = true

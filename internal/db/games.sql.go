@@ -64,8 +64,7 @@ type CreateGameParams struct {
 	IsPreview int64
 }
 
-// is_preview marks a host preview game (#1192): the owner test-plays a draft
-// solo quiz without their run reaching the leaderboard or the play_count.
+// is_preview marks an owner preview game that stays off the leaderboard and play_count (#1192).
 func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, error) {
 	row := q.db.QueryRowContext(ctx, createGame, arg.ID, arg.QuizID, arg.IsPreview)
 	var i Game
@@ -403,11 +402,8 @@ type GetRealGameByPlayerAndQuizParams struct {
 	QuizID   int64
 }
 
-// Returns the most-recent NON-preview game for the given (player, quiz) pair.
-// Used by the player-side resume flow (GET /api/quizzes/{slugID}/my-game) so a
-// stale owner-preview game never surfaces as a resumable real attempt: after an
-// owner previews a draft and publishes it, the resume probe must skip the
-// is_preview game so the owner can still record a real scoring run (#1192).
+// Returns the most-recent non-preview game for the (player, quiz) pair, so the
+// resume flow skips a stale owner-preview and the owner can still record a real run (#1192).
 func (q *Queries) GetRealGameByPlayerAndQuiz(ctx context.Context, arg GetRealGameByPlayerAndQuizParams) (Game, error) {
 	row := q.db.QueryRowContext(ctx, getRealGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
 	var i Game

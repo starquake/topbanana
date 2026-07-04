@@ -25,11 +25,7 @@ var (
 	// [Service.GetGameForPlayerOnQuiz] first.
 	ErrGameAlreadyExists = errors.New("game already exists for this player and quiz")
 
-	// ErrPreviewNotAllowed is returned by [Service.CreateGame] when a preview
-	// game is requested for a quiz that cannot be previewed this way (#1192):
-	// preview & play is solo-only. Ownership is enforced by the handler (which
-	// has the requester's admin status); the service enforces the solo-mode
-	// rule. Handlers map it to 403.
+	// ErrPreviewNotAllowed is returned when a preview game is requested for a non-solo quiz; preview is solo-only (#1192). Handlers map it to 403.
 	ErrPreviewNotAllowed = errors.New("preview not allowed for this quiz")
 
 	// ErrAnswerAlreadyRecorded is returned by [GameStore.CreateAnswer]
@@ -78,9 +74,7 @@ type Game struct {
 	ID     string
 	QuizID int64
 	Quiz   *quiz.Quiz
-	// Preview marks a host preview game (#1192): the owner test-plays a draft
-	// solo quiz without their run reaching the leaderboard or the play_count.
-	// Set on the create path; hydrated from games.is_preview on reads.
+	// Preview marks an owner preview game that stays off the leaderboard and play_count (#1192).
 	Preview      bool
 	CreatedAt    time.Time
 	StartedAt    *time.Time
@@ -313,11 +307,7 @@ type Store interface {
 	// callers can call [Game.IsCompleted]. Returns [ErrGameNotFound] if
 	// the player has no game for the quiz.
 	GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
-	// GetRealGameByPlayerAndQuiz returns the most-recent NON-preview game
-	// played by the given player on the given quiz, with [Game.Questions]
-	// populated so callers can call [Game.IsCompleted]. A stale owner-preview
-	// game is skipped so the resume flow never surfaces it (#1192). Returns
-	// [ErrGameNotFound] if the player has no real game for the quiz.
+	// GetRealGameByPlayerAndQuiz returns the most-recent non-preview game for the (player, quiz) pair with [Game.Questions] populated, so a stale owner-preview never surfaces in the resume flow (#1192). Returns [ErrGameNotFound] if the player has no real game for the quiz.
 	GetRealGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
 	// CreateGame creates a new game.
 	CreateGame(ctx context.Context, g *Game) error

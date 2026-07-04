@@ -94,17 +94,11 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "index.html", data)
 }
 
-// applyQuizOG overrides the share card's title/description with the named
-// quiz's own values, leaving the sitewide defaults in place when the quiz
-// is missing, is a live quiz, is private, or is an unpublished draft. A live
-// quiz is hosted-only (MP-0 / #677): injecting its title/description would leak
-// them into link previews before the hosted game runs, defeating the no-spoiler
-// guarantee. A private quiz is reachable only by signed-in players (#103); the
-// share card is an unauthenticated preview surface with no viewer context, so it
-// must not surface a private quiz's title/description to anonymous scrapers
-// (#783). A draft is not yet playable (#1192), so it gets the same no-spoiler
-// treatment. All keep the default card - a degraded preview, not a 404
-// (#678), mirroring the missing-quiz fallback.
+// applyQuizOG overrides the share card's title/description with the named quiz's
+// own values, but keeps the sitewide defaults for a quiz that is missing, live,
+// private, or a draft: none is a publicly-playable solo quiz, so surfacing its
+// details to anonymous scrapers would spoiler a hosted game (#677) or leak a
+// non-public quiz (#103, #1192). All keep the default card, not a 404 (#678).
 func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) {
 	q, err := s.quizStore.GetQuiz(r.Context(), id)
 	if err != nil {

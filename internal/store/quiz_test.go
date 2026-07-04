@@ -1376,8 +1376,7 @@ func TestQuizStore_UnpublishQuizIfUnplayed(t *testing.T) {
 	})
 }
 
-// TestQuizStore_ListPublicQuizzes_ExcludesDrafts pins that a draft quiz stays
-// out of the public solo listing until it is published (#1192).
+// TestQuizStore_ListPublicQuizzes_ExcludesDrafts pins that a draft quiz stays out of the public solo listing until published (#1192).
 func TestQuizStore_ListPublicQuizzes_ExcludesDrafts(t *testing.T) {
 	t.Parallel()
 

@@ -93,10 +93,7 @@ export class GameApp {
         // instead of silently dropping the player onto the generic picker
         // (#802). Reset whenever a real quiz is picked.
         this.deepLinkUnavailable = false;
-        // True when the page was opened as an owner preview of a draft quiz
-        // via /play/<slug>-<id>?preview=1 (#1192). Drives the "Preview" HUD
-        // chip and marks the created game non-scoring on the server. Set once
-        // in init(); the whole play loop otherwise runs unchanged.
+        // True when opened as an owner preview (?preview=1); drives the HUD chip and marks the game non-scoring (#1192).
         this.preview = false;
         // Gates the deep-link title/description so it only paints once
         // checkAlreadyPlayed has resolved the start state. Without it the
@@ -189,12 +186,7 @@ export class GameApp {
             playerService.getMe(),
         ]);
         this.player = player;
-        // Preview deep link (#1192): an owner reviewing a draft via
-        // /play/<slug>-<id>?preview=1. A draft is absent from the public list
-        // (ListPublicQuizzes filters to published), so the normal
-        // list-membership resolution can't find it — take the id straight from
-        // the path and start a preview game. This bypasses the quiz-list /
-        // resume probe entirely.
+        // Preview deep link: a draft is absent from the public list, so take the id from the path and start a preview game, bypassing the list/resume probe (#1192).
         if (this.isPreviewDeepLink()) {
             await this.startPreviewGame();
 
@@ -435,10 +427,7 @@ export class GameApp {
         return PLAY_PATH_PATTERN.test(window.location.pathname);
     }
 
-    // isPreviewDeepLink reports whether the URL is a /play/<slug>-<id> deep
-    // link carrying ?preview=1 (#1192) — the owner preview entry point. The
-    // server owner-gates the create, so a non-owner who forges the param just
-    // gets the "not available" note.
+    // isPreviewDeepLink reports whether the URL is a /play deep link carrying ?preview=1; the server owner-gates the create (#1192).
     isPreviewDeepLink() {
         if (!this.hasDeepLinkPath()) return false;
         return new URLSearchParams(window.location.search).get('preview') === '1';
@@ -451,20 +440,14 @@ export class GameApp {
         return match ? parseInt(match[1], 10) : null;
     }
 
-    // deepLinkSlugId returns the `${slug}-${id}` portion of a /play/ deep link
-    // (trailing slash stripped), used as the leaderboard key on the preview
-    // path where the quiz is absent from the loaded list.
+    // deepLinkSlugId returns the `${slug}-${id}` portion of a /play/ deep link, used as the leaderboard key when the quiz is absent from the loaded list.
     deepLinkSlugId() {
         return window.location.pathname
             .replace(/\/$/, '')
             .replace(/^\/play\//, '');
     }
 
-    // startPreviewGame runs the owner preview flow (#1192): create a preview
-    // game straight from the deep-link quiz id (no list membership check, since
-    // drafts are not in the public list) and drop into the normal play loop.
-    // A 403 (not owner / not solo) or 404 (missing / draft) surfaces the same
-    // "not available" note a stale deep link shows.
+    // startPreviewGame creates a preview game from the deep-link quiz id and drops into the normal play loop; a 403/404 surfaces the "not available" note (#1192).
     async startPreviewGame() {
         this.preview = true;
         const quizId = this.deepLinkQuizId();
@@ -475,9 +458,7 @@ export class GameApp {
             return;
         }
         this.quizSlugId = this.deepLinkSlugId();
-        // No Start gesture fires on a preview auto-start, so bootstrapGame
-        // preloads without the loading screen and doesn't tear down audio on a
-        // first-question failure (there is no iOS keep-alive to stop).
+        // No Start gesture on a preview auto-start: no loading screen and no audio teardown (no keep-alive to stop).
         await this.bootstrapGame({
             create: async () => {
                 try {
@@ -663,9 +644,7 @@ export class GameApp {
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return;
         this.quizSlugId = slugId;
-        // The Start gesture armed the iOS keep-alive, so bootstrapGame preloads
-        // behind the "Loading sounds" state and tears audio down on a
-        // first-question failure; clips re-preload on the next Start.
+        // The Start gesture armed the iOS keep-alive, so preload behind the loading screen and tear audio down on failure.
         await this.bootstrapGame({
             create: async () => {
                 if (existing) return existing.gameId;
@@ -674,12 +653,7 @@ export class GameApp {
 
                     return data.id;
                 } catch (err) {
-                    // #287: 409 means a game already exists for this
-                    // (player, quiz) pair — usually a two-tab race past
-                    // the checkAlreadyPlayed gate above. Recover by
-                    // re-fetching the existing game so the player still
-                    // gets through; any other error (500, network) gives
-                    // up with a visible startError.
+                    // #287: 409 means a game already exists (a two-tab race); recover by re-fetching it. Any other error surfaces startError.
                     if (err && err.status === 409) {
                         const recovered = await gameService.getMyGameForQuiz(slugId);
                         if (!recovered) {
@@ -703,17 +677,12 @@ export class GameApp {
         });
     }
 
-    // bootstrapGame runs the shared game-start tail for the normal start and the
-    // owner preview (#1192): reset the per-game state, create the game via the
-    // caller's `create` closure, preload audio, then load the first question.
-    // `create` returns the new game id, or null when it handled its own failure
-    // (a 409 with no recoverable game, or the preview owner/existence gate) and
-    // already set the right UI state -- bootstrap then just aborts. A failed
-    // first /next rolls back to the start screen with `failureCopy` so it can't
-    // freeze the player on "Loading question..." (#1188). `showAudioLoading`
-    // gates the "Loading sounds" screen (and blocks the first question on the
-    // preload); `tearDownAudioOnFailure` stops the iOS keep-alive the Start
-    // gesture armed (the preview auto-start arms none).
+    // bootstrapGame is the shared game-start tail for the normal start and the
+    // preview. `create` returns the new game id, or null when it already handled
+    // its own failure and set the UI state (bootstrap then aborts). A failed first
+    // question rolls back to the start screen with `failureCopy` (#1188).
+    // `showAudioLoading` gates the loading screen; `tearDownAudioOnFailure` stops
+    // the iOS keep-alive.
     async bootstrapGame({ create, failureCopy, showAudioLoading, tearDownAudioOnFailure }) {
         this.score = 0;
         // Clear any leftover round-card state from a prior session in
@@ -727,11 +696,7 @@ export class GameApp {
         if (!gameId) return;
         this.gameId = gameId;
 
-        // Preload every clip up front (#1088). With the loading screen the start
-        // blocks on it so each question plays an already-decoded Howl; without
-        // it (preview / resume) preload runs in the background and the manual
-        // play control covers a blocked clip. The engine's budget keeps a
-        // slow/failed clip from hanging the start.
+        // Preload every clip up front (#1088). With the loading screen the start blocks on it; otherwise it runs in the background and the manual play control covers a blocked clip.
         if (showAudioLoading) {
             await this.preloadGameAudio();
         } else {

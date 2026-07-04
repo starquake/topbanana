@@ -217,8 +217,7 @@ func TestHandleCreateGame_AlreadyExists(t *testing.T) {
 func TestHandleCreateGame_Preview(t *testing.T) {
 	t.Parallel()
 
-	// draftSoloQuiz is twoQuestionQuiz owned by ownerID but left as a draft, so
-	// only the owner may preview it and a normal create 404s.
+	// draftSoloQuiz is a draft owned by ownerID: only the owner may preview it and a normal create 404s.
 	draftSoloQuiz := func(ownerID int64) *quiz.Quiz {
 		qz := twoQuestionQuiz("Draft", "draft-quiz")
 		qz.CreatedByPlayerID = ownerID
