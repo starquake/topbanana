@@ -159,7 +159,7 @@ If removing the comment wouldn't confuse a future reader, don't write it.
 
 - Don't restate the code (`// increment i`, `// open the file`, `// the X package` above a `package x` declaration).
 - Don't reference the current task, fix, or caller (`// used by X`, `// added for Y`, `// handles the case from issue #123`) — those belong in the PR description and rot as the codebase evolves.
-- Don't write multi-paragraph rationale or step-by-step narration. One short line per real `why` is usually enough.
+- **Keep it to one short line.** A real `why` fits in a single sentence; if a comment runs to several sentences it is explaining too much — cut it to the one non-obvious point or delete it. No multi-paragraph rationale, no step-by-step narration, no restating the same reason on adjacent lines. Generated/agent-written comments over-explain by default — trim them hard.
 - Issue links are fine when they're load-bearing: `// see #165` stays accurate because issues don't move.
 
 When in doubt, leave the comment out. A reviewer who finds the code unclear will ask, and that's a better signal of what actually needs a comment.
