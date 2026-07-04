@@ -83,9 +83,11 @@ func Resolve(r *http.Request) string {
 }
 
 // fromAcceptLanguage does a deliberately small Accept-Language parse: split on
-// commas, drop any ";q=..." weight, and return LocaleNL for the first tag whose
-// primary subtag is "nl". Anything else (including an empty header) falls back
-// to English, the only other locale.
+// commas (browsers list tags in descending priority order), drop any ";q=..."
+// weight, and return the first tag whose primary subtag is a supported locale.
+// The first *supported* tag wins, so an "en-US,en;q=0.9,nl;q=0.3" header (English
+// preferred, Dutch a low fallback) stays English. Anything unrecognised
+// (including an empty header) falls back to English.
 func fromAcceptLanguage(header string) string {
 	for part := range strings.SplitSeq(header, ",") {
 		tag := part
@@ -93,8 +95,11 @@ func fromAcceptLanguage(header string) string {
 			tag = tag[:i]
 		}
 		primary, _, _ := strings.Cut(strings.TrimSpace(tag), "-")
-		if strings.EqualFold(primary, LocaleNL) {
+		switch {
+		case strings.EqualFold(primary, LocaleNL):
 			return LocaleNL
+		case strings.EqualFold(primary, LocaleEN):
+			return LocaleEN
 		}
 	}
 

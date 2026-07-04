@@ -36,6 +36,14 @@ func TestHandleSetLocale(t *testing.T) {
 		},
 		{name: "no referer redirects to root", locale: "en", wantCookie: true, wantValue: "en", wantRedirect: "/"},
 		{
+			name:         "protocol-relative referer path is rejected",
+			locale:       "nl",
+			referer:      "https://example.test//evil.example/x",
+			wantCookie:   true,
+			wantValue:    "nl",
+			wantRedirect: "/",
+		},
+		{
 			name:         "referer query is preserved",
 			locale:       "nl",
 			referer:      "https://example.test/login?next=%2Fadmin",

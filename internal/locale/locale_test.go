@@ -39,6 +39,11 @@ func TestResolve(t *testing.T) {
 		{name: "invalid cookie ignored", cookie: "fr", acceptLang: "nl", want: LocaleNL},
 		{name: "accept-language nl", acceptLang: "nl-NL,en;q=0.8", want: LocaleNL},
 		{name: "accept-language en", acceptLang: "en-US,en;q=0.9", want: LocaleEN},
+		{
+			name:       "english primary with dutch fallback stays english",
+			acceptLang: "en-US,en;q=0.9,nl;q=0.3",
+			want:       LocaleEN,
+		},
 		{name: "accept-language unknown falls back", acceptLang: "fr-FR,de;q=0.8", want: LocaleEN},
 		{name: "junk header falls back", acceptLang: ";;;q=", want: LocaleEN},
 		{name: "nl behind a weight still wins", acceptLang: "de;q=0.9, nl;q=0.8", want: LocaleNL},

@@ -3,7 +3,11 @@ package locale
 import (
 	"net/http"
 	"net/url"
+	"strings"
 )
+
+// rootPath is the fallback redirect target when there is no usable Referer.
+const rootPath = "/"
 
 // HandleSetLocale sets the lang cookie from the {locale} path segment and
 // redirects back to where the request came from. It is a plain GET link (no
@@ -28,15 +32,18 @@ func HandleSetLocale() http.Handler {
 func redirectTarget(r *http.Request) string {
 	ref := r.Referer()
 	if ref == "" {
-		return "/"
+		return rootPath
 	}
 	u, err := url.Parse(ref)
 	if err != nil {
-		return "/"
+		return rootPath
 	}
 	dest := u.EscapedPath()
-	if dest == "" {
-		return "/"
+	// Require a single-slash-rooted path. A "//host/..." path would be emitted
+	// as a protocol-relative Location and redirect off-site, so reject it (and
+	// any non-rooted value) back to the home page.
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		return rootPath
 	}
 	if u.RawQuery != "" {
 		dest += "?" + u.RawQuery
