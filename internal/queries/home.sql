@@ -4,7 +4,9 @@
 -- been issued, i.e. the count of game_questions rows for the game has
 -- caught up with the count of questions on the quiz. Same finisher
 -- condition as ListAnswersForQuizLeaderboard so the home page and the
--- per-quiz leaderboard agree on what "played" means.
+-- per-quiz leaderboard agree on what "played" means. Host preview games
+-- (is_preview = 1, #1192) are excluded so a draft an owner only previewed
+-- never surfaces here and a preview never inflates the ranking.
 --
 -- The EXISTS gate on questions excludes quizzes with zero questions:
 -- without it the finisher predicate above degenerates to 0 >= 0 and
@@ -46,6 +48,7 @@ JOIN games g ON g.quiz_id = q.id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND q.visibility = 'public'
   AND q.mode = 'solo'
+  AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id)
@@ -112,6 +115,7 @@ JOIN game_participants gp ON gp.player_id = p.id
 JOIN games g ON g.id = gp.game_id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND p.display_name_claimed = 1
+  AND g.is_preview = 0
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)

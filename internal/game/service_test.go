@@ -368,6 +368,73 @@ func TestService_CreateGame_Preview(t *testing.T) {
 		}
 	})
 
+	t.Run("preview on a published quiz is rejected and keeps the real game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		published := newTestQuiz(t) // Published: true
+		if err := quizStore.CreateQuiz(ctx, published); err != nil {
+			t.Fatalf("failed to create published quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		// The owner has a real game on the published quiz.
+		realGame, err := svc.CreateGame(ctx, published.ID, playerID, false)
+		if err != nil {
+			t.Fatalf("real CreateGame err = %v, want nil", err)
+		}
+
+		// A preview on the published quiz must be refused, and it must NOT
+		// hard-delete the existing real game (that was a data-loss bug).
+		if _, err = svc.CreateGame(ctx, published.ID, playerID, true); !errors.Is(err, ErrPreviewNotAllowed) {
+			t.Errorf("preview on published err = %v, want %v", err, ErrPreviewNotAllowed)
+		}
+		if _, err = gameStore.GetGame(ctx, realGame.ID); err != nil {
+			t.Errorf("real game gone after refused preview: GetGame err = %v, want nil", err)
+		}
+	})
+
+	t.Run("preview then publish then real play resets the preview game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		draft := newTestQuiz(t)
+		draft.Published = false
+		if err := quizStore.CreateQuiz(ctx, draft); err != nil {
+			t.Fatalf("failed to create draft quiz: %v", err)
+		}
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		preview, err := svc.CreateGame(ctx, draft.ID, playerID, true)
+		if err != nil {
+			t.Fatalf("preview CreateGame err = %v, want nil", err)
+		}
+
+		if err = quizStore.SetQuizPublished(ctx, draft.ID, true); err != nil {
+			t.Fatalf("SetQuizPublished err = %v, want nil", err)
+		}
+
+		// The leftover preview game must not block the owner's real attempt.
+		realGame, err := svc.CreateGame(ctx, draft.ID, playerID, false)
+		if err != nil {
+			t.Fatalf("real CreateGame after preview err = %v, want nil", err)
+		}
+		if realGame.Preview {
+			t.Error("real game Preview = true, want false")
+		}
+		if _, err = gameStore.GetGame(ctx, preview.ID); !errors.Is(err, ErrGameNotFound) {
+			t.Errorf("preview game still exists after real play: GetGame err = %v, want ErrGameNotFound", err)
+		}
+	})
+
 	t.Run("preview of a live quiz is rejected", func(t *testing.T) {
 		t.Parallel()
 

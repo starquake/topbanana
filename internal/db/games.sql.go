@@ -305,7 +305,7 @@ func (q *Queries) GetGame(ctx context.Context, id string) (Game, error) {
 }
 
 const getGameByPlayerAndQuiz = `-- name: GetGameByPlayerAndQuiz :one
-SELECT g.id, g.quiz_id, g.created_at, g.started_at
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
 FROM games g
          JOIN game_participants gp ON gp.game_id = g.id
 WHERE gp.player_id = ?
@@ -319,25 +319,19 @@ type GetGameByPlayerAndQuizParams struct {
 	QuizID   int64
 }
 
-type GetGameByPlayerAndQuizRow struct {
-	ID        string
-	QuizID    int64
-	CreatedAt time.Time
-	StartedAt sql.NullTime
-}
-
 // Returns the most-recent game for the given (player, quiz) pair. Used by the
 // player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
 // defensive backstop in CreateGame so the same player cannot start a second
 // attempt at a quiz they have already played.
-func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlayerAndQuizParams) (GetGameByPlayerAndQuizRow, error) {
+func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlayerAndQuizParams) (Game, error) {
 	row := q.db.QueryRowContext(ctx, getGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
-	var i GetGameByPlayerAndQuizRow
+	var i Game
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
 		&i.CreatedAt,
 		&i.StartedAt,
+		&i.IsPreview,
 	)
 	return i, err
 }

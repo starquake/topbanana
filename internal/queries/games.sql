@@ -166,7 +166,7 @@ WHERE g.quiz_id = sqlc.arg('quiz_id')
 -- player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
 -- defensive backstop in CreateGame so the same player cannot start a second
 -- attempt at a quiz they have already played.
-SELECT g.id, g.quiz_id, g.created_at, g.started_at
+SELECT g.id, g.quiz_id, g.created_at, g.started_at, g.is_preview
 FROM games g
          JOIN game_participants gp ON gp.game_id = g.id
 WHERE gp.player_id = ?

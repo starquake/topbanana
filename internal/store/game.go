@@ -96,6 +96,7 @@ func (s *GameStore) GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID
 	g := &game.Game{
 		ID:        row.ID,
 		QuizID:    row.QuizID,
+		Preview:   row.IsPreview != 0,
 		CreatedAt: row.CreatedAt,
 	}
 

@@ -176,7 +176,15 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64, previe
 		return nil, fmt.Errorf("failed to check existing game: %w", err)
 	}
 	if existing != nil {
-		return nil, ErrGameAlreadyExists
+		// A prior preview game does not consume the player's one real attempt
+		// (#1192): reset it so the owner can play their now-published quiz for
+		// real and land on the leaderboard. A real prior game still blocks.
+		if !existing.Preview {
+			return nil, ErrGameAlreadyExists
+		}
+		if err = s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, qz.ID); err != nil {
+			return nil, fmt.Errorf("failed to reset prior preview game: %w", err)
+		}
 	}
 
 	// CreateGame + CreateParticipant + StartGame run in a single
@@ -591,7 +599,11 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 // a fresh is_preview game is created. No leaderboard publish fires: a preview
 // game never appears in the standings.
 func (s *Service) createPreviewGame(ctx context.Context, qz *quiz.Quiz, playerID int64) (*Game, error) {
-	if qz.Mode != quiz.ModeSolo {
+	// Preview is solo-only and for drafts only. Rejecting a published quiz is
+	// not just a policy: without it, previewing a published quiz would reset
+	// (hard-delete) the requester's real game below, destroying their
+	// leaderboard entry (#1192). A published quiz is played normally instead.
+	if qz.Mode != quiz.ModeSolo || qz.Published {
 		return nil, ErrPreviewNotAllowed
 	}
 
