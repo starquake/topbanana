@@ -160,7 +160,7 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64, previe
 	}
 
 	if preview {
-		return s.createPreviewGame(ctx, qz, playerID)
+		return s.CreatePreviewGame(ctx, qz, playerID)
 	}
 
 	// Live quizzes are hosted-only (MP-0 / #677) and drafts are not yet
@@ -596,13 +596,16 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
 }
 
-// createPreviewGame is the preview branch of [Service.CreateGame] (#1192): the
-// owner test-plays a draft solo quiz. Preview is solo-only, so a live quiz
-// returns [ErrPreviewNotAllowed]. Any prior game for the (player, quiz) is
-// reset first so re-previewing works despite the one-attempt UNIQUE index, then
-// a fresh is_preview game is created. No leaderboard publish fires: a preview
-// game never appears in the standings.
-func (s *Service) createPreviewGame(ctx context.Context, qz *quiz.Quiz, playerID int64) (*Game, error) {
+// CreatePreviewGame creates an owner preview game from an already-loaded quiz
+// (#1192): the owner test-plays a draft solo quiz. Callers that already hold the
+// quiz (the preview ownership gate) pass it straight through, so no second load
+// is paid; [Service.CreateGame] uses it for the preview branch of the normal
+// path. Preview is solo-only, so a live quiz returns [ErrPreviewNotAllowed]. Any
+// prior game for the (player, quiz) is reset first so re-previewing works despite
+// the one-attempt UNIQUE index, then a fresh is_preview game is created. No
+// leaderboard publish fires: a preview game never appears in the standings.
+// Ownership is enforced by the caller.
+func (s *Service) CreatePreviewGame(ctx context.Context, qz *quiz.Quiz, playerID int64) (*Game, error) {
 	// Preview is solo-only and for drafts only. Rejecting a published quiz is
 	// not just a policy: without it, previewing a published quiz would reset
 	// (hard-delete) the requester's real game below, destroying their

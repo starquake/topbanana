@@ -183,29 +183,33 @@ func gateQuizRead(
 // quiz's creator or an admin may open a preview game. It loads the quiz for its
 // creator id (a missing quiz 404s) and 403s a non-owner. The service enforces
 // the solo-only rule separately, so this handler concern is ownership alone.
+//
+// The loaded quiz is returned so the caller can create the preview game from it
+// via [game.Service.CreatePreviewGame] without a second load. Returns ok=false
+// with the response already written on any failure.
 func gatePreviewOwner(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, service *game.Service, quizID int64, player *auth.Player,
-) bool {
+) (*quiz.Quiz, bool) {
 	qz, err := service.GetQuiz(r.Context(), quizID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) {
 			http.NotFound(w, r)
 
-			return false
+			return nil, false
 		}
 		writeInternalError(w, r, logger, "error loading quiz for preview gate", err)
 
-		return false
+		return nil, false
 	}
 
 	if !player.IsAdmin() && player.ID != qz.CreatedByPlayerID {
 		http.Error(w, "only the quiz owner can preview this quiz", http.StatusForbidden)
 
-		return false
+		return nil, false
 	}
 
-	return true
+	return qz, true
 }
 
 // decimalBase is the radix used when formatting ids as strings.
@@ -613,11 +617,18 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		if req.Preview && !gatePreviewOwner(w, r, logger, service, req.QuizID, player) {
-			return
+		var g *game.Game
+		if req.Preview {
+			// The owner gate loads the quiz for the ownership check; pass it
+			// straight to CreatePreviewGame so the preview path loads it once.
+			qz, ok := gatePreviewOwner(w, r, logger, service, req.QuizID, player)
+			if !ok {
+				return
+			}
+			g, err = service.CreatePreviewGame(ctx, qz, player.ID)
+		} else {
+			g, err = service.CreateGame(ctx, req.QuizID, player.ID, false)
 		}
-
-		g, err := service.CreateGame(ctx, req.QuizID, player.ID, req.Preview)
 		if err != nil {
 			writeCreateGameError(w, r, logger, err)
 
