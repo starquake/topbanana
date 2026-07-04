@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -135,18 +134,7 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name string, data shellData) {
 	loc := locale.Resolve(r)
 	data.Locale = loc
-	messages, err := json.Marshal(locale.Messages(loc))
-	if err != nil {
-		// The catalog is static ASCII strings, so a marshal failure is not
-		// reachable in practice; fall back to an empty object so the SPA's
-		// window.__I18N__.messages is always valid JSON.
-		s.logger.ErrorContext(r.Context(), "marshal locale messages", slog.Any("err", err))
-		messages = []byte("{}")
-	}
-	// messages is our own static ASCII catalog marshaled to JSON, never user
-	// input, so injecting it as template.JS carries no XSS risk.
-	//nolint:gosec // G203: trusted, server-owned JSON; not attacker-controlled.
-	data.MessagesJSON = template.JS(messages)
+	data.MessagesJSON = locale.MessagesJSON(loc)
 	funcs := template.FuncMap{
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"envTitleTag": envtag.Get,

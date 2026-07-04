@@ -13,8 +13,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"maps"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -33,11 +35,25 @@ const CookieName = "lang"
 // survives across sessions without being permanent.
 const cookieMaxAgeSeconds = 365 * 24 * 60 * 60
 
+// defaultQWeight is the Accept-Language q-value assumed for a tag that omits
+// ";q="; qBitSize is the bit size passed to [strconv.ParseFloat] for a q-value.
+const (
+	defaultQWeight = 1.0
+	qBitSize       = 64
+)
+
 //go:embed en.json nl.json
 var catalogFS embed.FS
 
 //nolint:gochecknoglobals // immutable translation catalog, parsed once at load and never mutated.
 var catalog = loadCatalog()
+
+// messagesJSON holds each locale's merged catalog marshaled to JSON once at
+// load. The catalog is immutable, so the SPA shell can inject the same bytes on
+// every render instead of re-merging and re-marshaling ~170 entries per request.
+//
+//nolint:gochecknoglobals // immutable, derived from catalog once at load.
+var messagesJSON = loadMessagesJSON()
 
 // loadCatalog reads and parses the embedded per-locale JSON once. A read or
 // parse failure is a build-time programming error (the files are embedded and
@@ -82,28 +98,62 @@ func Resolve(r *http.Request) string {
 	return fromAcceptLanguage(r.Header.Get("Accept-Language"))
 }
 
-// fromAcceptLanguage does a deliberately small Accept-Language parse: split on
-// commas (browsers list tags in descending priority order), drop any ";q=..."
-// weight, and return the first tag whose primary subtag is a supported locale.
-// The first *supported* tag wins, so an "en-US,en;q=0.9,nl;q=0.3" header (English
-// preferred, Dutch a low fallback) stays English. Anything unrecognised
-// (including an empty header) falls back to English.
+// fromAcceptLanguage does a deliberately small Accept-Language parse honouring
+// q-weights: it reads each comma-separated tag with its ";q=" weight (default
+// 1.0 when omitted) and returns the supported locale with the highest weight,
+// ties broken by list order. A q of 0 excludes a tag; a malformed q skips it.
+// Anything unrecognised (including an empty header) falls back to English.
 func fromAcceptLanguage(header string) string {
+	best := LocaleEN
+	var bestQ float64
 	for part := range strings.SplitSeq(header, ",") {
-		tag := part
-		if i := strings.IndexByte(tag, ';'); i >= 0 {
-			tag = tag[:i]
+		tag, q, ok := parseLanguageRange(part)
+		if !ok || q <= 0 {
+			continue
 		}
-		primary, _, _ := strings.Cut(strings.TrimSpace(tag), "-")
+		primary, _, _ := strings.Cut(tag, "-")
+		var loc string
 		switch {
 		case strings.EqualFold(primary, LocaleNL):
-			return LocaleNL
+			loc = LocaleNL
 		case strings.EqualFold(primary, LocaleEN):
-			return LocaleEN
+			loc = LocaleEN
+		default:
+			continue
+		}
+		if q > bestQ {
+			best = loc
+			bestQ = q
 		}
 	}
 
-	return LocaleEN
+	return best
+}
+
+// parseLanguageRange splits one Accept-Language element into its language tag
+// and q-weight. The weight defaults to 1.0 when no ";q=" is present; a present
+// but unparseable weight returns ok=false so the caller drops the tag. An empty
+// tag also returns ok=false.
+func parseLanguageRange(part string) (tag string, q float64, ok bool) {
+	fields := strings.Split(part, ";")
+	tag = strings.TrimSpace(fields[0])
+	if tag == "" {
+		return "", 0, false
+	}
+	q = defaultQWeight
+	for _, f := range fields[1:] {
+		val, isQ := strings.CutPrefix(strings.TrimSpace(f), "q=")
+		if !isQ {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(val), qBitSize)
+		if err != nil {
+			return "", 0, false
+		}
+		q = parsed
+	}
+
+	return tag, q, true
 }
 
 // Translate returns the message for key in loc, falling back to the English
@@ -123,8 +173,9 @@ func Translate(loc, key string) string {
 }
 
 // Messages returns the full message map for loc, English overlaid with the
-// locale's own entries, so every key resolves to a value. Used to inject the
-// catalog into the SPA. A fresh map is returned on every call.
+// locale's own entries, so every key resolves to a value. A fresh map is
+// returned on every call. The SPA shell path uses the precomputed
+// [MessagesJSON] instead; this stays for callers that need the map itself.
 func Messages(loc string) map[string]string {
 	merged := make(map[string]string, len(catalog[LocaleEN]))
 	maps.Copy(merged, catalog[LocaleEN])
@@ -135,11 +186,40 @@ func Messages(loc string) map[string]string {
 	return merged
 }
 
-// SetCookie writes the lang cookie so a manual language choice persists. It is
-// deliberately not marked Secure so it works over plain HTTP in development; the
-// SPA reads the locale from the injected window.__I18N__ global rather than the
-// cookie, so HttpOnly is on. SameSite=Lax is enough for a preference cookie that
-// carries no auth.
+// loadMessagesJSON marshals each locale's merged catalog to JSON once at load.
+// A marshal failure is a build-time programming error (the catalog is static
+// ASCII covered by tests), so it panics rather than returning an error.
+func loadMessagesJSON() map[string]template.JS {
+	out := make(map[string]template.JS, len(catalog))
+	for _, loc := range Locales() {
+		data, err := json.Marshal(Messages(loc))
+		if err != nil {
+			panic(fmt.Sprintf("locale: marshal %s messages: %v", loc, err))
+		}
+		// Content is our own static ASCII catalog, never attacker input.
+		//nolint:gosec // G203: trusted, server-owned JSON; not attacker-controlled.
+		out[loc] = template.JS(data)
+	}
+
+	return out
+}
+
+// MessagesJSON returns the precomputed merged catalog for loc as JSON ready to
+// embed in a <script> as window.__I18N__.messages. The bytes are byte-identical
+// across calls. Content is server-owned static ASCII, so [template.JS] carries
+// no XSS risk. An unknown locale falls back to English.
+func MessagesJSON(loc string) template.JS {
+	if v, ok := messagesJSON[loc]; ok {
+		return v
+	}
+
+	return messagesJSON[LocaleEN]
+}
+
+// SetCookie writes the lang cookie so a manual language choice persists. No
+// client JS needs to read this cookie, so HttpOnly is set. SameSite=Lax and a
+// non-Secure attribute suit a preference cookie that carries no auth and must
+// work over plain HTTP in development.
 //
 //nolint:gosec // G124: a language preference cookie carries no auth; not Secure so it works over plain HTTP in dev.
 func SetCookie(w http.ResponseWriter, loc string) {

@@ -3,6 +3,7 @@ package locale_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/locale"
@@ -48,6 +49,11 @@ func TestResolve(t *testing.T) {
 		{name: "junk header falls back", acceptLang: ";;;q=", want: LocaleEN},
 		{name: "nl behind a weight still wins", acceptLang: "de;q=0.9, nl;q=0.8", want: LocaleNL},
 		{name: "cookie wins over accept-language", cookie: LocaleEN, acceptLang: "nl", want: LocaleEN},
+		{name: "descending-q browser header", acceptLang: "nl-NL,nl;q=0.9,en;q=0.5", want: LocaleNL},
+		{name: "ascending-q picks the higher-q supported tag", acceptLang: "nl;q=0.1, en;q=0.9", want: LocaleEN},
+		{name: "q=0 excludes a tag", acceptLang: "en;q=0, nl", want: LocaleNL},
+		{name: "malformed q is ignored", acceptLang: "en;q=abc, nl;q=0.5", want: LocaleNL},
+		{name: "no supported tag falls back to en", acceptLang: "fr;q=0.9, de;q=0.8", want: LocaleEN},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,6 +109,23 @@ func TestMessages(t *testing.T) {
 		if _, ok := nl[key]; !ok {
 			t.Errorf("Messages(nl) missing key %q present in English base", key)
 		}
+	}
+}
+
+func TestMessagesJSON(t *testing.T) {
+	t.Parallel()
+
+	nl := string(MessagesJSON(LocaleNL))
+	if got, want := nl, `"login.submit":"Inloggen"`; !strings.Contains(got, want) {
+		t.Errorf("MessagesJSON(nl) = %q, should contain %q", got, want)
+	}
+	// The precomputed bytes must be identical across calls (immutable catalog).
+	if got, want := string(MessagesJSON(LocaleNL)), nl; got != want {
+		t.Errorf("MessagesJSON(nl) not stable: %q != %q", got, want)
+	}
+	// An unknown locale falls back to the English catalog.
+	if got, want := string(MessagesJSON("fr")), string(MessagesJSON(LocaleEN)); got != want {
+		t.Errorf("MessagesJSON(fr) = %q, want English fallback %q", got, want)
 	}
 }
 
