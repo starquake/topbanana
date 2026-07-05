@@ -289,10 +289,9 @@ type Config struct {
 	ProfileEnabled bool
 
 	// DemoSeedArchiveDir is the directory the seed-demo command reads quiz
-	// archive zips from (DEMO_SEED_ARCHIVE_DIR). Every *.zip in it is restored
-	// as a demo quiz, in sorted-filename order; the files come from the demo
-	// deployment's bind mount rather than being embedded, so they stay out of
-	// the production image. Only consumed by SeedDemo, which gates on DemoMode.
+	// archive zips from (DEMO_SEED_ARCHIVE_DIR). The files come from the demo
+	// deployment's bind mount rather than being embedded. Only consumed by
+	// SeedDemo, which gates on DemoMode.
 	DemoSeedArchiveDir string
 
 	// RevealDelay overrides the per-question reveal beat (#247). Zero means

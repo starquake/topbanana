@@ -127,7 +127,7 @@ var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
 var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE_DIR is not set")
 
 // seedDemoWrap is the error-wrap prefix used by SeedDemo failure paths so the
-// messages stay consistent and revive's add-constant linter stays quiet.
+// messages stay consistent.
 const seedDemoWrap = "seed-demo: %w"
 
 // PromoteAdmin looks up a player by email and sets them to the top tier
