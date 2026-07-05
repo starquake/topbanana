@@ -77,9 +77,7 @@ func (s *Service) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	return qz, nil
 }
 
-// GetQuizMeta proxies to the wrapped quiz store. Exposed so the clientapi
-// deep-link resolver can read a quiz's metadata (title, slug, mode, ...)
-// without paying the questions/options fan-out GetQuiz performs.
+// GetQuizMeta proxies to the quiz store's metadata read.
 func (s *Service) GetQuizMeta(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	qz, err := s.quizStore.GetQuizMeta(ctx, id)
 	if err != nil {

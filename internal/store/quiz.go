@@ -274,10 +274,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	return qz, nil
 }
 
-// GetQuizMeta returns a quiz's own columns (title, slug, description, mode,
-// visibility, ...) by its ID without loading its questions or options.
-// Prefer this over GetQuiz when the caller needs the quiz metadata but not
-// the question tree. Returns ErrQuizNotFound when the quiz does not exist.
+// GetQuizMeta reads the quiz row by ID without its questions or options.
 func (s *QuizStore) GetQuizMeta(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	row, err := s.q.GetQuiz(ctx, id)
 	if err != nil {

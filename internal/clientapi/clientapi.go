@@ -310,17 +310,11 @@ func writeQuizLeaderboardError(
 	writeInternalError(w, r, logger, "error retrieving quiz leaderboard", err)
 }
 
-// HandleQuizMeta resolves a deep-linked quiz to its client-facing metadata
-// (id, slug, title, description, mode) so the play/start screen can render a
-// private or unlisted quiz that never appears in the public list (#1214).
-//
-// Metadata is returned only for a quiz that is actually solo-deep-link
-// playable; everything else 404s opaquely, matching applyQuizOG's withholding
-// (internal/client/share.go) and CreateGame's accept rule: a draft leaks a
-// hidden quiz (#1192/#783) and a live quiz spoilers a hosted game (#677), so
-// both stay indistinguishable from a missing quiz. The #103 visibility gate
-// still applies on top: a private quiz 404s for an anonymous caller. No
-// questions, options, or answer key are ever exposed.
+// HandleQuizMeta returns a deep-linked quiz's client metadata (id, slug, title,
+// description, mode) so the play screen can resolve a private or unlisted quiz
+// absent from the public list (#1214). Anything not solo-deep-link playable -- a
+// draft, a live quiz, or a private quiz for an anonymous caller -- 404s opaquely
+// so a hidden quiz stays indistinguishable from a missing one.
 func HandleQuizMeta(logger *slog.Logger, service *game.Service) http.Handler {
 	type quizMetaResponse struct {
 		ID          int64     `json:"id"`
