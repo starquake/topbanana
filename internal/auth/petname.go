@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"errors"
 	"math/big"
 )
 
@@ -14,6 +15,34 @@ func GeneratePetname() string {
 	n := pickRandom(petnameNouns)
 
 	return a1 + "-" + a2 + "-" + n
+}
+
+// CreateWithPetnameFallback calls create with firstChoice and, on an
+// ErrDisplayNameTaken collision, retries with a freshly generated
+// petname up to maxPetnameAttempts times. Any other error, or success,
+// returns immediately. The error is returned unwrapped so each caller
+// keeps its own wrapping.
+func CreateWithPetnameFallback(
+	firstChoice string,
+	create func(name string) (*Player, error),
+) (*Player, error) {
+	const maxPetnameAttempts = 5
+
+	name := firstChoice
+	var err error
+	for range maxPetnameAttempts + 1 {
+		var player *Player
+		player, err = create(name)
+		if err == nil {
+			return player, nil
+		}
+		if !errors.Is(err, ErrDisplayNameTaken) {
+			return nil, err
+		}
+		name = GeneratePetname()
+	}
+
+	return nil, err
 }
 
 // pickRandom returns a uniformly-random element from words. Falls
