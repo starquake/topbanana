@@ -12,6 +12,7 @@ import (
 
 	. "github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/demo"
@@ -590,6 +591,218 @@ func TestSeedDemo_EmptyArchiveDir_ReturnsError(t *testing.T) {
 	err := SeedDemo(t.Context(), getenv, &stderr)
 	if got, want := err, demo.ErrNoArchives; !errors.Is(got, want) {
 		t.Errorf("SeedDemo err = %v, want %v", got, want)
+	}
+}
+
+// openMigratedPlayerStore opens a fresh connection to the migrated DB at dbURI
+// and returns a concrete PlayerStore, the type bootstrapInitialAdmin takes.
+func openMigratedPlayerStore(t *testing.T, dbURI string) *store.PlayerStore {
+	t.Helper()
+
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	if err := database.Migrate(conn); err != nil {
+		t.Fatalf("Migrate err = %v, want nil", err)
+	}
+
+	return store.NewPlayerStore(conn, slog.Default())
+}
+
+// countPlayers returns the total number of rows in the players table, used to
+// assert bootstrapInitialAdmin did not insert when it should have skipped.
+func countPlayers(t *testing.T, dbURI string) int {
+	t.Helper()
+
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	var n int
+	if err := conn.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM players").Scan(&n); err != nil {
+		t.Fatalf("count players err = %v, want nil", err)
+	}
+
+	return n
+}
+
+// discardLogger is a slog logger that drops output, for bootstrap tests that
+// assert on state and return values rather than log output.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
+
+func TestBootstrapInitialAdmin_NoAdmin_CreatesVerifiedAdmin(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const (
+		email    = "founder@example.test"
+		password = "correct-horse-battery"
+	)
+	cfg := &config.Config{InitialAdminEmail: email, InitialAdminPassword: password}
+	if err := BootstrapInitialAdmin(t.Context(), cfg, openMigratedPlayerStore(t, dbURI), discardLogger()); err != nil {
+		t.Fatalf("BootstrapInitialAdmin err = %v, want nil", err)
+	}
+
+	p := fetchPlayerByEmail(t, dbURI, email)
+	if got, want := p.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+	if !p.IsEmailVerified() {
+		t.Error("IsEmailVerified() = false, want true")
+	}
+	if err := auth.CheckPassword(p.PasswordHash, password); err != nil {
+		t.Errorf("CheckPassword(password) err = %v, want nil", err)
+	}
+}
+
+func TestBootstrapInitialAdmin_AdminPresent_NoNewAdmin(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+	// The first credentialled registrant becomes admin automatically, so the DB
+	// now holds one admin; bootstrap must be a no-op against it.
+	seedPlayer(t, dbURI, "alice")
+
+	before := countPlayers(t, dbURI)
+	cfg := &config.Config{InitialAdminEmail: "founder@example.test", InitialAdminPassword: "correct-horse-battery"}
+	if err := BootstrapInitialAdmin(t.Context(), cfg, openMigratedPlayerStore(t, dbURI), discardLogger()); err != nil {
+		t.Fatalf("BootstrapInitialAdmin err = %v, want nil", err)
+	}
+
+	if got, want := countPlayers(t, dbURI), before; got != want {
+		t.Errorf("player count after bootstrap = %d, want %d (no new row)", got, want)
+	}
+}
+
+func TestBootstrapInitialAdmin_EmailInUse_SkipsWithoutError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	// Insert a non-admin owning the target email while no admin exists, so the
+	// bootstrap reaches the "email already in use" skip branch.
+	const email = "founder@example.test"
+	seedNonAdminWithEmail(t, dbURI, "founder", email)
+
+	before := countPlayers(t, dbURI)
+	cfg := &config.Config{InitialAdminEmail: email, InitialAdminPassword: "correct-horse-battery"}
+	players := openMigratedPlayerStore(t, dbURI)
+	if err := BootstrapInitialAdmin(t.Context(), cfg, players, discardLogger()); err != nil {
+		t.Fatalf("BootstrapInitialAdmin err = %v, want nil", err)
+	}
+
+	if got, want := countPlayers(t, dbURI), before; got != want {
+		t.Errorf("player count after bootstrap = %d, want %d (no new row)", got, want)
+	}
+	hasAdmin, err := players.HasAnyAdmin(t.Context())
+	if err != nil {
+		t.Fatalf("HasAnyAdmin err = %v, want nil", err)
+	}
+	if hasAdmin {
+		t.Error("HasAnyAdmin() = true, want false (bootstrap should not have promoted)")
+	}
+}
+
+func TestBootstrapInitialAdmin_PasswordTooShort_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	cfg := &config.Config{InitialAdminEmail: "founder@example.test", InitialAdminPassword: "short"}
+	err := BootstrapInitialAdmin(t.Context(), cfg, openMigratedPlayerStore(t, dbURI), discardLogger())
+	if got, want := err, ErrInitialAdminPasswordTooShort; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapInitialAdmin_PasswordTooLong_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	tooLong := strings.Repeat("a", auth.MaxPasswordLength+1)
+	cfg := &config.Config{InitialAdminEmail: "founder@example.test", InitialAdminPassword: tooLong}
+	err := BootstrapInitialAdmin(t.Context(), cfg, openMigratedPlayerStore(t, dbURI), discardLogger())
+	if got, want := err, ErrInitialAdminPasswordTooLong; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapInitialAdmin_MalformedEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	cfg := &config.Config{InitialAdminEmail: "admin@localhost", InitialAdminPassword: "correct-horse-battery"}
+	err := BootstrapInitialAdmin(t.Context(), cfg, openMigratedPlayerStore(t, dbURI), discardLogger())
+	if got, want := err, ErrInitialAdminInvalidEmail; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapInitialAdmin_EmptyEnv_NoOp(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	before := countPlayers(t, dbURI)
+	players := openMigratedPlayerStore(t, dbURI)
+	cfg := &config.Config{}
+	if err := BootstrapInitialAdmin(t.Context(), cfg, players, discardLogger()); err != nil {
+		t.Fatalf("BootstrapInitialAdmin err = %v, want nil", err)
+	}
+
+	if got, want := countPlayers(t, dbURI), before; got != want {
+		t.Errorf("player count after empty-env bootstrap = %d, want %d (no new row)", got, want)
+	}
+}
+
+// seedNonAdminWithEmail inserts a player row holding the given email at the
+// player tier without any admin present, the state the "email already in use"
+// skip branch needs. A normal registration would auto-promote the first
+// credentialled row to admin, which would short-circuit before that branch.
+func seedNonAdminWithEmail(t *testing.T, dbURI, displayName, email string) {
+	t.Helper()
+
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	if err := database.Migrate(conn); err != nil {
+		t.Fatalf("Migrate err = %v, want nil", err)
+	}
+	if _, err := conn.ExecContext(
+		t.Context(),
+		"INSERT INTO players (display_name, email, role) VALUES (?, ?, ?)",
+		displayName, email, auth.RolePlayer,
+	); err != nil {
+		t.Fatalf("insert non-admin err = %v, want nil", err)
 	}
 }
 

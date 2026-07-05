@@ -597,6 +597,57 @@ func TestParse_DemoMode(t *testing.T) {
 	})
 }
 
+func TestParse_InitialAdmin(t *testing.T) {
+	t.Parallel()
+
+	getenv := func(key string) string {
+		switch key {
+		case "INITIAL_ADMIN_EMAIL":
+			return "founder@example.test"
+		case "INITIAL_ADMIN_PASSWORD":
+			return "correct-horse-battery"
+		case "APP_ENV":
+			return "development"
+		}
+
+		return ""
+	}
+
+	c, err := Parse(getenv)
+	if err != nil {
+		t.Fatalf("Parse() err = %v, want nil", err)
+	}
+	if got, want := c.InitialAdminEmail, "founder@example.test"; got != want {
+		t.Errorf("InitialAdminEmail = %q, want %q", got, want)
+	}
+	if got, want := c.InitialAdminPassword, "correct-horse-battery"; got != want {
+		t.Errorf("InitialAdminPassword = %q, want %q", got, want)
+	}
+}
+
+func TestParse_InitialAdmin_UnsetDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+
+	getenv := func(key string) string {
+		if key == "APP_ENV" {
+			return "development"
+		}
+
+		return ""
+	}
+
+	c, err := Parse(getenv)
+	if err != nil {
+		t.Fatalf("Parse() err = %v, want nil", err)
+	}
+	if got, want := c.InitialAdminEmail, ""; got != want {
+		t.Errorf("InitialAdminEmail = %q, want %q", got, want)
+	}
+	if got, want := c.InitialAdminPassword, ""; got != want {
+		t.Errorf("InitialAdminPassword = %q, want %q", got, want)
+	}
+}
+
 func TestParse_DemoSeedArchiveDir(t *testing.T) {
 	t.Parallel()
 

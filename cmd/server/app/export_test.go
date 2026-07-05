@@ -32,6 +32,12 @@ var (
 	ErrCreateAdminEmailExists = errCreateAdminEmailExists
 	// ErrCreateAdminInvalidEmail re-exports errCreateAdminInvalidEmail for tests.
 	ErrCreateAdminInvalidEmail = errCreateAdminInvalidEmail
+	// ErrInitialAdminInvalidEmail re-exports errInitialAdminInvalidEmail for tests.
+	ErrInitialAdminInvalidEmail = errInitialAdminInvalidEmail
+	// ErrInitialAdminPasswordTooShort re-exports errInitialAdminPasswordTooShort for tests.
+	ErrInitialAdminPasswordTooShort = errInitialAdminPasswordTooShort
+	// ErrInitialAdminPasswordTooLong re-exports errInitialAdminPasswordTooLong for tests.
+	ErrInitialAdminPasswordTooLong = errInitialAdminPasswordTooLong
 	// ErrSeedDemoDisabled re-exports errSeedDemoDisabled for tests.
 	ErrSeedDemoDisabled = errSeedDemoDisabled
 	// ErrSeedDemoArchiveNotSet re-exports errSeedDemoArchiveNotSet for tests.
@@ -39,6 +45,11 @@ var (
 	// ErrEmptyMediaDir re-exports errEmptyMediaDir for tests.
 	ErrEmptyMediaDir = errEmptyMediaDir
 )
+
+// BootstrapInitialAdmin exposes the unexported first-boot admin bootstrap so
+// the external app_test package can pin its create / skip / validate behaviour
+// (#1206) without standing up the full server.
+var BootstrapInitialAdmin = bootstrapInitialAdmin
 
 // MkMediaDir exposes the pure media-directory creation helper so the external
 // app_test package can pin that it creates the directory and rejects an empty

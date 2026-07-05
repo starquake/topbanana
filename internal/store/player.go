@@ -1010,6 +1010,18 @@ func classifyDemoteRefusal(ctx context.Context, q *db.Queries, playerID int64) e
 	return auth.ErrPlayerNotFound
 }
 
+// HasAnyAdmin reports whether any player currently holds the admin role.
+// Backs the first-boot bootstrap that mints an admin from env vars only when
+// none exists yet.
+func (s *PlayerStore) HasAnyAdmin(ctx context.Context) (bool, error) {
+	exists, err := s.q.HasAnyAdmin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for any admin: %w", err)
+	}
+
+	return exists, nil
+}
+
 // ListAdmins returns every current Admin ordered by displayName (#320/#538).
 // Empty slice when no Admin exists yet.
 func (s *PlayerStore) ListAdmins(ctx context.Context) ([]*auth.AdminEntry, error) {

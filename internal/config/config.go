@@ -294,6 +294,11 @@ type Config struct {
 	// SeedDemo, which gates on DemoMode.
 	DemoSeedArchiveDir string
 
+	// InitialAdminEmail and InitialAdminPassword bootstrap the first admin on
+	// first boot; empty disables it. See .env.example for the full behaviour.
+	InitialAdminEmail    string
+	InitialAdminPassword string
+
 	// RevealDelay overrides the per-question reveal beat (#247). Zero means
 	// "use the built-in default" (3 s). Parsed from the REVEAL_DELAY env var
 	// via time.ParseDuration; e2e and load-test deployments shrink this to a
@@ -660,6 +665,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
 
 	c.DemoSeedArchiveDir = getenv("DEMO_SEED_ARCHIVE_DIR")
+
+	c.InitialAdminEmail = getenv("INITIAL_ADMIN_EMAIL")
+	c.InitialAdminPassword = getenv("INITIAL_ADMIN_PASSWORD")
 
 	applyDemoMode(&c)
 

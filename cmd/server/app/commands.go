@@ -390,6 +390,96 @@ func displayNameFromEmail(email string) string {
 	return local
 }
 
+// errInitialAdminInvalidEmail is wrapped by [bootstrapInitialAdmin] when
+// INITIAL_ADMIN_EMAIL fails the [auth.LooksLikeEmail] shape check, so a
+// misconfigured operator fails startup instead of minting a broken admin.
+var errInitialAdminInvalidEmail = errors.New("INITIAL_ADMIN_EMAIL is not a valid email")
+
+// errInitialAdminPasswordTooShort is wrapped by [bootstrapInitialAdmin] when
+// INITIAL_ADMIN_PASSWORD is below [auth.MinPasswordLength].
+var errInitialAdminPasswordTooShort = errors.New("INITIAL_ADMIN_PASSWORD is too short")
+
+// errInitialAdminPasswordTooLong is wrapped by [bootstrapInitialAdmin] when
+// INITIAL_ADMIN_PASSWORD exceeds [auth.MaxPasswordLength] (bcrypt's 72-byte
+// limit), so the operator sees a clear message instead of a cryptic hash error.
+var errInitialAdminPasswordTooLong = errors.New("INITIAL_ADMIN_PASSWORD is too long")
+
+// bootstrapWrap is the error-wrap prefix shared by [bootstrapInitialAdmin]
+// failure paths so revive's add-constant linter stays quiet.
+const bootstrapWrap = "bootstrap initial admin: %w"
+
+// bootstrapInitialAdmin mints a verified admin from INITIAL_ADMIN_EMAIL /
+// INITIAL_ADMIN_PASSWORD on first boot, and is a no-op once any admin exists.
+func bootstrapInitialAdmin(
+	ctx context.Context, cfg *config.Config, players *store.PlayerStore, logger *slog.Logger,
+) error {
+	email := strings.ToLower(strings.TrimSpace(cfg.InitialAdminEmail))
+	password := cfg.InitialAdminPassword
+	if email == "" || password == "" {
+		return nil
+	}
+
+	hasAdmin, err := players.HasAnyAdmin(ctx)
+	if err != nil {
+		return fmt.Errorf(bootstrapWrap, err)
+	}
+	if hasAdmin {
+		logger.InfoContext(ctx, "initial admin bootstrap skipped: an admin already exists")
+
+		return nil
+	}
+
+	if !auth.LooksLikeEmail(email) {
+		return fmt.Errorf("bootstrap initial admin: %w (%q)", errInitialAdminInvalidEmail, email)
+	}
+	if len(password) < auth.MinPasswordLength {
+		return fmt.Errorf(
+			"bootstrap initial admin: %w (need at least %d characters)",
+			errInitialAdminPasswordTooShort, auth.MinPasswordLength,
+		)
+	}
+	if len(password) > auth.MaxPasswordLength {
+		return fmt.Errorf(
+			"bootstrap initial admin: %w (bcrypt accepts at most %d bytes)",
+			errInitialAdminPasswordTooLong, auth.MaxPasswordLength,
+		)
+	}
+
+	switch _, lookupErr := players.GetPlayerByEmail(ctx, email); {
+	case lookupErr == nil:
+		logger.WarnContext(ctx, "initial admin bootstrap skipped: email already in use",
+			slog.String(emailKey, email))
+
+		return nil
+	case !errors.Is(lookupErr, auth.ErrPlayerNotFound):
+		return fmt.Errorf(bootstrapWrap, lookupErr)
+	}
+
+	hashed, err := auth.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("bootstrap initial admin: hash password: %w", err)
+	}
+
+	player, err := createVerifiedAdmin(ctx, players, email, hashed)
+	if err != nil {
+		// Another instance won the race between our HasAnyAdmin check and this
+		// insert; the admin now exists, so skip rather than fail this boot.
+		if errors.Is(err, auth.ErrEmailTaken) {
+			logger.InfoContext(ctx, "initial admin already created concurrently, skipping",
+				slog.String(emailKey, email))
+
+			return nil
+		}
+
+		return fmt.Errorf(bootstrapWrap, err)
+	}
+
+	logger.InfoContext(ctx, "initial admin created",
+		slog.String(emailKey, email), slog.String("display_name", player.DisplayName))
+
+	return nil
+}
+
 // SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz set)
 // against the configured database. It exits early with an error when demo mode
 // is off (Config.DemoMode) so it cannot accidentally seed a non-demo DB. Every
