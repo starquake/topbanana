@@ -31,9 +31,10 @@ https://github.com/user-attachments/assets/cb8c8f0b-d2e3-40e7-9753-fa029fd1b20a
 
 A pre-built image is published to the GitHub Container Registry, so you can run Top Banana! without cloning the repo:
 
-- `ghcr.io/starquake/topbanana:edge` — the latest `main`.
-- `ghcr.io/starquake/topbanana:2026.7` / `:2026.7.1` — release tags (major.minor and exact version).
-- `ghcr.io/starquake/topbanana:sha-<commit>` — a specific build, pinned.
+- `ghcr.io/starquake/topbanana:latest` — the newest release (recommended).
+- `ghcr.io/starquake/topbanana:2026.7` / `:2026.7.1` — a specific release, pinned to the major.minor or the exact version.
+- `ghcr.io/starquake/topbanana:edge` — the latest `main`; may include changes not yet in a release.
+- `ghcr.io/starquake/topbanana:sha-<commit>` — an exact build.
 
 ```bash
 docker run -d --name topbanana \
@@ -42,7 +43,7 @@ docker run -d --name topbanana \
   -e SESSION_KEY="$(openssl rand -hex 32)" \
   -e REGISTRATION_ENABLED=true \
   -e ADMIN_EMAILS=you@example.com \
-  ghcr.io/starquake/topbanana:edge
+  ghcr.io/starquake/topbanana:latest
 ```
 
 The server listens on `http://localhost:8080`. Verify it's up:
@@ -61,7 +62,7 @@ To run the same image with Compose, save this as `docker-compose.yml`:
 ```yaml
 services:
   app:
-    image: ghcr.io/starquake/topbanana:edge
+    image: ghcr.io/starquake/topbanana:latest
     ports:
       - "8080:8080"
     environment:
@@ -129,7 +130,7 @@ Registration is closed by default. Two ways to create the first admin:
 
 The admin footer and the public `GET /version` endpoint report which release and commit are running. There is nothing to set: the release version is baked in from the committed `VERSION` file at build time, and the commit comes from the build. A `production` deploy shows the release (`v2026.6.0 (abc1234)`); a development build shows the commit (`development (abc1234)`).
 
-To self-host **production** with an accurate release number, run a release-tagged image (`ghcr.io/starquake/topbanana:2026.7.1`) rather than `:edge`. An `:edge` image run as production shows the last release's `VERSION` alongside its newer commit, because `VERSION` only changes when a release is cut — the commit is the disambiguator.
+To self-host **production** with an accurate release number, run a release image (`:latest` or a pinned `:2026.7.1`) rather than `:edge`. An `:edge` image run as production shows the last release's `VERSION` alongside its newer commit, because `VERSION` only changes when a release is cut — the commit is the disambiguator.
 
 ## Troubleshooting
 
