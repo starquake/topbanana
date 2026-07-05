@@ -13,6 +13,7 @@ import (
 
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -56,6 +57,17 @@ func postRoleWith(
 	sender auth.VerifyEmailSender, mailConfigured bool,
 ) (*httptest.ResponseRecorder, auth.SignedFlashRead) {
 	t.Helper()
+
+	return postRoleWithLang(t, env, targetID, form, sender, mailConfigured, "")
+}
+
+// postRoleWithLang is postRoleWith with an explicit UI language: a
+// non-empty lang sets the lang cookie so the handler resolves that locale.
+func postRoleWithLang(
+	t *testing.T, env *adminEnv, targetID int64, form url.Values,
+	sender auth.VerifyEmailSender, mailConfigured bool, lang string,
+) (*httptest.ResponseRecorder, auth.SignedFlashRead) {
+	t.Helper()
 	flash := auth.NewSignedFlash([]byte("test-key-test-key-test-key-32byt"), false, "flash", "/admin")
 	handler := HandlePlayerSetRole(slog.New(slog.DiscardHandler), env.admin, sender, mailConfigured, flash, nil)
 
@@ -64,6 +76,9 @@ func postRoleWith(
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if lang != "" {
+		req.AddCookie(&http.Cookie{Name: locale.CookieName, Value: lang})
+	}
 	req.SetPathValue("playerID", strconv.FormatInt(targetID, 10))
 	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
 
@@ -166,6 +181,57 @@ func TestHandlePlayerSetRole_NotifyVerifiedSendsEmail(t *testing.T) {
 
 	if got, want := flash.Notice, "A notification email was sent to the player."; !strings.Contains(got, want) {
 		t.Errorf("flash.Notice = %q, should contain %q", got, want)
+	}
+}
+
+// TestHandlePlayerSetRole_NotifyDutch pins that the role-change notice is
+// localized to the acting admin's request locale, including the role word.
+func TestHandlePlayerSetRole_NotifyDutch(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	target := env.seedVerifiedNonAdminPlayer(t, "notify-nl-target", "notify-nl@example.test")
+	spy := newRoleMailSpy()
+
+	form := url.Values{"role": {auth.RoleHost}, "notify_email": {"on"}}
+	rec, _ := postRoleWithLang(t, env, target, form, spy, true, locale.LocaleNL)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+
+	select {
+	case msg := <-spy.sent:
+		if got, want := msg.Subject, "De rol van je Top Banana!-account is gewijzigd"; got != want {
+			t.Errorf("msg.Subject = %q, want %q", got, want)
+		}
+		if got, want := msg.Body, "Een beheerder heeft de rol"; !strings.Contains(got, want) {
+			t.Errorf("msg.Body = %q, should contain %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the role-change notice to dispatch")
+	}
+}
+
+// TestHandlePlayerSetRole_NotifyAdminRoleDutch pins the Dutch role word for
+// an admin promotion, exercising the localizedRoleLabel admin branch.
+func TestHandlePlayerSetRole_NotifyAdminRoleDutch(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	target := env.seedVerifiedNonAdminPlayer(t, "promote-nl-target", "promote-nl@example.test")
+	spy := newRoleMailSpy()
+
+	form := url.Values{"role": {auth.RoleAdmin}, "notify_email": {"on"}}
+	postRoleWithLang(t, env, target, form, spy, true, locale.LocaleNL)
+
+	select {
+	case msg := <-spy.sent:
+		if got, want := msg.Body, "gewijzigd naar beheerder"; !strings.Contains(got, want) {
+			t.Errorf("msg.Body = %q, should contain %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the role-change notice to dispatch")
 	}
 }
 
