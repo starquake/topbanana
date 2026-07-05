@@ -353,10 +353,8 @@ const (
 // so the collision response keeps the same timing as the success path. A nil
 // Mailer (unit tests) skips the send; failures are logged, never surfaced.
 //
-// This notice goes to the existing account owner but is triggered by an
-// unauthenticated submitter who controls their own request locale, so it is not
-// localized to that locale; English is the safe default until a stored recipient
-// locale exists.
+// Uses English, not the submitter's request locale: the submitter is
+// unauthenticated and does not own the recipient mailbox.
 func dispatchRegisterExisting(
 	ctx context.Context,
 	logger *slog.Logger,

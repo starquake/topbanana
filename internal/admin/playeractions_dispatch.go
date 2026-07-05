@@ -17,7 +17,7 @@ import (
 // when email is not configured (nil tokens/sender or empty baseURL) so
 // the caller can skip the audit row and the success notice.
 //
-//nolint:revive // argument-limit: loc is message content alongside recipient; the rest is the irreducible mail plumbing.
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func dispatchAdminResendVerification(
 	ctx context.Context,
 	logger *slog.Logger,

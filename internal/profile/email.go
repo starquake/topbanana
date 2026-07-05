@@ -24,9 +24,8 @@ const (
 	EmailChangeFlashCookiePath = "/profile/email"
 )
 
-// Email-change-notice catalog keys. The notice goes to the account's
-// current address (the authenticated user's own mailbox), so the
-// triggering request's locale is the right one.
+// Email-change-notice catalog keys; the notice goes to the user's own
+// mailbox, so the triggering request's locale is the right one.
 const (
 	emailChangeNoticeSubjectKey locale.MessageID = "email.emailChangeNotice.subject"
 	emailChangeNoticeBodyKey    locale.MessageID = "email.emailChangeNotice.body"

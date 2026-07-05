@@ -17,9 +17,7 @@ import (
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
-// Verify-email catalog keys. The register-time and email-change variants
-// carry separate subjects and bodies so a recipient who did not initiate
-// an email change can tell the two flows apart.
+// Verify-email catalog keys.
 const (
 	emailVerifySubjectKey       locale.MessageID = "email.verify.subject"
 	emailVerifyBodyKey          locale.MessageID = "email.verify.body"
@@ -151,7 +149,7 @@ func SendVerifyEmail(
 // the same plumbing. An empty pendingEmail mints a register-time row
 // that behaves identically to today's flow.
 //
-//nolint:revive // argument-limit: loc is message content alongside recipient; the rest is the irreducible mail plumbing.
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendVerifyEmailWithPending(
 	ctx context.Context,
 	tokens VerifyTokenStore,
@@ -190,7 +188,7 @@ func SendVerifyEmailWithPending(
 // so an SMTP outage or a mis-typed recipient does not block the
 // signup from completing; the user can retry via the resend flow.
 //
-//nolint:revive // argument-limit: loc is message content alongside recipient; the rest is the irreducible mail plumbing.
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendVerifyEmailBestEffort(
 	ctx context.Context,
 	logger *slog.Logger,

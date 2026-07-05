@@ -135,7 +135,7 @@ func HashInviteToken(raw string) string {
 // row is still committed so a future resend (slice 2) can run
 // independently of SMTP availability.
 //
-//nolint:revive // argument-limit: loc is message content alongside recipient; the rest is the irreducible mail plumbing.
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendInviteEmail(
 	ctx context.Context,
 	invites InviteStore,
