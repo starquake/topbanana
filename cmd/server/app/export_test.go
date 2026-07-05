@@ -26,8 +26,6 @@ var (
 	ErrSeedDemoDisabled = errSeedDemoDisabled
 	// ErrSeedDemoArchiveNotSet re-exports errSeedDemoArchiveNotSet for tests.
 	ErrSeedDemoArchiveNotSet = errSeedDemoArchiveNotSet
-	// ErrSeedDemoNoArchives re-exports errSeedDemoNoArchives for tests.
-	ErrSeedDemoNoArchives = errSeedDemoNoArchives
 	// ErrEmptyMediaDir re-exports errEmptyMediaDir for tests.
 	ErrEmptyMediaDir = errEmptyMediaDir
 )

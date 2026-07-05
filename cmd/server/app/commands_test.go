@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -387,7 +388,7 @@ func TestSeedDemo_EmptyArchiveDir_ReturnsError(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	err := SeedDemo(t.Context(), getenv, &stderr)
-	if got, want := err, ErrSeedDemoNoArchives; !errors.Is(got, want) {
+	if got, want := err, demo.ErrNoArchives; !errors.Is(got, want) {
 		t.Errorf("SeedDemo err = %v, want %v", got, want)
 	}
 }

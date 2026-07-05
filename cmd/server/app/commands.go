@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -127,10 +126,6 @@ var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
 // empty; defined at package scope so callers can match it via [errors.Is].
 var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE_DIR is not set")
 
-// errSeedDemoNoArchives is returned by SeedDemo when DEMO_SEED_ARCHIVE_DIR holds
-// no .zip files, so a misconfigured mount fails fast rather than seeding nothing.
-var errSeedDemoNoArchives = errors.New("no demo archives (.zip) found in DEMO_SEED_ARCHIVE_DIR")
-
 // seedDemoWrap is the error-wrap prefix used by SeedDemo failure paths so the
 // messages stay consistent and revive's add-constant linter stays quiet.
 const seedDemoWrap = "seed-demo: %w"
@@ -240,29 +235,22 @@ func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer)
 }
 
 // readDemoArchives reads every *.zip in dir into memory, one byte slice per
-// archive, sorted by filename so the demo set restores in a stable order
-// ([os.ReadDir] returns entries sorted by name). It errors if the directory
-// holds no .zip files so a misconfigured mount fails fast.
+// archive, in the sorted-filename order [demo.ArchivePaths] returns. It errors
+// with [demo.ErrNoArchives] when the directory holds no .zip files so a
+// misconfigured mount fails fast.
 func readDemoArchives(dir string) ([][]byte, error) {
-	entries, err := os.ReadDir(dir)
+	paths, err := demo.ArchivePaths(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read archive dir: %w", err)
+		return nil, fmt.Errorf("scan demo archives: %w", err)
 	}
 
-	var archives [][]byte
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".zip") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
+	archives := make([][]byte, 0, len(paths))
+	for _, path := range paths {
 		raw, err := os.ReadFile(path) //nolint:gosec // operator-provided dir from a trusted env var
 		if err != nil {
-			return nil, fmt.Errorf("read archive %q: %w", entry.Name(), err)
+			return nil, fmt.Errorf("read archive %q: %w", path, err)
 		}
 		archives = append(archives, raw)
-	}
-	if len(archives) == 0 {
-		return nil, errSeedDemoNoArchives
 	}
 
 	return archives, nil

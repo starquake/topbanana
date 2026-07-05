@@ -11,6 +11,7 @@ import (
 	. "github.com/starquake/topbanana/cmd/seed-dev"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -448,8 +449,8 @@ func TestSeedDemoArchiveSet(t *testing.T) {
 		if qz == nil {
 			t.Fatal("created quiz = nil, want a quiz per archive")
 		}
-		if !qz.Published {
-			t.Errorf("demo quiz %q Published = false, want true", qz.Title)
+		if got, want := qz.Published, true; got != want {
+			t.Errorf("demo quiz %q Published = %v, want %v", qz.Title, got, want)
 		}
 		if _, dup := slugs[qz.Slug]; dup {
 			t.Errorf("duplicate slug %q across demo archives", qz.Slug)
@@ -472,7 +473,7 @@ func TestOpenDemoArchivesEmptyDir(t *testing.T) {
 	t.Parallel()
 
 	_, err := ExportOpenDemoArchives(t.TempDir())
-	if got, want := err, ErrExportNoDemoArchives; !errors.Is(got, want) {
+	if got, want := err, demo.ErrNoArchives; !errors.Is(got, want) {
 		t.Errorf("ExportOpenDemoArchives() err = %v, want %v", got, want)
 	}
 }

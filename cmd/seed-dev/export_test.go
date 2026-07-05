@@ -16,7 +16,6 @@ var (
 	ErrExportFixtureQuestionsOrRounds  = errFixtureQuestionsOrRounds
 	ErrExportFixtureRoundTitleRequired = errFixtureRoundTitleRequired
 	ErrExportFixtureRoundNoQuestions   = errFixtureRoundNoQuestions
-	ErrExportNoDemoArchives            = errNoDemoArchives
 )
 
 // ExportSampleAudio re-exports the bundled sample clip so a test can assert the

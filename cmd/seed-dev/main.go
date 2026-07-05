@@ -24,8 +24,6 @@ import (
 	"log/slog"
 	mrand "math/rand/v2"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gosimple/slug"
@@ -35,6 +33,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
+	"github.com/starquake/topbanana/internal/demo"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -283,33 +282,23 @@ func loadSeedSource(cfg seedConfig) (seedSource, error) {
 	return seedSource{fixtures: fixtures}, nil
 }
 
-// errNoDemoArchives is returned when the demo archive directory holds no .zip
-// files, so a wrong -demo-archive-dir fails fast rather than seeding nothing.
-var errNoDemoArchives = errors.New("no demo archives (.zip) found in directory")
-
-// openDemoArchives opens every *.zip in dir as a zip reader, in filename order
-// ([os.ReadDir] returns entries sorted by name) so the demo set restores
+// openDemoArchives opens every *.zip in dir as a zip reader, in the
+// sorted-filename order [demo.ArchivePaths] returns so the demo set restores
 // deterministically. A bad directory or zip surfaces here, before any DB side
 // effects.
 func openDemoArchives(dir string) ([]*zip.Reader, error) {
-	entries, err := os.ReadDir(dir)
+	paths, err := demo.ArchivePaths(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read demo archive dir: %w", err)
+		return nil, fmt.Errorf("scan demo archives: %w", err)
 	}
 
-	readers := make([]*zip.Reader, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".zip") {
-			continue
-		}
-		zr, err := openDemoArchive(filepath.Join(dir, entry.Name()))
+	readers := make([]*zip.Reader, 0, len(paths))
+	for _, path := range paths {
+		zr, err := openDemoArchive(path)
 		if err != nil {
 			return nil, err
 		}
 		readers = append(readers, zr)
-	}
-	if len(readers) == 0 {
-		return nil, fmt.Errorf("%w: %q", errNoDemoArchives, dir)
 	}
 
 	return readers, nil
