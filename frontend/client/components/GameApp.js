@@ -237,7 +237,22 @@ export class GameApp {
     // once the quiz list is in hand. Split out of init so the Retry path
     // (#1120) can re-run it after a recovered load.
     async resolveStartState() {
-        const deepLinked = this.findDeepLinkedQuiz();
+        let deepLinked;
+        try {
+            deepLinked = await this.resolveDeepLinkedQuiz();
+        } catch (err) {
+            // A transient / non-404 meta fetch must not permanently flag the
+            // quiz unavailable; surface the retryable quiz-list error so the
+            // existing Retry affordance re-runs resolution. The resume probe
+            // still runs off the URL slugID (independent of the failed meta
+            // fetch), so a mid-game reload resumes instead of dropping onto the
+            // Retry screen (#1214).
+            console.warn('deep-link quiz meta fetch failed', err);
+            this.quizzesError = true;
+            await this.resumeDeepLinkInProgress();
+
+            return;
+        }
         if (deepLinked) {
             this.deepLinkedQuiz = deepLinked;
             this.selectedQuizId = deepLinked.id;
@@ -254,43 +269,53 @@ export class GameApp {
         // hides the Start button + leaderboard until the player picks
         // a quiz via /quizzes.
         const existing = await this.checkAlreadyPlayed();
-        // Resume on reload (#310): when the player is mid-game (e.g. a
-        // mobile pull-to-refresh bounces them off the question screen),
-        // skip the start screen and jump straight back into the
-        // question. /questions/next is idempotent while the current
-        // question's answer window is open, so the same question comes
-        // back with the same StartedAt/ExpiredAt anchor — the
-        // countdown picks up where it left off rather than restarting.
-        // The `=== false` form fails closed if the server ever omits
-        // the field (rather than silently resuming on an unknown
-        // game state).
-        if (existing && existing.completed === false) {
-            this.gameId = existing.gameId;
-            // Hydrate the running-total chip from the server before
-            // rendering the resumed question so the HUD picks up the
-            // points already banked instead of starting from zero.
-            // Best-effort: a failed fetch just leaves the chip at 0,
-            // which is the pre-fix behaviour.
-            await this.hydrateScoreFromResults();
-            // Resume preloads non-blocking and without the loading screen: the
-            // resumed question must paint at once (its window is already draining).
-            // With no Start gesture the clip surfaces the manual play control until
-            // tapped -- the expected mid-game-reload fallback (#1088).
-            void this.preloadGameAudio({ showLoading: false });
-            try {
-                await this.nextQuestion();
-            } catch (err) {
-                // Roll back so the start screen renders and the player
-                // can retry via the Start button — without this, a
-                // transient 5xx on the resume's /questions/next leaves
-                // the SPA in a blank half-loaded state with no
-                // affordance to recover.
-                console.error('resume on init failed', err);
-                this.gameId = null;
-                this.question = null;
-                this.roundItem = null;
-            }
+        await this.resumeInProgressGame(existing);
+    }
+
+    // resumeInProgressGame jumps back into a mid-game reload (#310) from the
+    // resume-probe payload: mobile pull-to-refresh bounces the player off the
+    // question screen, so skip the start screen and reload the current question.
+    // /questions/next is idempotent while the answer window is open, so the same
+    // question returns with the same StartedAt/ExpiredAt anchor and the countdown
+    // picks up where it left off. The `=== false` form fails closed if the server
+    // ever omits `completed`. A failed first fetch rolls back to the start screen
+    // so a transient 5xx can't strand the player on a blank half-loaded view (#1188).
+    async resumeInProgressGame(existing) {
+        if (!existing || existing.completed !== false) return;
+        this.gameId = existing.gameId;
+        // Hydrate the running-total chip before rendering so the HUD picks up
+        // banked points instead of starting from zero; best-effort (#1088).
+        await this.hydrateScoreFromResults();
+        void this.preloadGameAudio({ showLoading: false });
+        try {
+            await this.nextQuestion();
+        } catch (err) {
+            console.error('resume on init failed', err);
+            this.gameId = null;
+            this.question = null;
+            this.roundItem = null;
         }
+    }
+
+    // resumeDeepLinkInProgress runs the resume probe for a deep link whose meta
+    // fetch failed transiently (#1214). The my-game endpoint resolves by the URL
+    // slugID, so an in-progress game still resumes even though the quiz metadata
+    // is not in hand; a not-mid-game probe leaves the retryable error standing.
+    async resumeDeepLinkInProgress() {
+        if (!this.hasDeepLinkPath()) return;
+        const slugId = this.deepLinkSlugId();
+        let existing;
+        try {
+            existing = await gameService.getMyGameForQuiz(slugId);
+        } catch (err) {
+            console.warn('deep-link resume probe failed', err);
+
+            return;
+        }
+        if (!existing || existing.completed !== false) return;
+        // Set quizSlugId so the finish leaderboard fetch (keyed on it) resolves.
+        this.quizSlugId = slugId;
+        await this.resumeInProgressGame(existing);
     }
 
     // hydrateScoreFromResults pulls the player's accumulated points
@@ -418,6 +443,24 @@ export class GameApp {
         if (!match) return null;
         const id = parseInt(match[1], 10);
         return this.quizzes.find(q => q.id === id) || null;
+    }
+
+    // resolveDeepLinkedQuiz returns the quiz named by a /play/<slug>-<id> deep
+    // link, falling back to the single-quiz metadata endpoint when it is absent
+    // from the public list so a private or unlisted quiz still resolves (#1214).
+    // A 404 (missing / not permitted / not solo-playable) returns null so the
+    // caller shows the "not available" note; a transient failure throws so the
+    // caller can route it through the retryable path rather than pinning the
+    // quiz unavailable. The resolved row is appended to this.quizzes so
+    // slugIdFor / selectedQuiz / share treat it like any listed quiz.
+    async resolveDeepLinkedQuiz() {
+        const inList = this.findDeepLinkedQuiz();
+        if (inList) return inList;
+        if (!this.hasDeepLinkPath()) return null;
+        const meta = await quizService.getQuizMeta(this.deepLinkSlugId());
+        if (!meta) return null;
+        this.quizzes = [...this.quizzes, meta];
+        return meta;
     }
 
     // hasDeepLinkPath reports whether the current URL is a /play/<slug>-<id>
