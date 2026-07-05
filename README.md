@@ -98,6 +98,8 @@ Building the image from source instead (and the bundled Mailpit mail catcher for
 
 Top Banana! is configured through environment variables. Sensible defaults apply in development; production deployments must set at least `SESSION_KEY` and `DB_URI` (the Docker image already sets `DB_URI`).
 
+In a Compose `environment:` list, write values **unquoted** (`- BASE_URL=https://quiz.example.com`). The `- KEY="value"` form keeps the quotes as part of the value, which breaks URL-typed settings like `BASE_URL`.
+
 ### Server
 
 - **`APP_ENV`** — `development` (default) or `production`. Production mode enforces `SESSION_KEY` and `DB_URI`. The published Docker image defaults to `production`.
