@@ -85,6 +85,13 @@ curl http://localhost:8080/healthz
 # {"status":"ok","checks":{"database":"healthy"}}
 ```
 
+### Behind a reverse proxy (HTTPS)
+
+To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you — point a SWAG `proxy-conf` at the `topbanana` container on port 8080. Two settings pair with a proxy:
+
+- **`BASE_URL`** — set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
+- **`TRUSTED_PROXY_IPS`** — set it to the proxy's address or CIDR so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's.
+
 Building the image from source instead (and the bundled Mailpit mail catcher for local development) is covered in [`docs/development.md`](docs/development.md).
 
 ## Configuration
