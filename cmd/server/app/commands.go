@@ -352,22 +352,17 @@ func CreateAdmin(
 func createVerifiedAdmin(
 	ctx context.Context, players *store.PlayerStore, email, passwordHash string,
 ) (*auth.Player, error) {
-	const maxPetnameAttempts = 5
-	displayName := displayNameFromEmail(email)
-	var err error
-	for attempt := 0; attempt <= maxPetnameAttempts; attempt++ {
-		var player *auth.Player
-		player, err = players.CreatePlayerByAdmin(ctx, displayName, email, passwordHash, auth.RoleAdmin)
-		if err == nil {
-			return player, nil
-		}
-		if !errors.Is(err, auth.ErrDisplayNameTaken) {
-			break
-		}
-		displayName = auth.GeneratePetname()
+	player, err := auth.CreateWithPetnameFallback(
+		displayNameFromEmail(email),
+		func(name string) (*auth.Player, error) {
+			return players.CreatePlayerByAdmin(ctx, name, email, passwordHash, auth.RoleAdmin)
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf(createAdminWrap, err)
 	}
 
-	return nil, fmt.Errorf(createAdminWrap, err)
+	return player, nil
 }
 
 // errCreateAdminEmailExistsFor wraps errCreateAdminEmailExists with the offending

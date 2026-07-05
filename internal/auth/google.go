@@ -602,31 +602,19 @@ func linkExistingPlayerByEmail(
 	return player, nil
 }
 
-// createGooglePlayer creates a fresh players row + linked identity.
-// Retries a handful of petname collisions before giving up; the pool
-// is large enough that a real production deployment should never run
-// out, but a tight test loop could hit the same petname twice in a
-// row.
+// createGooglePlayer creates a fresh players row + linked identity,
+// falling back through petnames on a display-name collision.
 func createGooglePlayer(
 	ctx context.Context,
 	identities OAuthIdentityStore,
 	subject, email string,
 ) (*Player, error) {
-	const maxPetnameAttempts = 5
-	var lastErr error
-	for range maxPetnameAttempts {
-		displayName := GeneratePetname()
-		player, err := identities.CreatePlayerFromOAuth(ctx, displayName, email)
-		if err != nil {
-			if errors.Is(err, ErrDisplayNameTaken) {
-				lastErr = err
-
-				continue
-			}
-
-			return nil, fmt.Errorf("create player from oauth: %w", err)
+	player, err := CreateWithPetnameFallback(GeneratePetname(), func(name string) (*Player, error) {
+		created, createErr := identities.CreatePlayerFromOAuth(ctx, name, email)
+		if createErr != nil {
+			return nil, fmt.Errorf("create player from oauth: %w", createErr)
 		}
-		if linkErr := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject); linkErr != nil {
+		if linkErr := identities.LinkProviderIdentity(ctx, created.ID, ProviderGoogle, subject); linkErr != nil {
 			if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
 				// Symmetric race recovery to claimAnonymousSessionPlayer
 				// and linkExistingPlayerByEmail: a concurrent callback
@@ -649,10 +637,13 @@ func createGooglePlayer(
 			return nil, fmt.Errorf("link identity to new player: %w", linkErr)
 		}
 
-		return player, nil
+		return created, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create google player: %w", err)
 	}
 
-	return nil, fmt.Errorf("create player after %d attempts: %w", maxPetnameAttempts, lastErr)
+	return player, nil
 }
 
 // ensureProvider lazily initialises the OIDC provider, verifier, and
