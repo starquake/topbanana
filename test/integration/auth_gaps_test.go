@@ -10,7 +10,7 @@ import (
 )
 
 // TestRegister_PasswordMismatchRejected pins the reg-mismatch case from
-// docs/auth-manual-test-plan.md: a register POST whose password and
+// docs/obsolete/auth-manual-test-plan.md: a register POST whose password and
 // confirmation differ is rejected with the mismatch message and no
 // account is created.
 func TestRegister_PasswordMismatchRejected(t *testing.T) {
