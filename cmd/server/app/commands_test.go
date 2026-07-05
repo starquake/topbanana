@@ -322,6 +322,61 @@ func TestPromoteAdmin_BlankEmail_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestVerifyEmail_HappyPath_MarksVerified(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const (
+		displayName = "alice"
+		email       = "alice@example.test"
+	)
+	seedPlayer(t, dbURI, displayName)
+
+	if got := fetchSeededPlayer(t, dbURI).IsEmailVerified(); got {
+		t.Fatalf("IsEmailVerified before VerifyEmail = %v, want false", got)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := VerifyEmail(t.Context(), envFor(dbURI), &stdout, &stderr, email); err != nil {
+		t.Fatalf("VerifyEmail err = %v, want nil", err)
+	}
+
+	if got, want := fetchSeededPlayer(t, dbURI).IsEmailVerified(), true; got != want {
+		t.Errorf("IsEmailVerified after VerifyEmail = %v, want %v", got, want)
+	}
+	if got, want := stdout.String(), "Verified"; !strings.Contains(got, want) {
+		t.Errorf("stdout = %q, want substring %q", got, want)
+	}
+}
+
+func TestVerifyEmail_UnknownEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := VerifyEmail(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody@example.test")
+	if got, want := err, ErrVerifyEmailNotFound; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestVerifyEmail_BlankEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := VerifyEmail(t.Context(), envFor(dbURI), &stdout, &stderr, "   ")
+	if got, want := err, ErrVerifyEmailRequired; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
 // TestSeedDemo_DisabledMode_ReturnsError pins the guard: SeedDemo refuses to
 // seed when demo mode is off, so it can never populate a non-demo DB. The guard
 // runs before any DB or archive access, so neither is needed. APP_ENV=development
