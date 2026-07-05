@@ -2,8 +2,8 @@
 
 The demo seed (`make seed-dev-demo`, or `go run ./cmd/seed-dev/ -seed=demo`)
 restores the quiz **"Composers of Classical Music: Sights & Sounds"** from
-`dev/fixtures/demo-quiz.zip`. That archive bundles the audio clips and composer
-portraits listed below.
+`dev/fixtures/demo/demo-quiz.zip`. That archive bundles the audio clips and
+composer portraits listed below.
 
 All assets are in the public domain. The recordings come from
 [Musopen](https://musopen.org); the portraits come from
