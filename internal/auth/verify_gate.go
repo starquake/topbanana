@@ -11,6 +11,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/htmx"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/request"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -111,7 +112,7 @@ func HandleVerifyPending(
 			return
 		}
 
-		data := verifyPendingData{Title: "Verify email", Email: p.Email}
+		data := verifyPendingData{Title: locale.Translate(locale.Resolve(r), "verifyEmail.title"), Email: p.Email}
 		if fr := flash.Read(w, r); fr.OK {
 			data.Notice = fr.Notice
 			data.Error = fr.Err
@@ -154,7 +155,7 @@ func HandleVerifyResend(
 			// Should not happen for password registrants since #111 PR1,
 			// but guard so an OAuth-stub row without an email cannot
 			// trigger a panic in SendVerifyEmail.
-			flash.SetError(w, "No email on file. Sign out and register again.", 0)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "verifyEmailPending.noEmailOnFile"), 0)
 			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 
 			return
@@ -166,7 +167,7 @@ func HandleVerifyResend(
 			// 0 (and ResendDisabled=false) lets a scripted client
 			// retry-loop the rate limiter.
 			seconds := int((wait + time.Second - 1) / time.Second)
-			flash.SetError(w, "Slow down: wait a moment before requesting another email.", seconds)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "verifyEmailPending.slowDownResend"), seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
 			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 
@@ -184,13 +185,13 @@ func HandleVerifyResend(
 			p.Email, p.ID, time.Now().UTC()); err != nil {
 			logger.WarnContext(r.Context(), "verify resend dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", err))
-			flash.SetError(w, "Could not send the email right now. Try again in a moment.", 0)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "verifyEmailPending.sendFailed"), 0)
 			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 
 			return
 		}
 
-		flash.SetNotice(w, "Verification email sent. Check your inbox.")
+		flash.SetNotice(w, locale.Translate(locale.Resolve(r), "verifyEmailPending.sent"))
 		http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 	})
 }

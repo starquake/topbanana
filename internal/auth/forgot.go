@@ -11,6 +11,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -25,14 +26,10 @@ const forgotPasswordCooldown = 60 * time.Second
 // handler logs against. Same pattern VerifyResendCooldown uses.
 func ForgotPasswordCooldown() time.Duration { return forgotPasswordCooldown }
 
-// forgotPasswordSuccessMsg is the account-existence-opaque flash the
-// POST handler always sets on success or no-match. The phrasing
-// deliberately does not confirm a match: an attacker who probes a
-// list of emails cannot tell from the response or the timing whether
-// any given address is registered.
-//
-//nolint:gosec // G101 false positive: this is a public-facing UI string, not a credential.
-const forgotPasswordSuccessMsg = "If an account matches, we've sent a reset link to its email."
+// forgotPasswordSuccessMsgKey is the account-existence-opaque success flash the
+// POST handler always sets: the phrasing never confirms a match, so probing a
+// list of emails reveals nothing from the response or timing.
+const forgotPasswordSuccessMsgKey locale.MessageID = "forgotPassword.sentNotice"
 
 // forgotPageData backs the forgot-password.gohtml template.
 type forgotPageData struct {
@@ -62,7 +59,7 @@ func HandleForgotForm(
 			return
 		}
 
-		data := forgotPageData{Title: "Forgot password"}
+		data := forgotPageData{Title: locale.Translate(locale.Resolve(r), "forgotPassword.title")}
 		if fr := flash.Read(w, r); fr.OK {
 			data.Notice = fr.Notice
 			data.Error = fr.Err
@@ -107,7 +104,7 @@ func HandleForgotSubmit(
 		}
 		if err := r.ParseForm(); err != nil {
 			logger.InfoContext(r.Context(), "forgot-password form parse failed", slog.Any("err", err))
-			flash.SetError(w, "Your submission was not understood. Try again.", 0)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "common.submissionNotUnderstood"), 0)
 			http.Redirect(w, r, "/forgot-password", http.StatusSeeOther)
 
 			return
@@ -115,7 +112,7 @@ func HandleForgotSubmit(
 
 		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
 			seconds := int((wait + time.Second - 1) / time.Second)
-			flash.SetError(w, "Slow down: wait a moment before submitting again.", seconds)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "common.slowDownSubmit"), seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
 			http.Redirect(w, r, "/forgot-password", http.StatusSeeOther)
 
@@ -129,7 +126,7 @@ func HandleForgotSubmit(
 
 		// Always flash the same success message - never reveal whether
 		// the identifier matched a real account.
-		flash.SetNotice(w, forgotPasswordSuccessMsg)
+		flash.SetNotice(w, locale.Translate(locale.Resolve(r), forgotPasswordSuccessMsgKey))
 		http.Redirect(w, r, "/forgot-password", http.StatusSeeOther)
 	})
 }

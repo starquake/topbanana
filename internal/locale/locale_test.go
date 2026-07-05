@@ -92,6 +92,42 @@ func TestTranslate(t *testing.T) {
 	}
 }
 
+func TestTranslateWith(t *testing.T) {
+	t.Parallel()
+
+	// Every {token} in the message is substituted.
+	if got, want := TranslateWith(LocaleEN, "common.passwordHelp", map[string]string{
+		"min": "13", "max": "72",
+	}), "Must be 13-72 characters."; got != want {
+		t.Errorf("TranslateWith(en, passwordHelp) = %q, want %q", got, want)
+	}
+	// A token absent from the message is a no-op, leaving the rest intact.
+	if got, want := TranslateWith(LocaleEN, "login.submit", map[string]string{
+		"n": "5",
+	}), "Log in"; got != want {
+		t.Errorf("TranslateWith(en, login.submit) = %q, want %q", got, want)
+	}
+	// A missing key falls back to the key itself, unchanged by substitution.
+	if got, want := TranslateWith(LocaleNL, "does.not.exist", map[string]string{
+		"n": "5",
+	}), "does.not.exist"; got != want {
+		t.Errorf("TranslateWith(nl, missing) = %q, want %q", got, want)
+	}
+}
+
+func TestTranslateCount(t *testing.T) {
+	t.Parallel()
+
+	if got, want := TranslateCount(LocaleEN, "validation.passwordTooShort", 13),
+		"Password must be at least 13 characters."; got != want {
+		t.Errorf("TranslateCount(en, passwordTooShort) = %q, want %q", got, want)
+	}
+	if got, want := TranslateCount(LocaleNL, "validation.passwordTooShort", 13),
+		"Wachtwoord moet minstens 13 tekens bevatten."; got != want {
+		t.Errorf("TranslateCount(nl, passwordTooShort) = %q, want %q", got, want)
+	}
+}
+
 func TestMessages(t *testing.T) {
 	t.Parallel()
 

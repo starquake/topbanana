@@ -10,6 +10,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -18,12 +19,10 @@ import (
 // flash cookie path, and the discovery affordances share one string.
 const verifyEmailRequestPath = "/verify-email/request"
 
-// verifyRequestSuccessMsg is the account-existence-opaque flash the
-// POST handler always sets, identical in shape to the forgot-password
-// banner. Phrased so an attacker probing a list of addresses cannot
-// tell from the response whether any given address is registered or
-// already verified.
-const verifyRequestSuccessMsg = "If an account matches, we've sent a verification link to its email."
+// verifyRequestSuccessMsgKey is the account-existence-opaque flash the POST
+// handler always sets, like the forgot-password banner: the phrasing never
+// reveals whether an address is registered or already verified.
+const verifyRequestSuccessMsgKey locale.MessageID = "verifyEmailRequest.sentNotice"
 
 // verifyEmailRequestData backs the verify_email_request.gohtml template.
 type verifyEmailRequestData struct {
@@ -54,7 +53,7 @@ func HandleVerifyEmailRequestForm(
 			return
 		}
 
-		data := verifyEmailRequestData{Title: "Resend verification email"}
+		data := verifyEmailRequestData{Title: locale.Translate(locale.Resolve(r), "verifyEmailRequest.heading")}
 		if fr := flash.Read(w, r); fr.OK {
 			data.Notice = fr.Notice
 			data.Error = fr.Err
@@ -98,7 +97,7 @@ func HandleVerifyEmailRequestSubmit(
 		}
 		if err := r.ParseForm(); err != nil {
 			logger.InfoContext(r.Context(), "verify-email request form parse failed", slog.Any("err", err))
-			flash.SetError(w, "Your submission was not understood. Try again.", 0)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "common.submissionNotUnderstood"), 0)
 			http.Redirect(w, r, verifyEmailRequestPath, http.StatusSeeOther)
 
 			return
@@ -106,7 +105,7 @@ func HandleVerifyEmailRequestSubmit(
 
 		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
 			seconds := int((wait + time.Second - 1) / time.Second)
-			flash.SetError(w, "Slow down: wait a moment before submitting again.", seconds)
+			flash.SetError(w, locale.Translate(locale.Resolve(r), "common.slowDownSubmit"), seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
 			http.Redirect(w, r, verifyEmailRequestPath, http.StatusSeeOther)
 
@@ -118,7 +117,7 @@ func HandleVerifyEmailRequestSubmit(
 			dispatchVerifyRequestIfMatch(r.Context(), logger, players, dispatch, email)
 		}
 
-		flash.SetNotice(w, verifyRequestSuccessMsg)
+		flash.SetNotice(w, locale.Translate(locale.Resolve(r), verifyRequestSuccessMsgKey))
 		http.Redirect(w, r, verifyEmailRequestPath, http.StatusSeeOther)
 	})
 }

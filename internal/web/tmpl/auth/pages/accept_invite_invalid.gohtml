@@ -1,10 +1,10 @@
 {{define "content"}}
     <div class="auth-shell text-center">
-        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Invite link is no longer valid</h1>
+        <h1 class="m-0 mb-3 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "acceptInviteInvalid.heading"}}</h1>
         <p class="mt-0 mb-6 text-text-dim text-[0.95rem]">
-            This invite has expired or was already used. Ask whoever invited you to send a fresh one.
+            {{t "acceptInviteInvalid.body"}}
         </p>
 
-        <a href="/login" class="btn-primary inline-flex">Go to sign in</a>
+        <a href="/login" class="btn-primary inline-flex">{{t "acceptInviteInvalid.goToSignIn"}}</a>
     </div>
 {{end}}

@@ -3,11 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -32,13 +32,19 @@ func HandleAcceptInviteForm(logger *slog.Logger, csrfMgr *csrf.Manager, invites 
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc := locale.Resolve(r)
 		raw := r.URL.Query().Get("token")
 		if !inviteLivePreflight(r, logger, invites, raw) {
-			invalid.Render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
+			invalid.Render(w, r, http.StatusGone, invitePageData{Title: locale.Translate(loc, "acceptInvite.title")})
 
 			return
 		}
-		renderer.Render(w, r, http.StatusOK, invitePageData{Title: "Accept your invite", Token: raw})
+		renderer.Render(
+			w,
+			r,
+			http.StatusOK,
+			invitePageData{Title: locale.Translate(loc, "acceptInvite.heading"), Token: raw},
+		)
 	})
 }
 
@@ -125,10 +131,11 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 			return
 		}
 
+		loc := locale.Resolve(r)
 		raw := r.PostFormValue("token")
 		invite, err := deps.Invites.GetLiveInvite(r.Context(), HashInviteToken(raw))
 		if err != nil {
-			invalid.Render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
+			invalid.Render(w, r, http.StatusGone, invitePageData{Title: locale.Translate(loc, "acceptInvite.title")})
 
 			return
 		}
@@ -136,9 +143,10 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 		displayName := r.PostFormValue("display_name")
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
-		if msg, ok := validateAcceptInviteInput(displayName, password, confirm); !ok {
+		if msg, ok := validateAcceptInviteInput(loc, displayName, password, confirm); !ok {
+			heading := locale.Translate(loc, "acceptInvite.heading")
 			renderer.Render(w, r, http.StatusBadRequest, invitePageData{
-				Title: "Accept your invite", Token: raw, DisplayName: displayName, Message: msg,
+				Title: heading, Token: raw, DisplayName: displayName, Message: msg,
 			})
 
 			return
@@ -180,11 +188,13 @@ func acceptInvite(
 		return
 	}
 
+	loc := locale.Resolve(r)
 	player, err := deps.Players.CreatePlayer(r.Context(), form.displayName, form.invite.Email, hashed, RolePlayer)
 	if err != nil {
-		if msg, ok := acceptInviteCollisionMessage(err); ok {
+		if msg, ok := acceptInviteCollisionMessage(loc, err); ok {
+			heading := locale.Translate(loc, "acceptInvite.heading")
 			renderer.Render(w, r, http.StatusConflict, invitePageData{
-				Title: "Accept your invite", Token: form.token, DisplayName: form.displayName, Message: msg,
+				Title: heading, Token: form.token, DisplayName: form.displayName, Message: msg,
 			})
 
 			return
@@ -233,19 +243,20 @@ func acceptInvite(
 
 // validateAcceptInviteInput pins a non-empty displayName plus the same
 // password length + confirm-match rules the register/reset forms use.
-// Returns the user-facing banner text and false when rejected.
-func validateAcceptInviteInput(displayName, password, confirm string) (string, bool) {
+// Returns the user-facing banner text (localized for loc) and false when
+// rejected.
+func validateAcceptInviteInput(loc, displayName, password, confirm string) (string, bool) {
 	if displayName == "" {
-		return "Pick a display name.", false
+		return locale.Translate(loc, "validation.displayNameRequired"), false
 	}
 	if len(password) < MinPasswordLength {
-		return fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength), false
 	}
 	if len(password) > MaxPasswordLength {
-		return fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
 	}
 	if password != confirm {
-		return "Passwords do not match.", false
+		return locale.Translate(loc, "validation.passwordsNoMatch"), false
 	}
 
 	return "", true
@@ -257,12 +268,12 @@ func validateAcceptInviteInput(displayName, password, confirm string) (string, b
 // account was created for this address between invite-send and accept (a
 // race); the recipient is told to sign in. ok=false for any other error
 // so the caller treats it as a 500.
-func acceptInviteCollisionMessage(err error) (string, bool) {
+func acceptInviteCollisionMessage(loc string, err error) (string, bool) {
 	switch {
 	case errors.Is(err, ErrDisplayNameTaken):
-		return "That display name is already taken. Pick another.", true
+		return locale.Translate(loc, "acceptInvite.displayNameTaken"), true
 	case errors.Is(err, ErrEmailTaken):
-		return "An account already exists for this email - sign in instead.", true
+		return locale.Translate(loc, "acceptInvite.emailTaken"), true
 	}
 
 	return "", false

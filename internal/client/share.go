@@ -136,7 +136,7 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 	funcs := template.FuncMap{
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"envTitleTag": envtag.Get,
-		"t":           func(key string) string { return locale.Translate(loc, key) },
+		"t":           func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"lang":        func() string { return loc },
 	}
 	// partials/ holds the {{define}} blocks shared between index.html (solo) and

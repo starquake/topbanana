@@ -197,7 +197,7 @@ func HandleRegisterSubmit(
 		password := r.PostFormValue("password")
 		passwordConfirm := r.PostFormValue("password_confirm")
 
-		input := validateRegisterInput(rawDisplayName, rawEmail, password, passwordConfirm)
+		input := validateRegisterInput(locale.Resolve(r), rawDisplayName, rawEmail, password, passwordConfirm)
 		if !input.OK {
 			renderer.Render(w, r, http.StatusBadRequest, formData{
 				Title:       "Register",
@@ -257,7 +257,7 @@ type registerRenderers struct {
 func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request, email string) {
 	rr.sessions.Clear(w)
 	rr.pending.Render(w, r, http.StatusOK, registerPendingData{
-		Title: "Verify your email",
+		Title: locale.Translate(locale.Resolve(r), "verifyEmailPending.heading"),
 		Email: email,
 	})
 }
@@ -285,7 +285,7 @@ func handleRegisterError(
 			Title:       "Register",
 			DisplayName: input.CleanedDisplayName,
 			Email:       input.CleanedEmail,
-			Message:     "That display name is already taken.",
+			Message:     locale.Translate(locale.Resolve(r), "register.displayNameTaken"),
 			ShowGoogle:  deps.GoogleEnabled,
 		})
 	default:
@@ -856,7 +856,7 @@ func renderLoginRateLimited(
 	cfg.render.Render(w, r, http.StatusTooManyRequests, formData{
 		Title:              "Log in",
 		Email:              email,
-		Message:            "Too many attempts. Try again in a moment.",
+		Message:            locale.Translate(locale.Resolve(r), "login.rateLimited"),
 		ShowRegister:       cfg.registrationEnabled,
 		ShowGoogle:         cfg.googleEnabled,
 		ShowForgotPassword: cfg.forgotPasswordEnabled,
@@ -906,7 +906,7 @@ type registerInput struct {
 // email, and validates the inputs. A blank displayName falls back to
 // [GeneratePetname] so register-with-just-email works after #446 made
 // the display name optional; email is the credential identifier.
-func validateRegisterInput(displayName, email, password, passwordConfirm string) registerInput {
+func validateRegisterInput(loc, displayName, email, password, passwordConfirm string) registerInput {
 	cleanedDisplayName := strings.TrimSpace(displayName)
 	if cleanedDisplayName == "" {
 		cleanedDisplayName = GeneratePetname()
@@ -915,13 +915,13 @@ func validateRegisterInput(displayName, email, password, passwordConfirm string)
 	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: "Enter a valid email address.", OK: false,
+			ErrMsg: locale.Translate(loc, "validation.invalidEmail"), OK: false,
 		}
 	}
 	if len(password) < MinPasswordLength {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
+			ErrMsg: locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength),
 			OK:     false,
 		}
 	}
@@ -931,14 +931,14 @@ func validateRegisterInput(displayName, email, password, passwordConfirm string)
 		// user-friendly message.
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
+			ErrMsg: locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength),
 			OK:     false,
 		}
 	}
 	if password != passwordConfirm {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
-			ErrMsg: "Passwords do not match.", OK: false,
+			ErrMsg: locale.Translate(loc, "validation.passwordsNoMatch"), OK: false,
 		}
 	}
 
@@ -959,7 +959,7 @@ func renderInvalidCredentials(
 	cfg.render.Render(w, r, http.StatusUnauthorized, formData{
 		Title:              "Log in",
 		Email:              email,
-		Message:            "Invalid email or password.",
+		Message:            locale.Translate(locale.Resolve(r), "login.invalidCredentials"),
 		ShowRegister:       cfg.registrationEnabled,
 		ShowGoogle:         cfg.googleEnabled,
 		ShowForgotPassword: cfg.forgotPasswordEnabled,
@@ -989,9 +989,10 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// Parse-time placeholders; render.Renderer rebinds t/lang per request.
-		"t":    func(string) string { return "" },
-		"lang": func() string { return locale.LocaleEN },
+		// Parse-time placeholders; render.Renderer rebinds t/tCount/lang per request.
+		"t":      func(string) string { return "" },
+		"tCount": func(string, int) string { return "" },
+		"lang":   func() string { return locale.LocaleEN },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
@@ -1024,9 +1025,18 @@ func authPerRequestFuncs(r *http.Request) template.FuncMap {
 		signedIn = true
 	}
 
+	loc := locale.Resolve(r)
+
 	return template.FuncMap{
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return displayName },
 		"isSignedIn": func() bool { return signedIn },
+		// passwordHelp keeps the {min}/{max} help text bound to the constants.
+		"passwordHelp": func() string {
+			return locale.TranslateWith(loc, "common.passwordHelp", map[string]string{
+				"min": strconv.Itoa(MinPasswordLength),
+				"max": strconv.Itoa(MaxPasswordLength),
+			})
+		},
 	}
 }

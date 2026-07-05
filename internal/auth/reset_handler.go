@@ -2,11 +2,11 @@ package auth
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -31,13 +31,24 @@ func HandleResetForm(
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc := locale.Resolve(r)
 		raw := r.URL.Query().Get("token")
 		if !resetTokenLivePreflight(r, logger, tokens, raw) {
-			invalid.Render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
+			invalid.Render(
+				w,
+				r,
+				http.StatusGone,
+				resetPageData{Title: locale.Translate(loc, "resetPassword.linkTitle")},
+			)
 
 			return
 		}
-		render.Render(w, r, http.StatusOK, resetPageData{Title: "Set a new password", Token: raw})
+		render.Render(
+			w,
+			r,
+			http.StatusOK,
+			resetPageData{Title: locale.Translate(loc, "resetPassword.heading"), Token: raw},
+		)
 	})
 }
 
@@ -92,12 +103,13 @@ func HandleResetSubmit(
 			return
 		}
 
+		loc := locale.Resolve(r)
 		raw := r.PostFormValue("token")
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
-		if msg, ok := validateResetInput(password, confirm); !ok {
+		if msg, ok := validateResetInput(loc, password, confirm); !ok {
 			render.Render(w, r, http.StatusBadRequest, resetPageData{
-				Title: "Set a new password", Token: raw, Message: msg,
+				Title: locale.Translate(loc, "resetPassword.heading"), Token: raw, Message: msg,
 			})
 
 			return
@@ -116,7 +128,12 @@ func HandleResetSubmit(
 		case err == nil:
 			autoLoginAfterReset(w, r, logger, sessions, players, playerID)
 		case errors.Is(err, ErrResetTokenInvalid):
-			invalid.Render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
+			invalid.Render(
+				w,
+				r,
+				http.StatusGone,
+				resetPageData{Title: locale.Translate(loc, "resetPassword.linkTitle")},
+			)
 		default:
 			logger.ErrorContext(r.Context(), "reset-password consume failed", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -156,16 +173,16 @@ func autoLoginAfterReset(
 
 // validateResetInput pins the same length rule the register form
 // uses, plus a confirm-match check. Returns the user-facing banner
-// text and false when the input is rejected.
-func validateResetInput(password, confirm string) (string, bool) {
+// text (localized for loc) and false when the input is rejected.
+func validateResetInput(loc, password, confirm string) (string, bool) {
 	if len(password) < MinPasswordLength {
-		return fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength), false
 	}
 	if len(password) > MaxPasswordLength {
-		return fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", MaxPasswordLength), false
 	}
 	if password != confirm {
-		return "Passwords do not match.", false
+		return locale.Translate(loc, "validation.passwordsNoMatch"), false
 	}
 
 	return "", true

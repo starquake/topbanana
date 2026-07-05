@@ -2,12 +2,12 @@ package profile
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -34,7 +34,8 @@ func HandleProfilePassword(logger *slog.Logger, csrfMgr *csrf.Manager) http.Hand
 
 			return
 		}
-		render.renderAny(w, r, http.StatusOK, passwordPageData{Title: "Change password"})
+		title := locale.Translate(locale.Resolve(r), "profile.changePassword")
+		render.renderAny(w, r, http.StatusOK, passwordPageData{Title: title})
 	})
 }
 
@@ -73,15 +74,17 @@ func HandleProfilePasswordChange(
 			return
 		}
 
+		loc := locale.Resolve(r)
+		title := locale.Translate(loc, "profile.changePassword")
 		current := r.PostFormValue("current_password")
 		newPassword := r.PostFormValue("new_password")
 		confirm := r.PostFormValue("new_password_confirm")
 
-		if msg, ok := validatePasswordChangeInput(newPassword, confirm); !ok {
+		if msg, ok := validatePasswordChangeInput(loc, newPassword, confirm); !ok {
 			logger.InfoContext(r.Context(), "profile password change rejected: invalid input",
 				slog.Int64("player_id", player.ID))
 			render.renderAny(w, r, http.StatusBadRequest, passwordPageData{
-				Title: "Change password", Message: msg,
+				Title: title, Message: msg,
 			})
 
 			return
@@ -91,7 +94,7 @@ func HandleProfilePasswordChange(
 			logger.InfoContext(r.Context(), "profile password change rejected: current password incorrect",
 				slog.Int64("player_id", player.ID))
 			render.renderAny(w, r, http.StatusUnauthorized, passwordPageData{
-				Title: "Change password", Message: "Current password is incorrect.",
+				Title: title, Message: locale.Translate(loc, "profile.currentPasswordIncorrect"),
 			})
 
 			return
@@ -102,7 +105,7 @@ func HandleProfilePasswordChange(
 		}
 
 		render.renderAny(w, r, http.StatusOK, passwordPageData{
-			Title: "Change password",
+			Title: title,
 			Saved: true,
 		})
 	})
@@ -162,16 +165,17 @@ func rotateAndRefresh(
 
 // validatePasswordChangeInput pins the same length rule the register
 // and reset forms apply, plus a confirm-match check. Returns the
-// user-facing banner text and false when the input is rejected.
-func validatePasswordChangeInput(password, confirm string) (string, bool) {
+// user-facing banner text (localized for loc) and false when the input
+// is rejected.
+func validatePasswordChangeInput(loc, password, confirm string) (string, bool) {
 	if len(password) < auth.MinPasswordLength {
-		return fmt.Sprintf("Password must be at least %d characters.", auth.MinPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooShort", auth.MinPasswordLength), false
 	}
 	if len(password) > auth.MaxPasswordLength {
-		return fmt.Sprintf("Password must be at most %d characters.", auth.MaxPasswordLength), false
+		return locale.TranslateCount(loc, "validation.passwordTooLong", auth.MaxPasswordLength), false
 	}
 	if password != confirm {
-		return "Passwords do not match.", false
+		return locale.Translate(loc, "validation.passwordsNoMatch"), false
 	}
 
 	return "", true

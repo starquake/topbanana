@@ -7,10 +7,19 @@
 // first paint and if this module never runs; server-side enforcement stays
 // authoritative (a submit right at expiry the server still rejects just
 // re-renders the cooldown page). Each button carries its remaining seconds in
-// data-cooldown and active label in data-cooldown-label, so this is generic
-// across the three pages.
+// data-cooldown, its active label in data-cooldown-label, and its localized
+// "Wait {n}s" countdown template in data-wait-label, so this is generic across
+// the three pages and stays in the page's language.
 
 import { onDomReady } from '@shared/domReady.js';
+
+// waitLabel fills {n} in the button's server-rendered countdown template; the
+// English default only guards a button missing data-wait-label.
+function waitLabel(button, remaining) {
+    const template = button.dataset.waitLabel || 'Wait {n}s';
+
+    return template.replace('{n}', String(remaining));
+}
 
 function startCooldown(button) {
     let remaining = Number.parseInt(button.dataset.cooldown ?? '', 10);
@@ -23,7 +32,7 @@ function startCooldown(button) {
     const tick = () => {
         remaining -= 1;
         if (remaining > 0) {
-            button.textContent = `Wait ${remaining}s`;
+            button.textContent = waitLabel(button, remaining);
 
             return;
         }

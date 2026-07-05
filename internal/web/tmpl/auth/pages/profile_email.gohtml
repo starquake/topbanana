@@ -1,8 +1,8 @@
 {{define "content"}}
     <div class="auth-shell">
         <header class="mb-8 text-center">
-            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Change email</h1>
-            <p class="mt-2 text-text-dim text-[0.95rem]">Switch the address tied to your account.</p>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "profile.changeEmail"}}</h1>
+            <p class="mt-2 text-text-dim text-[0.95rem]">{{t "profileEmail.subtitle"}}</p>
         </header>
 
         {{if .Notice}}
@@ -17,12 +17,12 @@
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
                 <div class="form-field mb-4">
-                    <span class="label-eyebrow">Current email</span>
+                    <span class="label-eyebrow">{{t "profileEmail.currentEmail"}}</span>
                     <p class="mt-2 text-sm">{{.CurrentEmail}}</p>
                 </div>
 
                 <div class="form-field">
-                    <label for="new_email" class="label-eyebrow">New email</label>
+                    <label for="new_email" class="label-eyebrow">{{t "profileEmail.newEmail"}}</label>
                     <input id="new_email" name="new_email" type="email" required
                            autocomplete="email"
                            class="form-input">
@@ -32,23 +32,23 @@
                          out of the account; the current address stays
                          verified until the new one is proven. */}}
                     <p class="mt-2 text-xs text-text-mute">
-                        We'll send a verification link to the new address. Your account email switches when you click that link, not before.
+                        {{t "profileEmail.newEmailHint"}}
                     </p>
                 </div>
 
                 <div class="form-field mt-4">
-                    <label for="current_password" class="label-eyebrow">Current password</label>
+                    <label for="current_password" class="label-eyebrow">{{t "common.currentPassword"}}</label>
                     <input id="current_password" name="current_password" type="password" required
                            autocomplete="current-password"
                            class="form-input">
                     <p class="mt-2 text-xs text-text-mute">
-                        Confirm your current password to start an email change.
+                        {{t "profileEmail.passwordHint"}}
                     </p>
                 </div>
 
                 <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
-                    <button type="submit" class="btn-primary">Send verification link</button>
-                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>
+                    <button type="submit" class="btn-primary">{{t "verifyEmailRequest.submit"}}</button>
+                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "common.backToProfile"}}</a>
                 </div>
             </form>
         {{else}}
@@ -57,14 +57,14 @@
                  self-editable here. */}}
             <div class="bg-surface border border-border-soft rounded-lg p-6">
                 <div class="form-field mb-4">
-                    <span class="label-eyebrow">Current email</span>
+                    <span class="label-eyebrow">{{t "profileEmail.currentEmail"}}</span>
                     <p class="mt-2 text-sm">{{.CurrentEmail}}</p>
                 </div>
                 <p class="text-text-dim text-sm">
-                    Your email is managed by your sign-in provider and can't be changed here.
+                    {{t "profileEmail.providerManaged"}}
                 </p>
                 <div class="pt-4">
-                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>
+                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "common.backToProfile"}}</a>
                 </div>
             </div>
         {{end}}

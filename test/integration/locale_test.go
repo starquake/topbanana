@@ -15,6 +15,13 @@ const (
 	homeTaglineNL = "Kies een quiz, race tegen de klok en kijk wie er bovenaan eindigt."
 	loginSubEN    = "Welcome back. Sign in to manage your quizzes."
 	loginSubNL    = "Welkom terug. Log in om je quizzen te beheren."
+
+	// The English subtitle's "we'll" is HTML-escaped by {{t}} (we&#39;ll), so
+	// pin the apostrophe-free lead; the Dutch line has no apostrophe.
+	forgotSubEN  = "Enter your email and"
+	forgotSubNL  = "Vul je e-mailadres in en we sturen je een resetlink."
+	profileSubEN = "Your account settings."
+	profileSubNL = "Je accountinstellingen."
 )
 
 // TestLocale_Integration covers #1115 through the real server: the home and
@@ -147,6 +154,120 @@ func TestLocale_Integration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestLocaleAuthPages_Integration covers #1197: the remaining auth pages
+// localize to Dutch under a lang=nl cookie and default to English. It drives a
+// public page (/forgot-password) and an authenticated one (/profile) through
+// the real server.
+func TestLocaleAuthPages_Integration(t *testing.T) {
+	t.Parallel()
+
+	// smtpEnabledEnv also flips REGISTRATION_ENABLED on and, per #1170, is the
+	// condition under which the forgot-password route is mounted at all.
+	ctx, srv := startServer(t, smtpEnabledEnv(t))
+	baseURL := srv.BaseURL
+
+	t.Run("forgot-password defaults to English", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/forgot-password", "", nil)
+		assertContains(t, body, forgotSubEN)
+		assertContains(t, body, `<html lang="en">`)
+		assertNotContains(t, body, forgotSubNL)
+	})
+
+	t.Run("forgot-password renders Dutch for a lang=nl cookie", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/forgot-password", "", &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, forgotSubNL)
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, forgotSubEN)
+	})
+
+	// /profile is behind the auth gate, so mint a signed-in client first.
+	authn := authClient(t)
+	registerVerifyAndMint(ctx, t, authn, baseURL, srv.DBURI, "locale-profile", "correct-battery-13")
+
+	t.Run("profile defaults to English", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, baseURL+"/profile", nil)
+		assertContains(t, body, profileSubEN)
+		assertContains(t, body, `<html lang="en">`)
+		assertNotContains(t, body, profileSubNL)
+	})
+
+	t.Run("profile renders Dutch for a lang=nl cookie", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, baseURL+"/profile", &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, profileSubNL)
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, profileSubEN)
+	})
+
+	// A handler-supplied Heading/Message (not a {{t}} template string) must
+	// also localize: an unknown verify token renders the invalid-link page.
+	badToken := baseURL + "/verify-email?token=nonexistent-token"
+
+	t.Run("verify-email invalid state defaults to English", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, badToken, "", nil)
+		assertContains(t, body, "Link is no longer valid")
+		assertContains(t, body, `<html lang="en">`)
+	})
+
+	t.Run("verify-email invalid state renders Dutch handler message", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, badToken, "", &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, "Link is niet meer geldig")
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, "Link is no longer valid")
+	})
+
+	// The password-help text is a Go-side template func (not a {{t}} string);
+	// under lang=nl the /profile/password page must render the Dutch copy.
+	pwURL := baseURL + "/profile/password"
+
+	t.Run("profile password page defaults to English help", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, pwURL, nil)
+		assertContains(t, body, "Must be")
+	})
+
+	t.Run("profile password page renders Dutch help", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithClientCookie(ctx, t, authn, pwURL, &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, "tekens lang zijn")
+		assertContains(t, body, `<html lang="nl">`)
+		assertNotContains(t, body, "Must be")
+	})
+}
+
+// getBodyWithClientCookie fetches target with the given (session-carrying)
+// client and an optional extra cookie, returning the response body. The extra
+// cookie rides alongside the client's jar cookies.
+func getBodyWithClientCookie(
+	ctx context.Context, t *testing.T, client *http.Client, target string, cookie *http.Cookie,
+) string {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer closeBody(t, resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+
+	return string(body)
 }
 
 // getBodyWithHeaderCookie fetches target with an optional Accept-Language

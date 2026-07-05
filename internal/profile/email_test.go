@@ -14,6 +14,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 	. "github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/store"
@@ -70,7 +71,7 @@ func TestValidateEmailChange_Cases(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			msg, ok := ExportValidateEmailChange(tc.newEmail, tc.currentEmail)
+			msg, ok := ExportValidateEmailChange(locale.LocaleEN, tc.newEmail, tc.currentEmail)
 			if got, want := ok, tc.wantOK; got != want {
 				t.Errorf("ok = %v, want %v (msg=%q)", got, want, msg)
 			}

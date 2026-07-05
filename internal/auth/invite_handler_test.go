@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 )
 
 func TestValidateAcceptInviteInput(t *testing.T) {
@@ -70,7 +71,7 @@ func TestValidateAcceptInviteInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			msg, ok := ValidateAcceptInviteInput(tc.displayName, tc.password, tc.confirm)
+			msg, ok := ValidateAcceptInviteInput(locale.LocaleEN, tc.displayName, tc.password, tc.confirm)
 			if got, want := ok, tc.wantOK; got != want {
 				t.Errorf("ValidateAcceptInviteInput ok = %t, want %t", got, want)
 			}
@@ -78,6 +79,22 @@ func TestValidateAcceptInviteInput(t *testing.T) {
 				t.Errorf("ValidateAcceptInviteInput msg = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// TestValidateAcceptInviteInputDutch pins the Dutch translation and the
+// {n} count substitution for the shared password-length message.
+func TestValidateAcceptInviteInputDutch(t *testing.T) {
+	t.Parallel()
+
+	tooShort := strings.Repeat("a", MinPasswordLength-1)
+	msg, ok := ValidateAcceptInviteInput(locale.LocaleNL, "alice", tooShort, tooShort)
+	if got, want := ok, false; got != want {
+		t.Errorf("ValidateAcceptInviteInput ok = %t, want %t", got, want)
+	}
+	wantMsg := fmt.Sprintf("Wachtwoord moet minstens %d tekens bevatten.", MinPasswordLength)
+	if got, want := msg, wantMsg; got != want {
+		t.Errorf("ValidateAcceptInviteInput msg = %q, want %q", got, want)
 	}
 }
 
@@ -99,7 +116,7 @@ func TestAcceptInviteCollisionMessage(t *testing.T) {
 		{
 			name:    "email taken",
 			err:     ErrEmailTaken,
-			wantMsg: "An account already exists for this email - sign in instead.",
+			wantMsg: "An account already exists for this email. Sign in instead.",
 			wantOK:  true,
 		},
 		{
@@ -114,7 +131,7 @@ func TestAcceptInviteCollisionMessage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			msg, ok := AcceptInviteCollisionMessage(tc.err)
+			msg, ok := AcceptInviteCollisionMessage(locale.LocaleEN, tc.err)
 			if got, want := ok, tc.wantOK; got != want {
 				t.Errorf("AcceptInviteCollisionMessage ok = %t, want %t", got, want)
 			}

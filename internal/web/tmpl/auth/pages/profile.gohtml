@@ -1,12 +1,12 @@
 {{define "content"}}
     <div class="auth-shell">
         <header class="mb-8 text-center">
-            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Profile</h1>
-            <p class="mt-2 text-text-dim text-[0.95rem]">Your account settings.</p>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">{{t "profile.heading"}}</h1>
+            <p class="mt-2 text-text-dim text-[0.95rem]">{{t "profile.subtitle"}}</p>
         </header>
 
         {{if .Saved}}
-            {{template "authNotice" "Display name updated."}}
+            {{template "authNotice" (t "profile.savedName")}}
         {{end}}
         {{if .Message}}
             {{template "authError" .Message}}
@@ -20,12 +20,12 @@
             {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
 
             <div class="form-field">
-                <label for="display_name" class="label-eyebrow">Name</label>
+                <label for="display_name" class="label-eyebrow">{{t "common.name"}}</label>
                 <input id="display_name" name="display_name" type="text" required
                        autocomplete="nickname"
                        value="{{.DisplayName}}" class="form-input">
                 <p class="mt-2 text-xs text-text-mute">
-                    This is the name your leaderboard rows are shown under.
+                    {{t "profile.nameHint"}}
                 </p>
             </div>
 
@@ -33,16 +33,16 @@
                  pattern as /login and /register so the CTA sits under
                  the right thumb on phones. */}}
             <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
-                <button type="submit" class="btn-primary">Save</button>
+                <button type="submit" class="btn-primary">{{t "common.save"}}</button>
                 <a href="{{.BackHref}}" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{.BackLabel}}</a>
             </div>
         </form>
 
         <div class="mt-6 bg-surface border border-border-soft rounded-lg p-6">
-            <p class="label-eyebrow">Account</p>
+            <p class="label-eyebrow">{{t "profile.account"}}</p>
             <ul class="mt-3 flex flex-col gap-2 text-sm">
-                <li><a href="/profile/email" class="text-text-dim hover:text-text underline-offset-2 hover:underline">Change email</a></li>
-                <li><a href="/profile/password" class="text-text-dim hover:text-text underline-offset-2 hover:underline">Change password</a></li>
+                <li><a href="/profile/email" class="text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "profile.changeEmail"}}</a></li>
+                <li><a href="/profile/password" class="text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "profile.changePassword"}}</a></li>
             </ul>
         </div>
     </div>
