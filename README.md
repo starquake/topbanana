@@ -50,7 +50,7 @@ The server listens on `http://localhost:8080` by default. Verify it's up:
 
 ```bash
 curl http://localhost:8080/healthz
-# {"status":"ok"}
+# {"status":"ok","checks":{"database":"healthy"}}
 ```
 
 `go run ./cmd/server/` writes the SQLite database to `topbanana.sqlite` in the working directory and runs pending migrations on every start.
@@ -90,8 +90,8 @@ Following the official guidelines for a [standard Go server project layout](http
 
 ### Folders
 - `cmd/server`: Application entrypoint.
-- `cmd/seed-dev`: Seeds the local dev database with example quizzes. The `-seed` flag picks the seed set: `test` (the default) loads the small fixture quizzes, while `demo` restores one large showcase quiz with real public-domain music and pictures from a committed quiz archive. Both sets also seed a few anonymous players and finished games so the leaderboard and popular lists have data.
-- `deployments`: Docker compose configurations for the staging and production demo deployments.
+- `cmd/seed-dev`: Seeds the local dev database with example quizzes. The `-seed` flag picks the seed set: `test` (the default) loads the small fixture quizzes, while `demo` restores a set of showcase quizzes (classical-music sights and sounds, animal sounds, and a text quiz) built from committed public-domain quiz archives. Both sets also seed a few anonymous players and finished games so the leaderboard and popular lists have data.
+- `deployments`: Docker compose configurations for the staging, production, and demo deployments.
 - `docs`: Documentation for the project.
 - `internal/`: Private library code, including domain logic, database operations, HTTP handlers.
   - `absurl`: Builds absolute URLs from a request for share links and Open Graph cards.
@@ -135,7 +135,9 @@ Top Banana! is configured through environment variables. Sensible defaults apply
 - **`APP_ENV`** — `development` (default) or `production`. Production mode enforces `SESSION_KEY` and `DB_URI`.
 - **`HOST`** — interface to bind. Defaults to `localhost`. The provided Docker image overrides this to `0.0.0.0`; set it explicitly in your own compose / k8s manifest if you bind directly to the binary.
 - **`PORT`** — TCP port. Defaults to `8080`.
-- **`DB_URI`** — modernc.org/sqlite connection string. Defaults to `file:topbanana.sqlite` in development; **required** in production.
+- **`DB_URI`** — modernc.org/sqlite connection string. Defaults in development to a local `file:topbanana.sqlite` with WAL, `busy_timeout`, and `foreign_keys` pragmas already applied; **required** in production.
+- **`MEDIA_DIR`** — filesystem directory for uploaded images and audio. Defaults to `./media`. The Docker image writes it under the data volume (`/home/nonroot/data/media`) so uploads survive restarts; point it at a persistent path in your own deployment.
+- **`TRUSTED_PROXY_IPS`** — comma-separated CIDR allow-list of reverse proxies whose `X-Forwarded-For` header the per-IP rate limiters should trust. Empty (default) means no proxy, so limiters bucket on the direct connection address. Set it when running behind a reverse proxy so rate limiting sees the real client IP.
 - **`CLIENT_DIR`** — development-only override that serves the player client from a directory on disk instead of the embedded FS, so HTML/JS edits hot-reload on page reload.
 - **`WEB_STATIC_DIR`** — development-only override that serves the admin/auth/home static assets (Tailwind output at `/static/`) from a directory on disk instead of the embedded FS. Set to `internal/assets/static` alongside `CLIENT_DIR=internal/client/static` for full live-reload coverage; a `make tailwind` regen then lands on the next request without a binary restart.
 
@@ -150,6 +152,14 @@ Top Banana! is configured through environment variables. Sensible defaults apply
 - **`SESSION_KEY`** — secret used to HMAC-sign session cookies. Defaults to a random ephemeral key in development; **required** in production. Treat as a credential — rotating it invalidates every active session.
 - **`ADMIN_EMAILS`** — comma-separated list of email addresses. A registrant whose trimmed + lowercased email matches an entry is promoted to `admin` on registration. The very first password-bearing registrant becomes admin regardless of this list. Defaults to empty.
 - **`REGISTRATION_ENABLED`** — when `false` (the default), `GET/POST /register` return `404` and the "No account? Register" link is hidden on `/login`. Set to `true` to allow new sign-ups — typically just long enough to bootstrap your first admin, then unset to lock the instance down.
+
+### Email
+
+Outgoing mail (email verification, password reset, invites) is optional. Without `SMTP_HOST` the mailer is a no-op: the server boots and the diagnostics page at `/admin/email` shows a "disabled" badge.
+
+- **`SMTP_HOST`**, **`SMTP_PORT`**, **`SMTP_FROM`** — SMTP server, port (1-65535), and From address. All three are required to enable mail; `SMTP_USERNAME` / `SMTP_PASSWORD` add optional auth.
+- **`SMTP_TLS`** — require STARTTLS on the connection. Defaults to `true`; set `false` only for a plain local catch-all like Mailpit.
+- **`BASE_URL`** — public URL of the instance (e.g. `https://quiz.example.com`), used as the prefix for links embedded in outgoing emails. Set it in production so verify/reset/invite links point at your real host.
 
 ### Gameplay
 
