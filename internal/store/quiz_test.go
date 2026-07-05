@@ -299,6 +299,49 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 	}
 }
 
+func TestQuizStore_ListQuizzesForOwner(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
+	playerStore := NewPlayerStore(db, slog.Default())
+
+	other, err := playerStore.CreateAnonymousPlayer(t.Context(), "owner-scope-other")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	adminQz := &quiz.Quiz{
+		Title: "Admin Owned", Slug: "admin-owned", Description: "x",
+		CreatedByPlayerID: seededAdminID,
+	}
+	otherQz := &quiz.Quiz{
+		Title: "Other Owned", Slug: "other-owned", Description: "x",
+		CreatedByPlayerID: other.ID,
+	}
+	for _, qz := range []*quiz.Quiz{adminQz, otherQz} {
+		if err = quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz(%s) err = %v, want nil", qz.Title, err)
+		}
+	}
+
+	adminList, err := quizStore.ListQuizzesForOwner(t.Context(), seededAdminID)
+	if err != nil {
+		t.Fatalf("ListQuizzesForOwner(admin) err = %v, want nil", err)
+	}
+	if got, want := quizTitles(adminList), []string{"Admin Owned"}; !slices.Equal(got, want) {
+		t.Errorf("ListQuizzesForOwner(admin) titles = %v, want %v", got, want)
+	}
+
+	otherList, err := quizStore.ListQuizzesForOwner(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("ListQuizzesForOwner(other) err = %v, want nil", err)
+	}
+	if got, want := quizTitles(otherList), []string{"Other Owned"}; !slices.Equal(got, want) {
+		t.Errorf("ListQuizzesForOwner(other) titles = %v, want %v", got, want)
+	}
+}
+
 func TestQuizStore_ListLiveQuizzes(t *testing.T) {
 	t.Parallel()
 
@@ -346,6 +389,65 @@ func TestQuizStore_ListLiveQuizzes(t *testing.T) {
 	if got, want := titles, []string{"Live A", "Live B"}; !slices.Equal(got, want) {
 		t.Errorf("live quiz titles = %v, want %v", got, want)
 	}
+}
+
+func TestQuizStore_ListLiveQuizzesForOwner(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
+	playerStore := NewPlayerStore(db, slog.Default())
+
+	other, err := playerStore.CreateAnonymousPlayer(t.Context(), "live-owner-scope-other")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	adminLive := &quiz.Quiz{
+		Title: "Admin Live", Slug: "admin-live", Description: "x",
+		CreatedByPlayerID: seededAdminID, Published: true,
+	}
+	otherLive := &quiz.Quiz{
+		Title: "Other Live", Slug: "other-live", Description: "x",
+		CreatedByPlayerID: other.ID, Published: true,
+	}
+	for _, qz := range []*quiz.Quiz{adminLive, otherLive} {
+		if err = quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz(%s) err = %v, want nil", qz.Title, err)
+		}
+		// CreateQuiz defaults to solo regardless of the Mode field.
+		if err = quizStore.SetQuizMode(t.Context(), qz.ID, quiz.ModeLive); err != nil {
+			t.Fatalf("SetQuizMode(%s, live) err = %v, want nil", qz.Title, err)
+		}
+	}
+
+	adminList, err := quizStore.ListLiveQuizzesForOwner(t.Context(), seededAdminID)
+	if err != nil {
+		t.Fatalf("ListLiveQuizzesForOwner(admin) err = %v, want nil", err)
+	}
+	if got, want := quizTitles(adminList), []string{"Admin Live"}; !slices.Equal(got, want) {
+		t.Errorf("ListLiveQuizzesForOwner(admin) titles = %v, want %v", got, want)
+	}
+
+	otherList, err := quizStore.ListLiveQuizzesForOwner(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("ListLiveQuizzesForOwner(other) err = %v, want nil", err)
+	}
+	if got, want := quizTitles(otherList), []string{"Other Live"}; !slices.Equal(got, want) {
+		t.Errorf("ListLiveQuizzesForOwner(other) titles = %v, want %v", got, want)
+	}
+}
+
+// quizTitles returns the sorted titles of the given quizzes for order-independent
+// assertions.
+func quizTitles(quizzes []*quiz.Quiz) []string {
+	titles := make([]string, 0, len(quizzes))
+	for _, qz := range quizzes {
+		titles = append(titles, qz.Title)
+	}
+	slices.Sort(titles)
+
+	return titles
 }
 
 func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {

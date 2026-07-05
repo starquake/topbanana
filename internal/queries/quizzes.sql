@@ -30,6 +30,29 @@ FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 ORDER BY q.updated_at DESC, q.id DESC;
 
+-- name: ListQuizzesForOwner :many
+-- Owner-scoped variant of ListQuizzes (#1207): returns only the quizzes the
+-- given player created, in the same shape and order. The admin quiz list uses
+-- the unscoped ListQuizzes; a plain Host sees only their own quizzes.
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       q.mode,
+       q.language,
+       q.play_count,
+       q.published,
+       p.display_name AS created_by_display_name
+FROM quizzes q
+         JOIN players p ON p.id = q.created_by_player_id
+WHERE q.created_by_player_id = ?
+ORDER BY q.updated_at DESC, q.id DESC;
+
 -- name: ListPublicQuizzes :many
 -- Public-facing variant of ListQuizzes (#103). Filters to visibility =
 -- 'public' so unlisted and private quizzes never appear in the player
@@ -81,6 +104,31 @@ FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.mode = 'live'
   AND q.published = 1
+ORDER BY q.updated_at DESC, q.id DESC;
+
+-- name: ListLiveQuizzesForOwner :many
+-- Owner-scoped variant of ListLiveQuizzes (#1207): the host picker offers a
+-- plain Host only their own live-eligible quizzes. Same mode = 'live' and
+-- published = 1 filters; an admin uses the unscoped ListLiveQuizzes.
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       q.mode,
+       q.language,
+       q.play_count,
+       q.published,
+       p.display_name AS created_by_display_name
+FROM quizzes q
+         JOIN players p ON p.id = q.created_by_player_id
+WHERE q.mode = 'live'
+  AND q.published = 1
+  AND q.created_by_player_id = ?
 ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: QuestionCountsByQuiz :many

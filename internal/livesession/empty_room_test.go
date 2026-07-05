@@ -100,7 +100,7 @@ func TestService_CreateEmptyRoom(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1 // seeded admin
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
@@ -136,7 +136,7 @@ func TestService_StartFirstQuizFromEmptyLobby(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
@@ -144,7 +144,7 @@ func TestService_StartFirstQuizFromEmptyLobby(t *testing.T) {
 
 	// The host picks the first quiz from the empty lobby; the unified StartQuiz
 	// arms it and begins immediately (the runner enters the first round_intro).
-	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID, false); err != nil {
 		t.Fatalf("StartQuiz (first game from empty lobby) err = %v, want nil", err)
 	}
 
@@ -180,7 +180,7 @@ func TestService_StartHosting_NoActiveRoomOpensArmedLobby(t *testing.T) {
 	const hostID int64 = 1
 	qz := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-new", [][]bool{{true}})
 
-	sess, err := h.service.StartHosting(ctx, qz.ID, hostID)
+	sess, err := h.service.StartHosting(ctx, qz.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("StartHosting (no active room) err = %v, want nil", err)
 	}
@@ -215,13 +215,13 @@ func TestService_StartHosting_EmptyRoomArmsExistingRoom(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	empty, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
 	qz := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-empty", [][]bool{{true}})
 
-	sess, err := h.service.StartHosting(ctx, qz.ID, hostID)
+	sess, err := h.service.StartHosting(ctx, qz.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("StartHosting (empty active room) err = %v, want nil", err)
 	}
@@ -267,18 +267,18 @@ func TestService_StartHosting_InFlightRoomLeftUntouched(t *testing.T) {
 
 	const hostID int64 = 1
 	running := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-running", [][]bool{{true}})
-	sess, err := h.service.CreateSession(ctx, &running.ID, hostID)
+	sess, err := h.service.CreateSession(ctx, &running.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
 	// Drive the room into flight: the first game is now running (round_intro).
-	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, running.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, running.ID, false); err != nil {
 		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 
 	// A different quiz is picked while the game runs.
 	other := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-other", [][]bool{{true}})
-	got, err := h.service.StartHosting(ctx, other.ID, hostID)
+	got, err := h.service.StartHosting(ctx, other.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("StartHosting (in-flight room) err = %v, want nil", err)
 	}
@@ -328,7 +328,7 @@ func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
 		t.Fatalf("CreateQuiz solo err = %v, want nil", err)
 	}
 
-	sess, err := h.service.StartHosting(ctx, solo.ID, hostID)
+	sess, err := h.service.StartHosting(ctx, solo.ID, hostID, false)
 	if got, want := err, ErrNotLiveQuiz; !errors.Is(got, want) {
 		t.Errorf("StartHosting (solo) err = %v, want %v", got, want)
 	}
@@ -337,8 +337,10 @@ func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
 	}
 }
 
-// TestService_CreateSession_DraftLiveQuizOwnerGate pins the owner-or-published hosting gate: the owner may host their own draft, another host cannot (#1192).
-func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
+// TestService_CreateSession_OwnerGate pins the per-host hosting isolation
+// (#1207): the owner may host their own draft, and a non-owner non-admin cannot
+// host it.
+func TestService_CreateSession_OwnerGate(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.July, 4, 12, 0, 0, 0, time.UTC)
@@ -352,7 +354,7 @@ func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
 	t.Run("owner can host their own draft", func(t *testing.T) {
 		t.Parallel()
 
-		sess, err := h.service.CreateSession(ctx, &qz.ID, ownerID)
+		sess, err := h.service.CreateSession(ctx, &qz.ID, ownerID, false)
 		if err != nil {
 			t.Fatalf("CreateSession (owner, draft) err = %v, want nil", err)
 		}
@@ -369,12 +371,97 @@ func TestService_CreateSession_DraftLiveQuizOwnerGate(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		sess, err := h.service.CreateSession(ctx, &qz.ID, stranger.ID)
-		if got, want := err, ErrQuizNotPublished; !errors.Is(got, want) {
+		sess, err := h.service.CreateSession(ctx, &qz.ID, stranger.ID, false)
+		if got, want := err, ErrQuizNotOwned; !errors.Is(got, want) {
 			t.Errorf("CreateSession (non-owner, draft) err = %v, want %v", got, want)
 		}
 		if sess != nil {
 			t.Errorf("CreateSession (non-owner, draft) session = %v, want nil", sess)
+		}
+	})
+}
+
+// TestService_Hosting_PerHostIsolation pins the #1207 override of #677 for the
+// live-run path: a non-owner non-admin cannot host another host's PUBLISHED live
+// quiz through any entry point (CreateSession, ArmQuiz, StartHosting), while an
+// admin may host it.
+func TestService_Hosting_PerHostIsolation(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.July, 4, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	// A live quiz owned by player 1, published - the case #677 used to let any
+	// host run; #1207 restricts it to the owner or an admin.
+	qz := seedRunnerQuizSlug(t, h.quizStore, "published-owner-gate", [][]bool{{true}})
+	if err := h.quizStore.SetQuizPublished(ctx, qz.ID, true); err != nil {
+		t.Fatalf("SetQuizPublished err = %v, want nil", err)
+	}
+
+	stranger, err := h.playerStore.CreateAnonymousPlayer(ctx, "iso-stranger")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	t.Run("non-owner CreateSession is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		sess, cerr := h.service.CreateSession(ctx, &qz.ID, stranger.ID, false)
+		if got, want := cerr, ErrQuizNotOwned; !errors.Is(got, want) {
+			t.Errorf("CreateSession (non-owner, published) err = %v, want %v", got, want)
+		}
+		if sess != nil {
+			t.Errorf("CreateSession (non-owner, published) session = %v, want nil", sess)
+		}
+	})
+
+	t.Run("non-owner ArmQuiz is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		empty, cerr := h.service.CreateSession(ctx, nil, stranger.ID, false)
+		if cerr != nil {
+			t.Fatalf("CreateSession (empty room) err = %v, want nil", cerr)
+		}
+		if got, want := h.service.ArmQuiz(
+			ctx,
+			empty.JoinCode,
+			stranger.ID,
+			qz.ID,
+			false,
+		), ErrQuizNotOwned; !errors.Is(
+			got,
+			want,
+		) {
+			t.Errorf("ArmQuiz (non-owner, published) err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("non-owner StartHosting is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		sess, cerr := h.service.StartHosting(ctx, qz.ID, stranger.ID, false)
+		if got, want := cerr, ErrQuizNotOwned; !errors.Is(got, want) {
+			t.Errorf("StartHosting (non-owner, published) err = %v, want %v", got, want)
+		}
+		if sess != nil {
+			t.Errorf("StartHosting (non-owner, published) session = %v, want nil", sess)
+		}
+	})
+
+	t.Run("admin may host any quiz", func(t *testing.T) {
+		t.Parallel()
+
+		admin, aerr := h.playerStore.CreateAnonymousPlayer(ctx, "iso-admin")
+		if aerr != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", aerr)
+		}
+		sess, cerr := h.service.CreateSession(ctx, &qz.ID, admin.ID, true)
+		if cerr != nil {
+			t.Fatalf("CreateSession (admin, foreign quiz) err = %v, want nil", cerr)
+		}
+		if sess == nil {
+			t.Fatal("CreateSession (admin, foreign quiz) session = nil, want a room")
 		}
 	})
 }
@@ -390,13 +477,13 @@ func TestService_ArmQuiz(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	empty, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
 	qz := seedRunnerQuizSlug(t, h.quizStore, "armquiz-live", [][]bool{{true}})
 
-	if err = h.service.ArmQuiz(ctx, empty.JoinCode, hostID, qz.ID); err != nil {
+	if err = h.service.ArmQuiz(ctx, empty.JoinCode, hostID, qz.ID, false); err != nil {
 		t.Fatalf("ArmQuiz err = %v, want nil", err)
 	}
 
@@ -431,7 +518,16 @@ func TestService_ArmQuiz(t *testing.T) {
 	if err = h.quizStore.CreateQuiz(ctx, solo); err != nil {
 		t.Fatalf("CreateQuiz solo err = %v, want nil", err)
 	}
-	if got, want := h.service.ArmQuiz(ctx, empty.JoinCode, hostID, solo.ID), ErrNotLiveQuiz; !errors.Is(got, want) {
+	if got, want := h.service.ArmQuiz(
+		ctx,
+		empty.JoinCode,
+		hostID,
+		solo.ID,
+		false,
+	), ErrNotLiveQuiz; !errors.Is(
+		got,
+		want,
+	) {
 		t.Errorf("ArmQuiz (solo) err = %v, want %v", got, want)
 	}
 }
@@ -448,7 +544,7 @@ func TestService_EndSessionClosesImmediately(t *testing.T) {
 
 	const hostID int64 = 1
 	qz := seedRunnerQuizSlug(t, h.quizStore, "end-session-quiz", [][]bool{{true}})
-	sess, err := h.service.CreateSession(ctx, &qz.ID, hostID)
+	sess, err := h.service.CreateSession(ctx, &qz.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -483,7 +579,7 @@ func TestService_EndSessionRejectsNonHost(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -521,7 +617,7 @@ func TestService_GetActiveSessionForHost(t *testing.T) {
 		t.Errorf("active session with no room = %v, want nil", none)
 	}
 
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -566,7 +662,7 @@ func TestService_StartHosting_RearmBeforeStartFromEmptyLobby(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	empty, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
@@ -581,7 +677,7 @@ func TestService_StartHosting_RearmBeforeStartFromEmptyLobby(t *testing.T) {
 
 	// The host arms A, then changes the pick to B, then to C, all before Start.
 	for _, qz := range []*quiz.Quiz{quizA, quizB, quizC} {
-		sess, hostErr := h.service.StartHosting(ctx, qz.ID, hostID)
+		sess, hostErr := h.service.StartHosting(ctx, qz.ID, hostID, false)
 		if hostErr != nil {
 			t.Fatalf("StartHosting (arm %s) err = %v, want nil", qz.Slug, hostErr)
 		}

@@ -69,7 +69,7 @@ func adminActor(req *http.Request) *http.Request {
 }
 
 // nonOwnerActor returns the request with a non-admin player whose id is
-// not the quiz creator's, so requireQuizOwner renders a 403.
+// not the quiz creator's, so requireQuizOwner renders an opaque 404 (#1207).
 func nonOwnerActor(req *http.Request) *http.Request {
 	return req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: nonOwnerID, Role: auth.RolePlayer}))
 }
@@ -166,7 +166,7 @@ func TestHandleQuestionMoveToRound(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner is forbidden", func(t *testing.T) {
+	t.Run("non-owner is an opaque 404", func(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
@@ -176,7 +176,7 @@ func TestHandleQuestionMoveToRound(t *testing.T) {
 			t, env, strconv.FormatInt(f.quiz.ID, 10), strconv.FormatInt(f.questionID, 10),
 			url.Values{"round_id": {strconv.FormatInt(f.secondRound, 10)}}, nonOwnerActor,
 		)
-		if got, want := rec.Code, http.StatusForbidden; got != want {
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
@@ -336,7 +336,7 @@ func TestHandleRoundDelete(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner is forbidden", func(t *testing.T) {
+	t.Run("non-owner is an opaque 404", func(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
@@ -345,7 +345,7 @@ func TestHandleRoundDelete(t *testing.T) {
 		rec := deleteRound(
 			t, env, strconv.FormatInt(f.quiz.ID, 10), strconv.FormatInt(f.secondRound, 10), nonOwnerActor,
 		)
-		if got, want := rec.Code, http.StatusForbidden; got != want {
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})

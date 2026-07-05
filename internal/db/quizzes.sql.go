@@ -447,6 +447,87 @@ func (q *Queries) ListLiveQuizzes(ctx context.Context) ([]ListLiveQuizzesRow, er
 	return items, nil
 }
 
+const listLiveQuizzesForOwner = `-- name: ListLiveQuizzesForOwner :many
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       q.mode,
+       q.language,
+       q.play_count,
+       q.published,
+       p.display_name AS created_by_display_name
+FROM quizzes q
+         JOIN players p ON p.id = q.created_by_player_id
+WHERE q.mode = 'live'
+  AND q.published = 1
+  AND q.created_by_player_id = ?
+ORDER BY q.updated_at DESC, q.id DESC
+`
+
+type ListLiveQuizzesForOwnerRow struct {
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	TimeLimitSeconds     int64
+	Visibility           string
+	Mode                 string
+	Language             string
+	PlayCount            int64
+	Published            int64
+	CreatedByDisplayName string
+}
+
+// Owner-scoped variant of ListLiveQuizzes (#1207): the host picker offers a
+// plain Host only their own live-eligible quizzes. Same mode = 'live' and
+// published = 1 filters; an admin uses the unscoped ListLiveQuizzes.
+func (q *Queries) ListLiveQuizzesForOwner(ctx context.Context, createdByPlayerID int64) ([]ListLiveQuizzesForOwnerRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveQuizzesForOwner, createdByPlayerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiveQuizzesForOwnerRow
+	for rows.Next() {
+		var i ListLiveQuizzesForOwnerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Slug,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByPlayerID,
+			&i.TimeLimitSeconds,
+			&i.Visibility,
+			&i.Mode,
+			&i.Language,
+			&i.PlayCount,
+			&i.Published,
+			&i.CreatedByDisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOptionIDsByQuestionID = `-- name: ListOptionIDsByQuestionID :many
 SELECT id
 FROM options
@@ -796,6 +877,85 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 	var items []ListQuizzesRow
 	for rows.Next() {
 		var i ListQuizzesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Slug,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByPlayerID,
+			&i.TimeLimitSeconds,
+			&i.Visibility,
+			&i.Mode,
+			&i.Language,
+			&i.PlayCount,
+			&i.Published,
+			&i.CreatedByDisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuizzesForOwner = `-- name: ListQuizzesForOwner :many
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       q.mode,
+       q.language,
+       q.play_count,
+       q.published,
+       p.display_name AS created_by_display_name
+FROM quizzes q
+         JOIN players p ON p.id = q.created_by_player_id
+WHERE q.created_by_player_id = ?
+ORDER BY q.updated_at DESC, q.id DESC
+`
+
+type ListQuizzesForOwnerRow struct {
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	TimeLimitSeconds     int64
+	Visibility           string
+	Mode                 string
+	Language             string
+	PlayCount            int64
+	Published            int64
+	CreatedByDisplayName string
+}
+
+// Owner-scoped variant of ListQuizzes (#1207): returns only the quizzes the
+// given player created, in the same shape and order. The admin quiz list uses
+// the unscoped ListQuizzes; a plain Host sees only their own quizzes.
+func (q *Queries) ListQuizzesForOwner(ctx context.Context, createdByPlayerID int64) ([]ListQuizzesForOwnerRow, error) {
+	rows, err := q.db.QueryContext(ctx, listQuizzesForOwner, createdByPlayerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuizzesForOwnerRow
+	for rows.Next() {
+		var i ListQuizzesForOwnerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,

@@ -412,28 +412,6 @@ func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	renderer.Render(w, r, http.StatusNotFound, nil)
 }
 
-// render403 renders the 403 error page with a message that names the
-// quiz the caller tried to modify and the admin who owns it. Used by
-// requireQuizOwner so a wrong-owner attempt surfaces a clear "not your
-// quiz, ask <name> to make the change" instead of a generic 403.
-func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
-	renderer := render.New(
-		logger,
-		csrfMgr,
-		parseTemplate("admin/errors/403.gohtml"),
-		baseLayout,
-		adminPerRequestFuncs,
-	)
-	data := struct {
-		Title   string
-		Message string
-	}{
-		Title:   "Forbidden",
-		Message: msg,
-	}
-	renderer.Render(w, r, http.StatusForbidden, data)
-}
-
 // render409 renders the 409 conflict error page with the given message.
 func render409(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
 	renderer := render.New(
@@ -466,9 +444,10 @@ func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	renderer.Render(w, r, http.StatusInternalServerError, nil)
 }
 
-// requireQuizOwner loads the quiz and gates the request on the session
-// player being its creator. Returns the loaded quiz on success;
-// renders 403 / 404 / 500 on the failure paths.
+// requireQuizOwner gates a mutating quiz route on the session player being the
+// quiz's creator or an Admin, reusing [requireQuizViewAccess] so a non-owner
+// non-admin gets the SAME opaque 404 an unknown quiz gives - a 403 naming the
+// owner and title would leak existence + title + owner by id enumeration (#1207).
 func requireQuizOwner(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -477,30 +456,7 @@ func requireQuizOwner(
 	quizStore quiz.Store,
 	id int64,
 ) (*quiz.Quiz, bool) {
-	qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, id)
-	if !ok {
-		return nil, false
-	}
-
-	// RequireAdmin (auth/middleware.go) already enforces a populated
-	// player on the context before any admin handler runs, and
-	// canEditQuiz below handles the not-present case correctly. The
-	// previous explicit check rendered 500 on a state that's
-	// unreachable under the production wiring (#371).
-	if canEditQuiz(r, qz.CreatedByPlayerID) {
-		return qz, true
-	}
-
-	owner := qz.CreatedByDisplayName
-	if owner == "" {
-		owner = "another admin"
-	}
-	render403(w, r, logger, csrfMgr, fmt.Sprintf(
-		"Only %s can edit \"%s\". Ask them to make the change, or have them transfer ownership.",
-		owner, qz.Title,
-	))
-
-	return nil, false
+	return requireQuizViewAccess(w, r, logger, csrfMgr, quizStore, id)
 }
 
 // requireEditableQuizOwner is requireQuizOwner plus the publish edit-lock: it 409s an owned but published quiz, which is locked from content edits (#1192).
@@ -525,6 +481,33 @@ func requireEditableQuizOwner(
 	}
 
 	return qz, true
+}
+
+// requireQuizViewAccess loads the quiz and gates a read-only quiz-detail
+// request on the session player being its creator or an Admin (#1207). It
+// returns the loaded quiz on success. A missing quiz and a wrong-owner request
+// both render the same opaque 404, so the route never reveals that another
+// host's quiz exists.
+func requireQuizViewAccess(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	id int64,
+) (*quiz.Quiz, bool) {
+	qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, id)
+	if !ok {
+		return nil, false
+	}
+
+	if canEditQuiz(r, qz.CreatedByPlayerID) {
+		return qz, true
+	}
+
+	render404(w, r, logger, csrfMgr)
+
+	return nil, false
 }
 
 // quizByID returns the quiz with the given ID from the store. It includes the questions.
@@ -1012,13 +995,8 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-
-		quizzes, err := quizStore.ListQuizzes(r.Context())
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error retrieving quizzes from store", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
+		quizzes, ok := listQuizzesForViewer(w, r, logger, csrfMgr, quizStore)
+		if !ok {
 			return
 		}
 
@@ -1064,6 +1042,43 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 
 		renderer.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// listQuizzesForViewer returns the quiz list scoped to the session player's
+// role (#1207): an Admin sees every quiz; a plain Host sees only their own. It
+// renders 500 and returns false on a store error or a missing player.
+func listQuizzesForViewer(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+) ([]*quiz.Quiz, bool) {
+	player, ok := auth.PlayerFromContext(r.Context())
+	if !ok {
+		logger.ErrorContext(r.Context(), "missing player on context for quiz list")
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	var (
+		quizzes []*quiz.Quiz
+		err     error
+	)
+	if player.IsAdmin() {
+		quizzes, err = quizStore.ListQuizzes(r.Context())
+	} else {
+		quizzes, err = quizStore.ListQuizzesForOwner(r.Context(), player.ID)
+	}
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error retrieving quizzes from store", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return quizzes, true
 }
 
 // filterQuizzesByMode keeps only quizzes whose Mode matches the requested play
@@ -1125,7 +1140,7 @@ func HandleQuizView(
 		}
 
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, id); !ok {
+		if qz, ok = requireQuizViewAccess(w, r, logger, csrfMgr, quizStore, id); !ok {
 			return
 		}
 

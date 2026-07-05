@@ -44,7 +44,7 @@ func TestService_HostHasRunningGame_FalseWhenStaging(t *testing.T) {
 		t.Parallel()
 		h := newEmptyRoomHarness(t, restartStart)
 		ctx := t.Context()
-		if _, err := h.service.CreateSession(ctx, nil, hostID); err != nil {
+		if _, err := h.service.CreateSession(ctx, nil, hostID, false); err != nil {
 			t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 		}
 		if got, want := runningGame(t, h), false; got != want {
@@ -57,7 +57,7 @@ func TestService_HostHasRunningGame_FalseWhenStaging(t *testing.T) {
 		h := newEmptyRoomHarness(t, restartStart)
 		ctx := t.Context()
 		qz := seedRunnerQuizSlug(t, h.quizStore, "restart-armed-lobby", [][]bool{{true}})
-		if _, err := h.service.CreateSession(ctx, &qz.ID, hostID); err != nil {
+		if _, err := h.service.CreateSession(ctx, &qz.ID, hostID, false); err != nil {
 			t.Fatalf("CreateSession (armed) err = %v, want nil", err)
 		}
 		// CreateSession leaves the room in the lobby with no started_at: the host
@@ -73,13 +73,13 @@ func TestService_HostHasRunningGame_FalseWhenStaging(t *testing.T) {
 		h := newEmptyRoomHarness(t, restartStart)
 		ctx := t.Context()
 		qz := seedRunnerQuizSlug(t, h.quizStore, "restart-intermission", [][]bool{{true}})
-		sess, err := h.service.CreateSession(ctx, &qz.ID, hostID)
+		sess, err := h.service.CreateSession(ctx, &qz.ID, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}
 		// Drive the game in flight, then end it into intermission via the store so
 		// the room sits at the between-games screen the host can re-arm from.
-		if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
+		if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID, false); err != nil {
 			t.Fatalf("StartQuiz err = %v, want nil", err)
 		}
 		if err = h.store.Intermission(ctx, sess.ID, false); err != nil {
@@ -102,13 +102,13 @@ func TestService_HostHasRunningGame_TrueWhenInFlight(t *testing.T) {
 
 	const hostID int64 = 1
 	qz := seedRunnerQuizSlug(t, h.quizStore, "restart-inflight", [][]bool{{true}})
-	sess, err := h.service.CreateSession(ctx, &qz.ID, hostID)
+	sess, err := h.service.CreateSession(ctx, &qz.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
 	// The runner drives the game into round_intro: it has left the lobby staging,
 	// so a pick cannot simply arm it.
-	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID, false); err != nil {
 		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 	if got, want := runningGame(t, h), true; got != want {
@@ -130,15 +130,15 @@ func TestService_RestartHosting_EndsRunningAndOpensNewRoom(t *testing.T) {
 	quizA := seedRunnerQuizSlug(t, h.quizStore, "restart-a", [][]bool{{true}})
 	quizB := seedRunnerQuizSlug(t, h.quizStore, "restart-b", [][]bool{{true}})
 
-	running, err := h.service.CreateSession(ctx, &quizA.ID, hostID)
+	running, err := h.service.CreateSession(ctx, &quizA.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if err = h.service.StartQuiz(ctx, running.JoinCode, hostID, quizA.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, running.JoinCode, hostID, quizA.ID, false); err != nil {
 		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 
-	fresh, err := h.service.RestartHosting(ctx, quizB.ID, hostID)
+	fresh, err := h.service.RestartHosting(ctx, quizB.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("RestartHosting err = %v, want nil", err)
 	}
@@ -193,11 +193,11 @@ func TestService_RestartHosting_RejectsSoloLeavesRunningUntouched(t *testing.T) 
 
 	const hostID int64 = 1
 	quizA := seedRunnerQuizSlug(t, h.quizStore, "restart-keep-a", [][]bool{{true}})
-	running, err := h.service.CreateSession(ctx, &quizA.ID, hostID)
+	running, err := h.service.CreateSession(ctx, &quizA.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if err = h.service.StartQuiz(ctx, running.JoinCode, hostID, quizA.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, running.JoinCode, hostID, quizA.ID, false); err != nil {
 		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 
@@ -215,7 +215,7 @@ func TestService_RestartHosting_RejectsSoloLeavesRunningUntouched(t *testing.T) 
 		t.Fatalf("CreateQuiz solo err = %v, want nil", err)
 	}
 
-	sess, err := h.service.RestartHosting(ctx, solo.ID, hostID)
+	sess, err := h.service.RestartHosting(ctx, solo.ID, hostID, false)
 	if got, want := err, ErrNotLiveQuiz; !errors.Is(got, want) {
 		t.Errorf("RestartHosting (solo) err = %v, want %v", got, want)
 	}
@@ -245,7 +245,7 @@ func TestService_RestartHosting_NoActiveSessionJustOpens(t *testing.T) {
 	const hostID int64 = 1
 	qz := seedRunnerQuizSlug(t, h.quizStore, "restart-fresh-open", [][]bool{{true}})
 
-	sess, err := h.service.RestartHosting(ctx, qz.ID, hostID)
+	sess, err := h.service.RestartHosting(ctx, qz.ID, hostID, false)
 	if err != nil {
 		t.Fatalf("RestartHosting (no active) err = %v, want nil", err)
 	}

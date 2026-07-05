@@ -127,16 +127,16 @@ func (e *sessionTestEnv) seedAnonymousPlayer(t *testing.T, name string) int64 {
 
 // seedLiveQuiz persists a mode='live' quiz with two single-answer questions so
 // a session can be opened on it (CreateSession gates on mode='live'). It mirrors
-// twoQuestionQuiz but in live mode, attributed to the seeded admin so the
-// NOT NULL created_by_player_id column is satisfied.
-func (e *sessionTestEnv) seedLiveQuiz(t *testing.T, slug string) *quiz.Quiz {
+// twoQuestionQuiz but in live mode, attributed to ownerID so the host that opens
+// a session on it is its creator (per-host isolation #1207).
+func (e *sessionTestEnv) seedLiveQuiz(t *testing.T, slug string, ownerID int64) *quiz.Quiz {
 	t.Helper()
 
 	qz := &quiz.Quiz{
 		Title:             "Live Quiz",
 		Slug:              slug,
 		Description:       "seeded",
-		CreatedByPlayerID: seededAdminID,
+		CreatedByPlayerID: ownerID,
 		Visibility:        quiz.VisibilityPublic,
 		Mode:              quiz.ModeLive,
 		Published:         true,
@@ -186,7 +186,7 @@ func TestHandleSessionState_LogLineInheritsRequestScopedFields(t *testing.T) {
 	env := newSessionTestEnv(t)
 	hostID := env.seedAnonymousPlayer(t, "host")
 
-	sess, err := env.service.CreateSession(t.Context(), nil, hostID)
+	sess, err := env.service.CreateSession(t.Context(), nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -225,12 +225,12 @@ func TestHandleSessionAudio(t *testing.T) {
 		t.Parallel()
 
 		env := newSessionTestEnv(t)
-		qz := env.seedLiveQuiz(t, "live-audio-quiz")
+		hostID := env.seedAnonymousPlayer(t, "audio-host")
+		qz := env.seedLiveQuiz(t, "live-audio-quiz", hostID)
 		mediaID0 := env.attachAudio(t, qz.Questions[0], false)
 		mediaID1 := env.attachAudio(t, qz.Questions[1], true)
-		hostID := env.seedAnonymousPlayer(t, "audio-host")
 
-		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}
@@ -284,11 +284,11 @@ func TestHandleSessionAudio(t *testing.T) {
 		t.Parallel()
 
 		env := newSessionTestEnv(t)
-		qz := env.seedLiveQuiz(t, "live-mixed-audio-quiz")
-		mediaID := env.attachAudio(t, qz.Questions[1], false)
 		hostID := env.seedAnonymousPlayer(t, "mixed-audio-host")
+		qz := env.seedLiveQuiz(t, "live-mixed-audio-quiz", hostID)
+		mediaID := env.attachAudio(t, qz.Questions[1], false)
 
-		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}
@@ -328,7 +328,7 @@ func TestHandleSessionAudio(t *testing.T) {
 
 		// An empty room (no quiz picked yet, #836) carries no quiz, so the
 		// manifest must still serialize clips as [], not null.
-		sess, err := env.service.CreateSession(t.Context(), nil, hostID)
+		sess, err := env.service.CreateSession(t.Context(), nil, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}
@@ -353,11 +353,11 @@ func TestHandleSessionAudio(t *testing.T) {
 		t.Parallel()
 
 		env := newSessionTestEnv(t)
-		qz := env.seedLiveQuiz(t, "live-nonhost-audio-quiz")
-		env.attachAudio(t, qz.Questions[0], false)
 		hostID := env.seedAnonymousPlayer(t, "nonhost-audio-host")
+		qz := env.seedLiveQuiz(t, "live-nonhost-audio-quiz", hostID)
+		env.attachAudio(t, qz.Questions[0], false)
 
-		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}
@@ -389,11 +389,11 @@ func TestHandleSessionAudio(t *testing.T) {
 		t.Parallel()
 
 		env := newSessionTestEnv(t)
-		qz := env.seedLiveQuiz(t, "live-gated-audio-quiz")
-		env.attachAudio(t, qz.Questions[0], false)
 		hostID := env.seedAnonymousPlayer(t, "gated-audio-host")
+		qz := env.seedLiveQuiz(t, "live-gated-audio-quiz", hostID)
+		env.attachAudio(t, qz.Questions[0], false)
 
-		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID, false)
 		if err != nil {
 			t.Fatalf("CreateSession err = %v, want nil", err)
 		}

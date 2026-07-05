@@ -61,13 +61,13 @@ func HandleSessionCreate(service *livesession.Service) http.Handler {
 			return
 		}
 
-		sess, err := service.CreateSession(ctx, req.QuizID, player.ID)
+		sess, err := service.CreateSession(ctx, req.QuizID, player.ID, player.IsAdmin())
 		if err != nil {
 			switch {
 			case errors.Is(err, quiz.ErrQuizNotFound),
 				errors.Is(err, livesession.ErrNotLiveQuiz),
-				errors.Is(err, livesession.ErrQuizNotPublished):
-				// Missing, solo, or unpublished-and-not-owned all 404 so the id stays opaque (#1192).
+				errors.Is(err, livesession.ErrQuizNotOwned):
+				// Missing, solo, or not-owned-by-a-non-admin all 404 so the id stays opaque (#1207).
 				http.NotFound(w, r)
 			default:
 				writeInternalError(w, r, logger, "error creating session", err)

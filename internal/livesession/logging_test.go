@@ -286,7 +286,7 @@ func TestService_LogsCreateSession(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}

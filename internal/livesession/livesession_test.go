@@ -283,10 +283,10 @@ func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {
 		return c
 	}
 	store := &fakeStore{existingCodes: map[string]bool{"TAKEN1": true, "TAKEN2": true}}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true}}
+	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true, CreatedByPlayerID: 1}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 8)
 
-	sess, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
+	sess, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -302,10 +302,10 @@ func TestService_CreateSession_ExhaustsCodeBudget(t *testing.T) {
 	// gives up with ErrJoinCodeUnavailable rather than looping forever.
 	gen := func() string { return "ALWAYS" }
 	store := &fakeStore{existingCodes: map[string]bool{"ALWAYS": true}}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true}}
+	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive, Published: true, CreatedByPlayerID: 1}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 3)
 
-	_, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
+	_, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1, false)
 	if got, want := err, ErrJoinCodeUnavailable; !errors.Is(got, want) {
 		t.Errorf("CreateSession exhausted err = %v, want %v", got, want)
 	}
@@ -663,7 +663,7 @@ func TestService_GetSessionState_QuestionPhaseWithoutQuiz(t *testing.T) {
 	q := full.Questions[0]
 
 	const hostID int64 = 1 // seeded admin
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
@@ -705,7 +705,7 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1 // seeded admin
-	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
 	}
@@ -734,7 +734,7 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 
 	// Still armable: the host can point it at a quiz and start it.
 	qz := seedRunnerQuizSlug(t, h.quizStore, "quizless-start-guard", [][]bool{{true}})
-	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID, false); err != nil {
 		t.Fatalf("StartQuiz after refused start err = %v, want nil (room must not be wedged)", err)
 	}
 }

@@ -75,6 +75,42 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	return quizzes, nil
 }
 
+// ListQuizzesForOwner returns the subset of [QuizStore.ListQuizzes] created by
+// the given player (#1207). Same shape and ordering; used by the admin quiz
+// list for a plain Host so they see only their own quizzes.
+//
+//nolint:dupl // See ListQuizzes: distinct sqlc row types, identical mapping.
+func (s *QuizStore) ListQuizzesForOwner(ctx context.Context, ownerID int64) ([]*quiz.Quiz, error) {
+	rows, err := s.q.ListQuizzesForOwner(ctx, ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list quizzes for owner: %w", err)
+	}
+
+	quizzes := make([]*quiz.Quiz, 0, len(rows))
+	for _, r := range rows {
+		qz := &quiz.Quiz{
+			ID:                r.ID,
+			Title:             r.Title,
+			Slug:              r.Slug,
+			Description:       r.Description,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			CreatedByPlayerID: r.CreatedByPlayerID,
+			TimeLimitSeconds:  int(r.TimeLimitSeconds),
+			Visibility:        r.Visibility,
+			Mode:              r.Mode,
+			Language:          r.Language,
+			PlayCount:         r.PlayCount,
+			Published:         r.Published != 0,
+			// INNER JOIN, see ListQuizzes (#359).
+			CreatedByDisplayName: r.CreatedByDisplayName,
+		}
+		quizzes = append(quizzes, qz)
+	}
+
+	return quizzes, nil
+}
+
 // ListPublicQuizzes returns the visibility=public subset of
 // [QuizStore.ListQuizzes] (#103). Same shape, same ordering - just the
 // rows safe to surface to anonymous traffic.
@@ -121,6 +157,42 @@ func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListLiveQuizzes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list live quizzes: %w", err)
+	}
+
+	quizzes := make([]*quiz.Quiz, 0, len(rows))
+	for _, r := range rows {
+		qz := &quiz.Quiz{
+			ID:                r.ID,
+			Title:             r.Title,
+			Slug:              r.Slug,
+			Description:       r.Description,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			CreatedByPlayerID: r.CreatedByPlayerID,
+			TimeLimitSeconds:  int(r.TimeLimitSeconds),
+			Visibility:        r.Visibility,
+			Mode:              r.Mode,
+			Language:          r.Language,
+			PlayCount:         r.PlayCount,
+			Published:         r.Published != 0,
+			// INNER JOIN, see ListQuizzes (#359).
+			CreatedByDisplayName: r.CreatedByDisplayName,
+		}
+		quizzes = append(quizzes, qz)
+	}
+
+	return quizzes, nil
+}
+
+// ListLiveQuizzesForOwner returns the subset of [QuizStore.ListLiveQuizzes]
+// created by the given player (#1207). Same shape and ordering; used by the
+// host picker for a plain Host so they see only their own live-eligible quizzes.
+//
+//nolint:dupl // See ListQuizzes: distinct sqlc row types, identical mapping.
+func (s *QuizStore) ListLiveQuizzesForOwner(ctx context.Context, ownerID int64) ([]*quiz.Quiz, error) {
+	rows, err := s.q.ListLiveQuizzesForOwner(ctx, ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list live quizzes for owner: %w", err)
 	}
 
 	quizzes := make([]*quiz.Quiz, 0, len(rows))

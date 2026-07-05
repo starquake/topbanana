@@ -144,17 +144,17 @@ func TestHandleMediaDescriptionSave(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner is a 403", func(t *testing.T) {
+	t.Run("non-owner is an opaque 404", func(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
-		qz := env.seedQuiz(t, ownedQuiz("Sounds", "media-desc-403"))
+		qz := env.seedQuiz(t, ownedQuiz("Sounds", "media-desc-404"))
 		mediaID := env.seedAudioMedia(t, qz.ID, "label")
 		handler := newDescriptionHandler(t, env)
 
 		rec := serveDescription(handler, nonOwnerActor(descriptionRequest(t, qz.ID, mediaID, "x")))
 
-		if got, want := rec.Code, http.StatusForbidden; got != want {
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})

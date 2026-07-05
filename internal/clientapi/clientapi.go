@@ -179,8 +179,10 @@ func gateQuizRead(
 	return canReadQuiz(w, r, visibility)
 }
 
-// gatePreviewOwner 404s a missing quiz and 403s a non-owner, then returns the
-// loaded quiz so the caller can create the preview game without a second load (#1192).
+// gatePreviewOwner returns the loaded quiz for the creator or an admin so the
+// caller can create the preview game without a second load (#1192). A missing
+// quiz AND a non-owner non-admin both get the same opaque 404 - a draft quiz's
+// existence is secret to non-owners, so a 403 would leak it by id enumeration (#1207).
 func gatePreviewOwner(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, service *game.Service, quizID int64, player *auth.Player,
@@ -198,7 +200,7 @@ func gatePreviewOwner(
 	}
 
 	if !player.IsAdmin() && player.ID != qz.CreatedByPlayerID {
-		http.Error(w, "only the quiz owner can preview this quiz", http.StatusForbidden)
+		http.NotFound(w, r)
 
 		return nil, false
 	}

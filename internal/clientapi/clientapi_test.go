@@ -246,7 +246,7 @@ func TestHandleCreateGame_Preview(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner cannot preview", func(t *testing.T) {
+	t.Run("non-owner cannot preview and gets an opaque 404", func(t *testing.T) {
 		t.Parallel()
 
 		env := newTestEnv(t)
@@ -262,7 +262,9 @@ func TestHandleCreateGame_Preview(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if got, want := rec.Code, http.StatusForbidden; got != want {
+		// A draft quiz's existence is secret to non-owners, so the gate returns
+		// the same opaque 404 an unknown quiz gives, not a 403 (#1207).
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %v, want %v", got, want)
 		}
 	})

@@ -379,10 +379,10 @@ func HandleQuizExport(logger *slog.Logger, quizStore quiz.Store, mediaSvc MediaA
 			return
 		}
 
-		// Same gate the quiz view's edit affordances use (#281/#538): the
-		// session player must be the quiz creator or an admin.
+		// A non-owner non-admin gets the same opaque 404 an absent quiz gives, so
+		// export cannot be used as an existence oracle by id enumeration (#1207).
 		if !canEditQuiz(r, qz.CreatedByPlayerID) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.NotFound(w, r)
 
 			return
 		}

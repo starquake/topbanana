@@ -90,7 +90,9 @@ func TestRoles_HostGating(t *testing.T) {
 	t.Run("host cannot manage another host's quiz", func(t *testing.T) {
 		t.Parallel()
 		target := baseURL + fmt.Sprintf("/admin/quizzes/%d/delete", ownerQuiz)
-		if got, want := postCSRFForm(ctx, t, host, target), http.StatusForbidden; got != want {
+		// The owner gate returns the same opaque 404 an unknown quiz gives, so a
+		// non-owner host cannot even tell the quiz exists (#1207).
+		if got, want := postCSRFForm(ctx, t, host, target), http.StatusNotFound; got != want {
 			t.Errorf("host delete other quiz status = %d, want %d", got, want)
 		}
 	})
@@ -193,11 +195,12 @@ func TestRoles_RoleChange(t *testing.T) {
 		t.Fatalf("after demote role = %q, want %q", got, want)
 	}
 
-	// Powers gone: deleting another host's quiz now 403s.
+	// Powers gone: deleting another host's quiz now gets the opaque 404 the
+	// owner gate returns to a non-owner non-admin (#1207).
 	probeQuiz := createQuizAs(ctx, t, owner, baseURL, "Owner Quiz Post-Demote")
 	if got, want := postCSRFForm(ctx, t, target,
 		baseURL+fmt.Sprintf("/admin/quizzes/%d/delete", probeQuiz),
-	), http.StatusForbidden; got != want {
+	), http.StatusNotFound; got != want {
 		t.Errorf("post-demote delete status = %d, want %d", got, want)
 	}
 }
@@ -278,15 +281,30 @@ func assertAuditRow(ctx context.Context, t *testing.T, dbURI string, target, act
 // from ADMIN_EMAILS / first-registrant promotion).
 func makeHost(ctx context.Context, t *testing.T, dbURI, displayName string) {
 	t.Helper()
+	setPlayerRole(ctx, t, dbURI, displayName, auth.RoleHost)
+}
+
+// makeAdmin sets the named player's role to Admin via the store. Used where a
+// fixture host must run a quiz it did not create - only an admin may host
+// another host's quiz under per-host isolation (#1207).
+func makeAdmin(ctx context.Context, t *testing.T, dbURI, displayName string) {
+	t.Helper()
+	setPlayerRole(ctx, t, dbURI, displayName, auth.RoleAdmin)
+}
+
+// setPlayerRole sets the named player's role via the store, mirroring the
+// production role endpoint.
+func setPlayerRole(ctx context.Context, t *testing.T, dbURI, displayName, role string) {
+	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
 	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("makeHost GetPlayerByDisplayName err = %v, want nil", err)
+		t.Fatalf("setPlayerRole GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if err := stores.AdminPlayers.SetPlayerRole(ctx, player.ID, auth.RoleHost); err != nil {
-		t.Fatalf("makeHost SetPlayerRole err = %v, want nil", err)
+	if err := stores.AdminPlayers.SetPlayerRole(ctx, player.ID, role); err != nil {
+		t.Fatalf("setPlayerRole SetPlayerRole err = %v, want nil", err)
 	}
 }
 
