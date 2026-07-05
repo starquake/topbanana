@@ -70,6 +70,10 @@ services:
       # in outbound email. Optional until #111 PR2 ships; the mailer
       # falls back to an empty prefix when unset.
       - BASE_URL=${BASE_URL:-}
+      # Runs behind SWAG on the external `web` network; trust that subnet so
+      # the per-IP rate limiters read the real client IP from X-Forwarded-For.
+      # Override via env if `web` uses a different subnet.
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-172.19.0.0/16}
     volumes:
       - topbanana_staging_data:/home/nonroot/data
     networks:
