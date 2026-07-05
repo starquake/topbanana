@@ -288,6 +288,12 @@ type Config struct {
 	// only driver today.
 	ProfileEnabled bool
 
+	// DemoSeedArchiveDir is the directory the seed-demo command reads quiz
+	// archive zips from (DEMO_SEED_ARCHIVE_DIR). The files come from the demo
+	// deployment's bind mount rather than being embedded. Only consumed by
+	// SeedDemo, which gates on DemoMode.
+	DemoSeedArchiveDir string
+
 	// RevealDelay overrides the per-question reveal beat (#247). Zero means
 	// "use the built-in default" (3 s). Parsed from the REVEAL_DELAY env var
 	// via time.ParseDuration; e2e and load-test deployments shrink this to a
@@ -652,6 +658,8 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleClientSecret = getenv("GOOGLE_CLIENT_SECRET")
 	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
+
+	c.DemoSeedArchiveDir = getenv("DEMO_SEED_ARCHIVE_DIR")
 
 	applyDemoMode(&c)
 

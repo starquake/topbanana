@@ -9,6 +9,7 @@ var (
 	ExportSeedQuizzes                  = seedQuizzes
 	ExportSeedDemoQuiz                 = seedDemoQuiz
 	ExportOpenDemoArchive              = openDemoArchive
+	ExportOpenDemoArchives             = openDemoArchives
 	ExportSeedPlayerName               = seedPlayerName
 	ExportSeedPlayerNames              = seedPlayerNames
 	ExportSeedPlays                    = seedPlays
