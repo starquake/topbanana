@@ -30,12 +30,16 @@ const (
 	// AbandonedGameDays is how long after creation a never-finished game is
 	// kept before the sweep prunes it (#627).
 	AbandonedGameDays = 30
+	// AdminAuditRetentionDays is how long an admin_audit row is kept before the
+	// sweep prunes it (#628).
+	AdminAuditRetentionDays = 180
 )
 
 // RetentionStore runs the periodic data-retention sweeps: it prunes stale
-// anonymous players together with all their game data (#626) and abandoned,
-// never-finished games regardless of player (#627). Each sweep takes its
-// retention window in days and computes the cutoff date in SQL.
+// anonymous players together with all their game data (#626), abandoned,
+// never-finished games regardless of player (#627), and admin_audit rows past
+// their retention window (#628). Each sweep takes its retention window in days
+// and computes the cutoff date in SQL.
 type RetentionStore struct {
 	q      *db.Queries
 	db     *sql.DB
@@ -100,6 +104,17 @@ func (s *RetentionStore) SweepAbandonedGames(ctx context.Context, days int) erro
 		if err != nil {
 			return fmt.Errorf("failed to sweep abandoned games: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// SweepStaleAuditLog hard-deletes admin_audit rows created more than days ago
+// (#628). One date-range DELETE with no id-list batching: admin_audit is
+// low-volume and nothing FK-references it, so there is no chunking concern.
+func (s *RetentionStore) SweepStaleAuditLog(ctx context.Context, days int) error {
+	if _, err := s.q.DeleteStaleAuditLog(ctx, int64(days)); err != nil {
+		return fmt.Errorf("failed to sweep stale audit log: %w", err)
 	}
 
 	return nil

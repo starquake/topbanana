@@ -138,12 +138,14 @@ func (s *stubInviteSweep) Calls() int {
 // called and optionally returns an error. Concurrent-safe so the sweep
 // goroutine and the test can touch it from different goroutines.
 type stubRetentionSweep struct {
-	mu               sync.Mutex
-	anonCalls        int
-	gameCalls        int
-	lastAnonDays     int
-	lastGameDays     int
-	anonErr, gameErr error
+	mu                         sync.Mutex
+	anonCalls                  int
+	gameCalls                  int
+	auditCalls                 int
+	lastAnonDays               int
+	lastGameDays               int
+	lastAuditDays              int
+	anonErr, gameErr, auditErr error
 }
 
 func (s *stubRetentionSweep) SweepStaleAnonymousPlayers(_ context.Context, days int) error {
@@ -164,6 +166,16 @@ func (s *stubRetentionSweep) SweepAbandonedGames(_ context.Context, days int) er
 	s.lastGameDays = days
 
 	return s.gameErr
+}
+
+func (s *stubRetentionSweep) SweepStaleAuditLog(_ context.Context, days int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.auditCalls++
+	s.lastAuditDays = days
+
+	return s.auditErr
 }
 
 func (s *stubRetentionSweep) AnonCalls() int {
@@ -192,6 +204,20 @@ func (s *stubRetentionSweep) LastGameDays() int {
 	defer s.mu.Unlock()
 
 	return s.lastGameDays
+}
+
+func (s *stubRetentionSweep) AuditCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.auditCalls
+}
+
+func (s *stubRetentionSweep) LastAuditDays() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.lastAuditDays
 }
 
 // stubMediaSweep counts how many times the media sweep ran. Concurrent-safe
@@ -243,12 +269,13 @@ func TestRunTokenSweep_TicksUntilCancel(t *testing.T) {
 	// Wait until at least one tick lands on each store before cancelling.
 	deadline := time.After(time.Second)
 	for verify.Calls() <= 0 || reset.Calls() <= 0 || invites.Calls() <= 0 ||
-		retention.AnonCalls() <= 0 || retention.GameCalls() <= 0 || mediaSweep.Calls() <= 0 {
+		retention.AnonCalls() <= 0 || retention.GameCalls() <= 0 || retention.AuditCalls() <= 0 ||
+		mediaSweep.Calls() <= 0 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d anon=%d game=%d media=%d",
+			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d anon=%d game=%d audit=%d media=%d",
 				verify.Calls(), reset.Calls(), invites.Calls(),
-				retention.AnonCalls(), retention.GameCalls(), mediaSweep.Calls())
+				retention.AnonCalls(), retention.GameCalls(), retention.AuditCalls(), mediaSweep.Calls())
 		case <-time.After(time.Millisecond):
 		}
 	}
@@ -272,8 +299,9 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 	reset := &stubResetSweep{err: errors.New("reset sweep failed")}
 	invites := &stubInviteSweep{err: errors.New("invite sweep failed")}
 	retention := &stubRetentionSweep{
-		anonErr: errors.New("anon sweep failed"),
-		gameErr: errors.New("game sweep failed"),
+		anonErr:  errors.New("anon sweep failed"),
+		gameErr:  errors.New("game sweep failed"),
+		auditErr: errors.New("audit sweep failed"),
 	}
 	mediaSweep := &stubMediaSweep{}
 
@@ -291,12 +319,12 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 	// invariant is observable.
 	deadline := time.After(time.Second)
 	for verify.Calls() < 2 || reset.Calls() < 2 || invites.Calls() < 2 ||
-		retention.AnonCalls() < 2 || retention.GameCalls() < 2 {
+		retention.AnonCalls() < 2 || retention.GameCalls() < 2 || retention.AuditCalls() < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick twice; verify=%d reset=%d invites=%d anon=%d game=%d",
+			t.Fatalf("sweep did not tick twice; verify=%d reset=%d invites=%d anon=%d game=%d audit=%d",
 				verify.Calls(), reset.Calls(), invites.Calls(),
-				retention.AnonCalls(), retention.GameCalls())
+				retention.AnonCalls(), retention.GameCalls(), retention.AuditCalls())
 		case <-time.After(time.Millisecond):
 		}
 	}
@@ -321,15 +349,21 @@ func TestRunRetentionSweep_PassesConfiguredWindows(t *testing.T) {
 	if got, want := retention.LastGameDays(), store.AbandonedGameDays; got != want {
 		t.Errorf("game sweep days = %d, want %d", got, want)
 	}
+	if got, want := retention.LastAuditDays(), store.AdminAuditRetentionDays; got != want {
+		t.Errorf("audit sweep days = %d, want %d", got, want)
+	}
 }
 
-// TestRunRetentionSweep_RunsGameSweepAfterAnonError pins that a failure in
-// the anonymous-player sweep does not skip the abandoned-game sweep: both
-// run on every pass regardless of the other's outcome.
-func TestRunRetentionSweep_RunsGameSweepAfterAnonError(t *testing.T) {
+// TestRunRetentionSweep_RunsRemainingSweepsAfterEarlierError pins that a failure
+// in an earlier sweep does not skip the later ones: every sweep runs on each
+// pass regardless of the others' outcomes.
+func TestRunRetentionSweep_RunsRemainingSweepsAfterEarlierError(t *testing.T) {
 	t.Parallel()
 
-	retention := &stubRetentionSweep{anonErr: errors.New("anon sweep failed")}
+	retention := &stubRetentionSweep{
+		anonErr: errors.New("anon sweep failed"),
+		gameErr: errors.New("game sweep failed"),
+	}
 
 	RunRetentionSweep(t.Context(), slog.New(slog.DiscardHandler), retention)
 
@@ -338,6 +372,9 @@ func TestRunRetentionSweep_RunsGameSweepAfterAnonError(t *testing.T) {
 	}
 	if got, want := retention.GameCalls(), 1; got != want {
 		t.Errorf("game sweep calls = %d, want %d", got, want)
+	}
+	if got, want := retention.AuditCalls(), 1; got != want {
+		t.Errorf("audit sweep calls = %d, want %d", got, want)
 	}
 }
 

@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 )
 
@@ -36,6 +37,23 @@ func (q *Queries) DeletePlayersByIDs(ctx context.Context, ids []int64) error {
 	}
 	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
+}
+
+const deleteStaleAuditLog = `-- name: DeleteStaleAuditLog :execresult
+DELETE
+FROM admin_audit
+WHERE created_at < datetime('now', '-' || CAST(?1 AS INTEGER) || ' days')
+`
+
+// Prunes admin_audit rows created more than the retention window ago (#628).
+// admin_audit is a low-volume, self-contained table (no rows FK-reference it),
+// so a single date-range DELETE suffices with no id-list batching. The window
+// in days is a caller-supplied integer, but the cutoff is computed in SQL
+// (datetime('now', '-<days> days')) so both sides of the comparison are SQLite
+// text in the CURRENT_TIMESTAMP encoding rows are minted with, not a
+// cross-format Go time.Time comparison.
+func (q *Queries) DeleteStaleAuditLog(ctx context.Context, days int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteStaleAuditLog, days)
 }
 
 const filterAnonymousPlayerIDs = `-- name: FilterAnonymousPlayerIDs :many

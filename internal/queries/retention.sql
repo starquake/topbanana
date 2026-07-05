@@ -81,3 +81,15 @@ WHERE g.created_at < datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) ||
     AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
         (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
   );
+
+-- name: DeleteStaleAuditLog :execresult
+-- Prunes admin_audit rows created more than the retention window ago (#628).
+-- admin_audit is a low-volume, self-contained table (no rows FK-reference it),
+-- so a single date-range DELETE suffices with no id-list batching. The window
+-- in days is a caller-supplied integer, but the cutoff is computed in SQL
+-- (datetime('now', '-<days> days')) so both sides of the comparison are SQLite
+-- text in the CURRENT_TIMESTAMP encoding rows are minted with, not a
+-- cross-format Go time.Time comparison.
+DELETE
+FROM admin_audit
+WHERE created_at < datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days');
