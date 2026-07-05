@@ -597,6 +597,43 @@ func TestParse_DemoMode(t *testing.T) {
 	})
 }
 
+func TestParse_DemoSeedArchiveDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"unset defaults to empty", "", ""},
+		{"path is read verbatim", "/srv/demo/archives", "/srv/demo/archives"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			getenv := func(key string) string {
+				switch key {
+				case "DEMO_SEED_ARCHIVE_DIR":
+					return tt.value
+				case "APP_ENV":
+					return "development"
+				}
+
+				return ""
+			}
+
+			c, err := Parse(getenv)
+			if err != nil {
+				t.Fatalf("Parse() err = %v, want nil", err)
+			}
+			if got, want := c.DemoSeedArchiveDir, tt.want; got != want {
+				t.Errorf("DemoSeedArchiveDir = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestParse_RevealDelay(t *testing.T) {
 	t.Parallel()
 

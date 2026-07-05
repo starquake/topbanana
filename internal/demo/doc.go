@@ -6,5 +6,6 @@
 //
 // This package provides the two demo-only behaviours: HandleEnter, the
 // one-click login into the shared demo Host mounted at POST /demo/enter, and
-// SeedIfEnabled, the idempotent baseline seeding the -seed-demo command runs.
+// SeedIfEnabled, the idempotent seeding the -seed-demo command runs to restore
+// the shared demo Host and the demo quiz set read from DEMO_SEED_ARCHIVE_DIR.
 package demo

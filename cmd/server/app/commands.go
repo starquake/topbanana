@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -122,9 +123,17 @@ var errPromoteEmailNotFound = errors.New("email not found")
 // it via [errors.Is].
 var errSeedDemoDisabled = errors.New("DEMO_MODE_ENABLED is not set")
 
-// errSeedDemoArchiveNotSet is returned by SeedDemo when DEMO_SEED_ARCHIVE is
+// errSeedDemoArchiveNotSet is returned by SeedDemo when DEMO_SEED_ARCHIVE_DIR is
 // empty; defined at package scope so callers can match it via [errors.Is].
-var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE is not set")
+var errSeedDemoArchiveNotSet = errors.New("DEMO_SEED_ARCHIVE_DIR is not set")
+
+// errSeedDemoNoArchives is returned by SeedDemo when DEMO_SEED_ARCHIVE_DIR holds
+// no .zip files, so a misconfigured mount fails fast rather than seeding nothing.
+var errSeedDemoNoArchives = errors.New("no demo archives (.zip) found in DEMO_SEED_ARCHIVE_DIR")
+
+// seedDemoWrap is the error-wrap prefix used by SeedDemo failure paths so the
+// messages stay consistent and revive's add-constant linter stays quiet.
+const seedDemoWrap = "seed-demo: %w"
 
 // PromoteAdmin looks up a player by email and sets them to the top tier
 // (role = 'admin') (#538). This is a break-glass recovery tool: the first
@@ -183,12 +192,13 @@ func PromoteAdmin(
 	return nil
 }
 
-// SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz)
+// SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz set)
 // against the configured database. It exits early with an error when demo mode
-// is off (Config.DemoMode) so it cannot accidentally seed a non-demo DB.
-// The quiz archive is read from the path given by DEMO_SEED_ARCHIVE; it is
-// not embedded in the binary so the ~3 MB file stays out of the production
-// image and is supplied by the demo deployment's bind mount instead.
+// is off (Config.DemoMode) so it cannot accidentally seed a non-demo DB. Every
+// *.zip in the DEMO_SEED_ARCHIVE_DIR directory is restored as a demo quiz, in
+// sorted-filename order; the archives are not embedded in the binary so the
+// files stay out of the production image and are supplied by the demo
+// deployment's bind mount instead.
 func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer) error {
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
@@ -197,17 +207,16 @@ func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer)
 		return fmt.Errorf("seed-demo: parse config: %w", err)
 	}
 	if !cfg.DemoMode {
-		return fmt.Errorf("seed-demo: %w", errSeedDemoDisabled)
+		return fmt.Errorf(seedDemoWrap, errSeedDemoDisabled)
 	}
 
-	archivePath := getenv("DEMO_SEED_ARCHIVE")
-	if archivePath == "" {
-		return fmt.Errorf("seed-demo: %w", errSeedDemoArchiveNotSet)
+	if cfg.DemoSeedArchiveDir == "" {
+		return fmt.Errorf(seedDemoWrap, errSeedDemoArchiveNotSet)
 	}
 
-	raw, err := os.ReadFile(archivePath) //nolint:gosec // operator-provided path from a trusted env var
+	archives, err := readDemoArchives(cfg.DemoSeedArchiveDir)
 	if err != nil {
-		return fmt.Errorf("seed-demo: read archive: %w", err)
+		return fmt.Errorf(seedDemoWrap, err)
 	}
 
 	conn, err := setupDB(ctx, cfg.DatabaseConfig(), logger)
@@ -223,11 +232,40 @@ func SeedDemo(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	stores := store.New(conn, logger)
 	mediaSvc := media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger)
 
-	if err := demo.SeedIfEnabled(ctx, cfg, stores, mediaSvc, logger, raw); err != nil {
-		return fmt.Errorf("seed-demo: %w", err)
+	if err := demo.SeedIfEnabled(ctx, cfg, stores, mediaSvc, logger, archives); err != nil {
+		return fmt.Errorf(seedDemoWrap, err)
 	}
 
 	return nil
+}
+
+// readDemoArchives reads every *.zip in dir into memory, one byte slice per
+// archive, sorted by filename so the demo set restores in a stable order
+// ([os.ReadDir] returns entries sorted by name). It errors if the directory
+// holds no .zip files so a misconfigured mount fails fast.
+func readDemoArchives(dir string) ([][]byte, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read archive dir: %w", err)
+	}
+
+	var archives [][]byte
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".zip") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path) //nolint:gosec // operator-provided dir from a trusted env var
+		if err != nil {
+			return nil, fmt.Errorf("read archive %q: %w", entry.Name(), err)
+		}
+		archives = append(archives, raw)
+	}
+	if len(archives) == 0 {
+		return nil, errSeedDemoNoArchives
+	}
+
+	return archives, nil
 }
 
 // readNewPassword prompts for a new password twice (input + confirmation)

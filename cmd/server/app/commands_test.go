@@ -344,8 +344,8 @@ func TestSeedDemo_DisabledMode_ReturnsError(t *testing.T) {
 }
 
 // TestSeedDemo_ArchiveNotSet_ReturnsError pins that SeedDemo rejects a missing
-// DEMO_SEED_ARCHIVE before opening the database. Both flags are read through the
-// getenv argument, so no process-environment mutation is needed.
+// DEMO_SEED_ARCHIVE_DIR before opening the database. Both flags are read through
+// the getenv argument, so no process-environment mutation is needed.
 func TestSeedDemo_ArchiveNotSet_ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -362,6 +362,32 @@ func TestSeedDemo_ArchiveNotSet_ReturnsError(t *testing.T) {
 	var stderr bytes.Buffer
 	err := SeedDemo(t.Context(), getenv, &stderr)
 	if got, want := err, ErrSeedDemoArchiveNotSet; !errors.Is(got, want) {
+		t.Errorf("SeedDemo err = %v, want %v", got, want)
+	}
+}
+
+// TestSeedDemo_EmptyArchiveDir_ReturnsError pins that SeedDemo rejects a
+// DEMO_SEED_ARCHIVE_DIR that holds no .zip files, before opening the database,
+// so a misconfigured mount fails fast rather than seeding nothing.
+func TestSeedDemo_EmptyArchiveDir_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	emptyDir := t.TempDir()
+	getenv := func(key string) string {
+		switch key {
+		case "APP_ENV":
+			return "development"
+		case "DEMO_MODE_ENABLED":
+			return "true"
+		case "DEMO_SEED_ARCHIVE_DIR":
+			return emptyDir
+		}
+
+		return ""
+	}
+	var stderr bytes.Buffer
+	err := SeedDemo(t.Context(), getenv, &stderr)
+	if got, want := err, ErrSeedDemoNoArchives; !errors.Is(got, want) {
 		t.Errorf("SeedDemo err = %v, want %v", got, want)
 	}
 }

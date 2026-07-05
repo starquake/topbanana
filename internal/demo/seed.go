@@ -29,8 +29,8 @@ const demoHostName = "Demo Host"
 const demoAnswerWindowSeconds = 10
 
 // demoPlayerNames is a small pool of imaginative display names for the
-// anonymous players seeded alongside the demo quiz. Composer / music themed to
-// match the "Composers of Classical Music" demo quiz.
+// anonymous players seeded alongside the demo quizzes; the same pool backs the
+// finished games recorded against every quiz in the demo set.
 //
 //nolint:gochecknoglobals // dictionary table; values never mutate.
 var demoPlayerNames = []string{
@@ -39,15 +39,16 @@ var demoPlayerNames = []string{
 }
 
 // SeedIfEnabled ensures the demo baseline (the shared demo Host and the demo
-// quiz) exists when demo mode is on. It is idempotent - a present host or quiz
-// is left as-is - so re-running it against a freshly-reset demo DB restores the
-// content. A no-op when cfg.DemoMode is off. archive is the raw bytes of the
-// demo quiz zip; it is read from the path given by DEMO_SEED_ARCHIVE in the
-// caller and not embedded in the binary.
+// quiz set) exists when demo mode is on. It is idempotent - a present host or
+// quiz is left as-is - so re-running it against a freshly-reset demo DB restores
+// the content. A no-op when cfg.DemoMode is off. archives holds the raw bytes of
+// each demo quiz zip, in the order they should be restored; the files are read
+// from the DEMO_SEED_ARCHIVE_DIR directory by the caller and not embedded in the
+// binary.
 func SeedIfEnabled(
 	ctx context.Context, cfg *config.Config,
 	stores *store.Stores, mediaSvc *media.Service, logger *slog.Logger,
-	archive []byte,
+	archives [][]byte,
 ) error {
 	if !cfg.DemoMode {
 		return nil
@@ -57,13 +58,15 @@ func SeedIfEnabled(
 	if err != nil {
 		return fmt.Errorf("ensure demo host: %w", err)
 	}
-	qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger, archive)
-	if err != nil {
-		return fmt.Errorf("ensure demo quiz: %w", err)
-	}
-	if qz != nil {
-		if err := seedDemoPlays(ctx, stores, qz, logger); err != nil {
-			return fmt.Errorf("seed demo plays: %w", err)
+	for _, archive := range archives {
+		qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger, archive)
+		if err != nil {
+			return fmt.Errorf("ensure demo quiz: %w", err)
+		}
+		if qz != nil {
+			if err := seedDemoPlays(ctx, stores, qz, logger); err != nil {
+				return fmt.Errorf("seed demo plays: %w", err)
+			}
 		}
 	}
 
@@ -99,11 +102,10 @@ func ensureDemoHost(ctx context.Context, players auth.PlayerStore, adminPlayers 
 	return host.ID, nil
 }
 
-// ensureDemoQuiz restores the baseline quiz (from archive) attributed to the
-// demo Host through the same HTTP-free import path the admin upload uses. A
-// slug collision (the quiz already exists) is the idempotent no-op and returns
-// (nil, nil). A newly created quiz is returned with its questions populated
-// (IDs set).
+// ensureDemoQuiz restores one quiz (from archive) attributed to the demo Host
+// through the same HTTP-free import path the admin upload uses. A slug collision
+// (the quiz already exists) is the idempotent no-op and returns (nil, nil). A
+// newly created quiz is returned with its questions populated (IDs set).
 func ensureDemoQuiz(
 	ctx context.Context, cfg *config.Config,
 	quizzes quiz.Store, mediaSvc *media.Service, hostID int64, logger *slog.Logger,
@@ -134,22 +136,18 @@ func ensureDemoQuiz(
 	return qz, nil
 }
 
-// seedDemoPlays creates a handful of anonymous players and records a finished
-// game for each against qz, so the demo quiz appears in the home Popular list.
-// Play-seeding is intentionally tied to quiz creation (qz non-nil only when
-// newly created) so idempotent boots that find the quiz already present skip
-// this step and leave existing play counts untouched.
+// seedDemoPlays records a finished game for each of the pooled demo players
+// against qz, so the quiz appears in the home Popular list. Play-seeding is
+// intentionally tied to quiz creation (qz non-nil only when newly created) so
+// idempotent boots that find the quiz already present skip this step and leave
+// existing play counts untouched. The players are get-or-created because a
+// second newly-created quiz in the same run reuses the pool created for the
+// first.
 func seedDemoPlays(ctx context.Context, stores *store.Stores, qz *quiz.Quiz, logger *slog.Logger) error {
 	for _, name := range demoPlayerNames {
-		p, err := stores.Players.CreateAnonymousPlayer(ctx, name)
+		p, err := ensureDemoPlayer(ctx, stores.Players, name)
 		if err != nil {
-			if errors.Is(err, auth.ErrDisplayNameTaken) {
-				logger.Info("demo player already exists (skipping)", slog.String("name", name))
-
-				continue
-			}
-
-			return fmt.Errorf("create anonymous player %q: %w", name, err)
+			return fmt.Errorf("ensure demo player %q: %w", name, err)
 		}
 		if err := finishDemoGame(ctx, stores.Games, p.ID, qz); err != nil {
 			logger.Warn("finish demo game",
@@ -161,6 +159,26 @@ func seedDemoPlays(ctx context.Context, stores *store.Stores, qz *quiz.Quiz, log
 	}
 
 	return nil
+}
+
+// ensureDemoPlayer returns the anonymous demo player with the given display
+// name, creating it on first use and looking up the existing row when the name
+// is already taken (display_name is UNIQUE).
+func ensureDemoPlayer(ctx context.Context, players auth.PlayerStore, name string) (*auth.Player, error) {
+	p, err := players.CreateAnonymousPlayer(ctx, name)
+	if err == nil {
+		return p, nil
+	}
+	if !errors.Is(err, auth.ErrDisplayNameTaken) {
+		return nil, fmt.Errorf("create anonymous player: %w", err)
+	}
+
+	existing, err := players.GetPlayerByDisplayName(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("get player by display name: %w", err)
+	}
+
+	return existing, nil
 }
 
 // finishDemoGame creates a game + participant + one game_question per quiz
