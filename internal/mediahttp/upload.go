@@ -113,10 +113,10 @@ type QuizEditLookup interface {
 // The route is host/admin-gated upstream (requireGameHost); this handler adds
 // the per-quiz edit gate so a host may upload only to a quiz they created and
 // an admin to any (the same creator-or-admin rule the admin question/quiz
-// mutations apply via requireQuizOwner). A non-owner host gets a 403; a
-// missing quiz a 404. A request with no files at all, or one exceeding the
-// per-request count cap, returns 400. A real server failure on store returns
-// 500.
+// mutations apply via requireQuizOwner). A non-owner host and a missing quiz
+// both get the same opaque 404 (#1207). A request with no files at all, or one
+// exceeding the per-request count cap, returns 400. A real server failure on
+// store returns 500.
 //
 // Two server-side backstops bound a single host's upload volume (#988), since
 // the form JS fires one request per picked file and so cannot be trusted to
@@ -506,8 +506,10 @@ func isPipelineRejection(err error) bool {
 }
 
 // authorizeQuizEdit gates the request on the creator-or-admin edit rule (mirrors
-// admin.canEditQuiz) plus the publish edit-lock: a missing quiz 404s, a non-owner
-// non-admin 403s, and a published (locked) quiz 409s (#1192). Returns whether to proceed.
+// admin.requireEditableQuizOwner) plus the publish edit-lock: a missing quiz AND
+// a non-owner non-admin both get the same opaque 404 so the route is no existence
+// oracle (#1207), and a published (locked) quiz owned by the caller 409s (#1192).
+// Returns whether to proceed.
 func authorizeQuizEdit(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, quizzes QuizEditLookup, quizID int64, player *auth.Player,
@@ -526,7 +528,7 @@ func authorizeQuizEdit(
 	}
 
 	if !player.IsAdmin() && player.ID != qz.CreatedByPlayerID {
-		http.Error(w, "you do not have permission to upload media to this quiz", http.StatusForbidden)
+		http.NotFound(w, r)
 
 		return false
 	}

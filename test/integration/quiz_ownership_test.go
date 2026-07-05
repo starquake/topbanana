@@ -11,12 +11,14 @@ import (
 	"testing"
 )
 
-// TestQuizOwnership_Integration covers #281/#538: a Host may edit or delete
-// only the quizzes they created, never another Host's. The test boots two
-// browser-shaped clients, makes both Hosts, has hostA create a quiz, and then
-// probes hostB against every mutating admin endpoint scoped to that quiz. Each
-// probe must come back 403 from the requireQuizOwner gate (an Admin would pass
-// it - that path is covered in TestRoles_HostGating).
+// TestQuizOwnership_Integration covers #281/#538 and the #1207 isolation: a Host
+// may edit or delete only the quizzes they created, never another Host's. The
+// test boots two browser-shaped clients, makes both Hosts, has hostA create a
+// quiz, and then probes hostB against every mutating admin endpoint scoped to
+// that quiz. Each probe must come back with the opaque 404 the requireQuizOwner
+// gate now returns (never a 403 naming the owner, which would leak existence +
+// title + owner by id enumeration); an Admin would pass, covered in
+// TestRoles_HostGating.
 func TestQuizOwnership_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -40,15 +42,13 @@ func TestQuizOwnership_Integration(t *testing.T) {
 	// header carries the id.
 	quizID := createQuizAs(ctx, t, adminA, baseURL, "Ownership Quiz")
 
-	t.Run("non-owner POST update returns 403", func(t *testing.T) {
+	t.Run("non-owner POST update returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d/edit", quizID))
 		form := url.Values{"title": {"Hijacked"}, "description": {"x"}, "csrf_token": {token}}
-		// The GET-for-CSRF above also surfaces the 403 inline since
-		// requireQuizOwner gates the edit form — but the form still
-		// renders a CSRF cookie (the renderer writes the cookie before
-		// the render path early-returns). Posting from that jar
-		// exercises the POST gate specifically.
+		// The GET-for-CSRF above 404s (requireQuizOwner gates the edit form),
+		// but the admin top bar's logout form still renders a CSRF token on the
+		// error page. Posting from that jar exercises the POST gate specifically.
 		req := newFormReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID), form)
 		resp, err := adminB.Do(req)
 		if err != nil {
@@ -56,12 +56,12 @@ func TestQuizOwnership_Integration(t *testing.T) {
 		}
 		defer closeBody(t, resp.Body)
 
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("update status = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("non-owner POST delete returns 403", func(t *testing.T) {
+	t.Run("non-owner POST delete returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
 		form := url.Values{"csrf_token": {token}}
@@ -72,22 +72,22 @@ func TestQuizOwnership_Integration(t *testing.T) {
 		}
 		defer closeBody(t, resp.Body)
 
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("delete status = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("non-owner GET edit page returns 403", func(t *testing.T) {
+	t.Run("non-owner GET edit page returns 404", func(t *testing.T) {
 		t.Parallel()
 		resp := httpGet(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d/edit", quizID))
 		defer closeBody(t, resp.Body)
 
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("edit GET status = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("non-owner POST question add returns 403", func(t *testing.T) {
+	t.Run("non-owner POST question add returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
 		form := url.Values{
@@ -104,7 +104,7 @@ func TestQuizOwnership_Integration(t *testing.T) {
 		}
 		defer closeBody(t, resp.Body)
 
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("question add status = %d, want %d", got, want)
 		}
 	})

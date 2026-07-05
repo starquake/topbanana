@@ -28,7 +28,7 @@ func mp3Bytes() []byte {
 // TestMediaAudioUpload_Integration covers the audio upload endpoint (#1059): an
 // owner can upload audio to their editable quiz, the clip then serves back as
 // audio/mpeg and honours a Range request; an unsupported format and an over-cap
-// upload are both rejected with 400; and a non-owner host is refused.
+// upload are both rejected with 400; and a non-owner host gets an opaque 404 (#1207).
 func TestMediaAudioUpload_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -122,7 +122,7 @@ func TestMediaAudioUpload_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner host is refused", func(t *testing.T) {
+	t.Run("non-owner host gets an opaque 404", func(t *testing.T) {
 		t.Parallel()
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Owner Gate Quiz")
 		token := fetchCSRFToken(ctx, t, other, baseURL+"/admin/quizzes")
@@ -135,7 +135,7 @@ func TestMediaAudioUpload_Integration(t *testing.T) {
 			t.Fatalf("Do err = %v, want nil", err)
 		}
 		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("non-owner audio upload status = %d, want %d", got, want)
 		}
 	})
@@ -357,7 +357,7 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 		audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
 
 		status := editAudioDescription(ctx, t, other, baseURL, quizID, audioID, "hijack")
-		if got, want := status, http.StatusForbidden; got != want {
+		if got, want := status, http.StatusNotFound; got != want {
 			t.Errorf("non-owner edit status = %d, want %d", got, want)
 		}
 	})

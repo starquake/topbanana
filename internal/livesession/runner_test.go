@@ -1195,7 +1195,7 @@ func TestRunner_RearmRunsNextGameWithResetScores(t *testing.T) {
 	// The host re-arms onto game 2 (a different quiz): the room bumps game_seq and
 	// the runner drives straight into game 2's first round.
 	const hostID int64 = 1
-	if err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID); err != nil {
+	if err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID, false); err != nil {
 		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 	reArmed := h.reload(t)
@@ -1253,7 +1253,7 @@ func TestService_StartHosting_IntermissionArmsAndWaits(t *testing.T) {
 
 	// The host picks a second quiz from the intermission. StartHosting must ARM it
 	// and stay in the lobby, not start it.
-	if _, err := h.service.StartHosting(ctx, game2.ID, hostID); err != nil {
+	if _, err := h.service.StartHosting(ctx, game2.ID, hostID, false); err != nil {
 		t.Fatalf("StartHosting (from intermission) err = %v, want nil", err)
 	}
 
@@ -1332,7 +1332,7 @@ func TestService_StartHosting_RearmBeforeStartFromIntermission(t *testing.T) {
 
 	// The host picks B from the intermission, then changes to C - both before Start.
 	for _, qz := range []*quiz.Quiz{quizB, quizC} {
-		if _, err := h.service.StartHosting(ctx, qz.ID, hostID); err != nil {
+		if _, err := h.service.StartHosting(ctx, qz.ID, hostID, false); err != nil {
 			t.Fatalf("StartHosting (arm %s) err = %v, want nil", qz.Slug, err)
 		}
 	}
@@ -1463,7 +1463,7 @@ func armNextGame(t *testing.T, h *runnerHarness, hostID, quizID int64) {
 	if got, want := h.phase(t), PhaseIntermission; got != want {
 		t.Fatalf("phase before arming next game = %q, want %q", got, want)
 	}
-	if _, err := h.service.StartHosting(ctx, quizID, hostID); err != nil {
+	if _, err := h.service.StartHosting(ctx, quizID, hostID, false); err != nil {
 		t.Fatalf("StartHosting (arm next game) err = %v, want nil", err)
 	}
 	armed := h.reload(t)
@@ -1529,7 +1529,7 @@ func TestRunner_RearmSameQuizResetsScores(t *testing.T) {
 	if sameQuizID == nil {
 		t.Fatal("room QuizID = nil, want the game-1 quiz id")
 	}
-	if err := h.service.StartQuiz(ctx, h.code, hostID, *sameQuizID); err != nil {
+	if err := h.service.StartQuiz(ctx, h.code, hostID, *sameQuizID, false); err != nil {
 		t.Fatalf("StartQuiz (same quiz) err = %v, want nil", err)
 	}
 
@@ -1566,7 +1566,7 @@ func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
 	}
 
 	const hostID int64 = 1
-	err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID)
+	err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID, false)
 	if got, want := err, ErrGameInFlight; !errors.Is(got, want) {
 		t.Errorf("StartQuiz mid-game err = %v, want %v", got, want)
 	}

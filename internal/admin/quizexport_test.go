@@ -385,7 +385,8 @@ func exportRequest(t *testing.T, quizID int64, player *auth.Player) *http.Reques
 }
 
 // TestHandleQuizExport pins the handler: a missing quiz is a 404, a non-owner
-// non-admin is a 403, and the owner gets a 200 zip with the slug filename.
+// non-admin gets the same opaque 404 (#1207), and the owner gets a 200 zip with
+// the slug filename.
 func TestHandleQuizExport(t *testing.T) {
 	t.Parallel()
 
@@ -433,7 +434,7 @@ func TestHandleQuizExport(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner is 403", func(t *testing.T) {
+	t.Run("non-owner is an opaque 404", func(t *testing.T) {
 		t.Parallel()
 
 		env := newAdminEnv(t)
@@ -441,12 +442,13 @@ func TestHandleQuizExport(t *testing.T) {
 		qz := env.seedQuiz(t, ownedQuiz("Owned", "owned-quiz"))
 
 		rr := httptest.NewRecorder()
-		// A signed-in player who is neither the creator nor an admin.
+		// A signed-in player who is neither the creator nor an admin gets the same
+		// opaque 404 an absent quiz gives, so export is no existence oracle (#1207).
 		HandleQuizExport(env.logger, env.quizzes, mediaSvc).ServeHTTP(
 			rr, exportRequest(t, qz.ID, &auth.Player{ID: nonOwnerID, Role: auth.RolePlayer}),
 		)
 
-		if got, want := rr.Code, http.StatusForbidden; got != want {
+		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}
 	})

@@ -28,8 +28,8 @@ var (
 	// quizzes are hostable (MP-0 / #677).
 	ErrNotLiveQuiz = errors.New("quiz is not a live quiz")
 
-	// ErrQuizNotPublished is returned when a host tries to host a live quiz they neither published nor own; an owner may host their own draft to test it (#1192).
-	ErrQuizNotPublished = errors.New("quiz is not published")
+	// ErrQuizNotOwned is returned when a non-admin host tries to host a live quiz they did not create; per-host isolation (#1207) means a host may host only their own quizzes (published or draft), while an admin may host any.
+	ErrQuizNotOwned = errors.New("quiz is not owned by host")
 
 	// ErrNotParticipant is returned by participant-gated reads/writes when
 	// the caller has not joined the session. Handlers map it to 404 so the
@@ -568,13 +568,18 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 	s.startCountdown = d
 }
 
-// hostableQuizErr reports why qz cannot be hosted live by hostPlayerID, or nil when it can: it must be a live quiz (else [ErrNotLiveQuiz]) that is published or owned by the host (else [ErrQuizNotPublished]) (#677, #1192).
-func hostableQuizErr(qz *quiz.Quiz, hostPlayerID int64) error {
+// hostableQuizErr reports why qz cannot be hosted live by the requester, or nil
+// when it can: it must be a live quiz (else [ErrNotLiveQuiz]), and per-host
+// isolation (#1207, overriding #677 for non-admins) means the requester must
+// have created it unless they are an admin (else [ErrQuizNotOwned]).
+//
+//nolint:revive // isAdmin is the requester's role threaded from the handler to select the owner-or-admin rule (#1207), not a behavioural mode switch.
+func hostableQuizErr(qz *quiz.Quiz, requesterID int64, isAdmin bool) error {
 	if qz.Mode != quiz.ModeLive {
 		return ErrNotLiveQuiz
 	}
-	if !qz.Published && qz.CreatedByPlayerID != hostPlayerID {
-		return ErrQuizNotPublished
+	if !isAdmin && qz.CreatedByPlayerID != requesterID {
+		return ErrQuizNotOwned
 	}
 
 	return nil
@@ -586,19 +591,24 @@ func hostableQuizErr(qz *quiz.Quiz, hostPlayerID int64) error {
 // players have joined), and a non-nil id opens a room with that quiz preselected
 // (the "Host live" entry, via [Service.StartHosting]). The route layer has
 // already gated the caller to host/admin; when a quiz is supplied this method
-// enforces the domain rules: it must exist and be visible to the host (any
-// visibility - a host can view any quiz, decision 4), must be mode='live'
-// (MP-0 / #677), and must be published or owned by the host (owner-or-published,
-// #1192). Returns [quiz.ErrQuizNotFound] when the supplied quiz does not exist,
-// [ErrNotLiveQuiz] when it is a solo quiz, and [ErrQuizNotPublished] when it is
-// a draft live quiz the host does not own.
-func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID int64) (*Session, error) {
+// enforces the domain rules: it must exist, must be mode='live' (MP-0 / #677),
+// and must have been created by the host unless isAdmin (per-host isolation
+// #1207, overriding the old owner-or-published rule). Returns
+// [quiz.ErrQuizNotFound] when the supplied quiz does not exist, [ErrNotLiveQuiz]
+// when it is a solo quiz, and [ErrQuizNotOwned] when a non-admin host did not
+// create it.
+func (s *Service) CreateSession(
+	ctx context.Context,
+	quizID *int64,
+	hostPlayerID int64,
+	isAdmin bool,
+) (*Session, error) {
 	if quizID != nil {
 		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get quiz for session: %w", err)
 		}
-		if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+		if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
 			return nil, gerr
 		}
 	}
@@ -751,10 +761,10 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 // intermission (the previous game counted) and resets the roster's ready flags,
 // then the game begins with the same start-now semantics as [Service.Start].
 // Returns [ErrSessionNotFound] for an unknown code, [ErrNotHost] when the caller
-// is not the host, [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] for an unhostable
-// quiz, and [ErrGameInFlight] when a game is already running.
-func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64) error {
-	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID)
+// is not the host, [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] / [ErrQuizNotOwned]
+// for an unhostable quiz, and [ErrGameInFlight] when a game is already running.
+func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64, isAdmin bool) error {
+	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID, isAdmin)
 	if err != nil {
 		return err
 	}

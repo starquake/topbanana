@@ -23,9 +23,9 @@ import (
 // authoritative (the redirect target). In the reuse branch the returned snapshot
 // predates the arm, so its Phase/QuizID/StartedAt may lag the now-armed room -
 // callers must re-read if they need post-arm state. [quiz.ErrQuizNotFound] and
-// [ErrNotLiveQuiz] propagate so the handler can bounce an unhostable quiz to the
-// quiz list.
-func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) (*Session, error) {
+// [ErrNotLiveQuiz] / [ErrQuizNotOwned] propagate so the handler can bounce an
+// unhostable quiz to the quiz list.
+func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64, isAdmin bool) (*Session, error) {
 	active, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)
 	if err != nil {
 		return nil, fmt.Errorf(errGetActiveSessionFmt, err)
@@ -33,7 +33,7 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 
 	if active == nil {
 		var sess *Session
-		if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID); err != nil {
+		if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID, isAdmin); err != nil {
 			return nil, err
 		}
 		s.logger.InfoContext(ctx, "host started hosting: opened new room",
@@ -61,7 +61,7 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 	// no-active-session case which also lands on an armed lobby. canArmQuiz
 	// guarantees active is one of these two; ArmQuiz handles both - RearmSession
 	// re-arms an intermission room back to an armed lobby with started_at cleared.
-	err = s.ArmQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
+	err = s.ArmQuiz(ctx, active.JoinCode, hostPlayerID, quizID, isAdmin)
 	switch {
 	case err == nil, errors.Is(err, ErrGameInFlight):
 		// ErrGameInFlight means the room raced into flight between the read above
@@ -84,8 +84,8 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 // players are in, matching the no-active-session flow rather than starting the
 // game outright. Only the host may call it, and only when no game is in flight.
 // Returns the same errors as [Service.armRoomForHost].
-func (s *Service) ArmQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64) error {
-	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID)
+func (s *Service) ArmQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64, isAdmin bool) error {
+	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID, isAdmin)
 	if err != nil {
 		return err
 	}
@@ -173,9 +173,14 @@ func (s *Service) GetActiveSessionForHost(ctx context.Context, hostPlayerID int6
 // not publish or start - the caller decides: [Service.ArmQuiz] stops here (the
 // room waits in the lobby), [Service.StartQuiz] marks it started. Returns
 // [ErrSessionNotFound] for an unknown code, [ErrNotHost] for a foreign host,
-// [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] / [ErrQuizNotPublished] for an
+// [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] / [ErrQuizNotOwned] for an
 // unhostable quiz, and [ErrGameInFlight] when a game is already running.
-func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlayerID, quizID int64) (*Session, error) {
+func (s *Service) armRoomForHost(
+	ctx context.Context,
+	joinCode string,
+	hostPlayerID, quizID int64,
+	isAdmin bool,
+) (*Session, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
@@ -193,7 +198,7 @@ func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlaye
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz to arm: %w", err)
 	}
-	if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+	if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
 		return nil, gerr
 	}
 

@@ -56,18 +56,20 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.FormValue("restart") == "true" {
-		h.hostLiveRestart(w, r, id, player.ID)
+		h.hostLiveRestart(w, r, id, player.ID, player.IsAdmin())
 
 		return
 	}
-	h.hostLive(w, r, id, player.ID)
+	h.hostLive(w, r, id, player.ID, player.IsAdmin())
 }
 
 // createEmptyRoom opens an empty staging room (the no-quiz path) and redirects
 // the host to it. Not one-room-aware on purpose: the dashboard UI gates the
 // empty-room entry (#851).
 func (h *Handlers) createEmptyRoom(w http.ResponseWriter, r *http.Request, playerID int64) {
-	sess, err := h.service.CreateSession(r.Context(), nil, playerID)
+	// A nil quiz opens an empty room; no quiz is hosted yet, so the admin flag is
+	// unconsulted here (the ad-hoc pick later goes through StartQuiz).
+	sess, err := h.service.CreateSession(r.Context(), nil, playerID, false)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "error creating host session", slog.Any("err", err))
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
@@ -80,14 +82,14 @@ func (h *Handlers) createEmptyRoom(w http.ResponseWriter, r *http.Request, playe
 // hostLive orchestrates the quiz-view "Host live" entry through StartHosting,
 // which is one-room-per-host aware, then redirects the host to the resulting
 // room. A missing or solo quiz bounces back to the quiz list (#851).
-func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, playerID int64) {
-	sess, err := h.service.StartHosting(r.Context(), quizID, playerID)
+func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, playerID int64, isAdmin bool) {
+	sess, err := h.service.StartHosting(r.Context(), quizID, playerID, isAdmin)
 	if err != nil {
 		switch {
 		case errors.Is(err, quiz.ErrQuizNotFound),
 			errors.Is(err, livesession.ErrNotLiveQuiz),
-			errors.Is(err, livesession.ErrQuizNotPublished):
-			// A missing, solo, or unpublished-and-not-owned quiz is not hostable; bounce to the quiz list instead of a raw error.
+			errors.Is(err, livesession.ErrQuizNotOwned):
+			// A missing, solo, or not-owned (non-admin) quiz is not hostable; bounce to the quiz list instead of a raw error.
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error hosting live quiz", slog.Any("err", err))
@@ -103,13 +105,13 @@ func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, play
 // the picked quiz (#853): the confirm-and-restart path the host took to switch
 // the live quiz. A missing or solo quiz bounces back to the quiz list and
 // nothing is ended.
-func (h *Handlers) hostLiveRestart(w http.ResponseWriter, r *http.Request, quizID, playerID int64) {
-	sess, err := h.service.RestartHosting(r.Context(), quizID, playerID)
+func (h *Handlers) hostLiveRestart(w http.ResponseWriter, r *http.Request, quizID, playerID int64, isAdmin bool) {
+	sess, err := h.service.RestartHosting(r.Context(), quizID, playerID, isAdmin)
 	if err != nil {
 		switch {
 		case errors.Is(err, quiz.ErrQuizNotFound),
 			errors.Is(err, livesession.ErrNotLiveQuiz),
-			errors.Is(err, livesession.ErrQuizNotPublished):
+			errors.Is(err, livesession.ErrQuizNotOwned):
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error restarting host session", slog.Any("err", err))
@@ -193,13 +195,13 @@ func (h *Handlers) NextQuiz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.service.StartQuiz(ctx, code, player.ID, quizID)
+	err = h.service.StartQuiz(ctx, code, player.ID, quizID, player.IsAdmin())
 	switch {
 	case err == nil,
 		errors.Is(err, livesession.ErrGameInFlight),
 		errors.Is(err, quiz.ErrQuizNotFound),
 		errors.Is(err, livesession.ErrNotLiveQuiz),
-		errors.Is(err, livesession.ErrQuizNotPublished):
+		errors.Is(err, livesession.ErrQuizNotOwned):
 		// code is the server-minted path value, never request input, so the
 		// redirect back to the lobby is same-origin.
 		dest := hostScreenPathPrefix + code

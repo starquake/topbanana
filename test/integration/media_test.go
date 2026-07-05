@@ -22,8 +22,8 @@ import (
 
 // TestMediaUpload_Integration covers the host/admin upload endpoint (#936
 // slice 2): an owner can upload an image to their editable quiz and the image
-// then serves back; a non-owner host is refused; and a malformed upload is
-// rejected with 400.
+// then serves back; a non-owner host gets the same opaque 404 an absent quiz
+// gives (#1207); and a malformed upload is rejected with 400.
 func TestMediaUpload_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -65,7 +65,7 @@ func TestMediaUpload_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("non-owner host is refused", func(t *testing.T) {
+	t.Run("non-owner host gets an opaque 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, other, baseURL+"/admin/quizzes")
 		body, contentType := multipartImage(t, "pic.png", pngBytes(t, 64, 64), token)
@@ -75,7 +75,7 @@ func TestMediaUpload_Integration(t *testing.T) {
 			t.Fatalf("Do err = %v, want nil", err)
 		}
 		defer closeBody(t, resp.Body)
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("non-owner upload status = %d, want %d", got, want)
 		}
 	})
@@ -500,8 +500,8 @@ func TestMediaServe_Integration(t *testing.T) {
 // TestMediaLibraryView_Integration covers the per-quiz image library on the
 // admin quiz view (#936 slice 3): the owner sees the upload control and (after
 // an upload) a thumbnail grid linking each stored image; a quiz with no media
-// shows the empty state; and a read-only viewer (a non-owner host who can open
-// the page but not edit) sees neither the upload form nor the grid.
+// shows the empty state; and a non-owner host cannot open the quiz view at all -
+// it 404s under the owner-or-admin view gate (#1207).
 func TestMediaLibraryView_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -555,19 +555,15 @@ func TestMediaLibraryView_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("read-only viewer sees no upload form", func(t *testing.T) {
+	t.Run("non-owner host cannot open the quiz view", func(t *testing.T) {
 		t.Parallel()
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Viewer Gate Quiz")
 		uploadImage(ctx, t, owner, baseURL, quizID, "pic.png", pngBytes(t, 200, 120))
 
-		page := getQuizViewBody(ctx, t, viewer, baseURL, quizID)
-		for _, unwanted := range []string{
-			fmt.Sprintf(`action="/admin/quizzes/%d/media"`, quizID),
-			`enctype="multipart/form-data"`,
-		} {
-			if strings.Contains(page, unwanted) {
-				t.Errorf("read-only viewer quiz view unexpectedly contains %q", unwanted)
-			}
+		resp := httpGet(ctx, t, viewer, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+			t.Errorf("non-owner quiz view status = %d, want %d", got, want)
 		}
 	})
 }

@@ -25,17 +25,18 @@ func (s *Service) HostHasRunningGame(ctx context.Context, hostPlayerID int64) (b
 // hosting quizID (#853) - the deliberate "switch the live quiz" path the host
 // confirms when a game is already running. The target quiz is validated BEFORE
 // the running session is ended, so an unhostable pick ([quiz.ErrQuizNotFound] /
-// [ErrNotLiveQuiz]) bounces with nothing torn down. A rarer failure of the
-// create after the end (e.g. join-code exhaustion) surfaces as an error; the old
-// session is already gone, so the host's retry simply opens the new room.
-func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64) (*Session, error) {
+// [ErrNotLiveQuiz] / [ErrQuizNotOwned]) bounces with nothing torn down. A rarer
+// failure of the create after the end (e.g. join-code exhaustion) surfaces as an
+// error; the old session is already gone, so the host's retry simply opens the
+// new room.
+func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64, isAdmin bool) (*Session, error) {
 	// Validate the target quiz up front; CreateSession re-checks it, but doing it
 	// here first guarantees we never end the running game for an unhostable pick.
 	qz, err := s.quizzes.GetQuiz(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz for restart: %w", err)
 	}
-	if gerr := hostableQuizErr(qz, hostPlayerID); gerr != nil {
+	if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
 		return nil, gerr
 	}
 
@@ -52,7 +53,7 @@ func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64
 	// No active session now (just ended, or never any): CreateSession opens a new
 	// armed lobby hosting the picked quiz.
 	var sess *Session
-	if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID); err != nil {
+	if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID, isAdmin); err != nil {
 		return nil, err
 	}
 	s.logger.InfoContext(ctx, "host restarted hosting: opened new room",

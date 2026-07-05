@@ -172,11 +172,19 @@ type stubQuizStore struct {
 
 func (stubQuizStore) Ping(_ context.Context) error                        { return nil }
 func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) { return nil, errStub }
+func (stubQuizStore) ListQuizzesForOwner(_ context.Context, _ int64) ([]*quiz.Quiz, error) {
+	return nil, errStub
+}
+
 func (stubQuizStore) ListPublicQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
 	return nil, errStub
 }
 
 func (stubQuizStore) ListLiveQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) ListLiveQuizzesForOwner(_ context.Context, _ int64) ([]*quiz.Quiz, error) {
 	return nil, errStub
 }
 

@@ -65,7 +65,16 @@ func (h *Handlers) Picker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quizzes, err := h.quizzes.ListLiveQuizzes(ctx)
+	// An Admin sees every live quiz; a plain Host sees only their own (#1207).
+	var (
+		quizzes []*quiz.Quiz
+		err     error
+	)
+	if player.IsAdmin() {
+		quizzes, err = h.quizzes.ListLiveQuizzes(ctx)
+	} else {
+		quizzes, err = h.quizzes.ListLiveQuizzesForOwner(ctx, player.ID)
+	}
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error listing live quizzes", slog.Any("err", err))
 		http.Error(w, msgInternalError, http.StatusInternalServerError)

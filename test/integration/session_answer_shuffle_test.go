@@ -41,13 +41,14 @@ func seedShuffleLiveQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, 
 	return qz
 }
 
-// startShuffleSession registers a fresh host, promotes it so it may open a
-// room, opens a session for quizID, joins the given players, and starts the
-// runner, returning the join code. Each session gets its own host because a
-// host may hold only one running game at a time, and the test needs several
-// concurrent sessions to compare orders. It mints the host session cookie
-// (registerVerifyAndMint) rather than logging in so several back-to-back host
-// sign-ins from one IP don't trip the per-IP login cooldown.
+// startShuffleSession registers a fresh host, promotes it to admin so it may run
+// this store-seeded quiz it does not own (per-host isolation #1207 restricts
+// hosting to the owner or an admin), opens a session for quizID, joins the given
+// players, and starts the runner, returning the join code. Each session gets its
+// own host because a host may hold only one running game at a time, and the test
+// needs several concurrent sessions to compare orders. It mints the host session
+// cookie (registerVerifyAndMint) rather than logging in so several back-to-back
+// host sign-ins from one IP don't trip the per-IP login cooldown.
 func startShuffleSession(
 	ctx context.Context, t *testing.T, setup integrationSetup, quizID int64, hostSlug string, players ...*http.Client,
 ) string {
@@ -58,7 +59,7 @@ func startShuffleSession(
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	registerVerifyAndMint(ctx, t, host, baseURL, setup.DBURI, hostSlug, hostSlug+"-pass-123")
-	makeHost(ctx, t, setup.DBURI, hostSlug)
+	makeAdmin(ctx, t, setup.DBURI, hostSlug)
 	code := createSession(ctx, t, host, baseURL, quizID)
 	for i, p := range players {
 		joinSession(ctx, t, p, baseURL, code, fmt.Sprintf("%s-p%d", hostSlug, i))

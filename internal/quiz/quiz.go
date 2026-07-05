@@ -17,6 +17,10 @@ type Store interface {
 	// ListQuizzes returns all quizzes regardless of visibility. Used by
 	// admin surfaces; public-facing callers should use ListPublicQuizzes.
 	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// ListQuizzesForOwner returns the subset of ListQuizzes created by the
+	// given player (#1207). The admin quiz list uses the unscoped
+	// ListQuizzes; a plain Host sees only their own quizzes.
+	ListQuizzesForOwner(ctx context.Context, ownerID int64) ([]*Quiz, error)
 	// ListPublicQuizzes returns the visibility=public subset of
 	// ListQuizzes (#103). Unlisted quizzes are reachable only by their
 	// share link; private quizzes are gated behind authentication at
@@ -26,6 +30,11 @@ type Store interface {
 	// Used by the host intermission picker to offer the room's next quiz;
 	// visibility is not filtered, matching CreateSession's mode='live' gate.
 	ListLiveQuizzes(ctx context.Context) ([]*Quiz, error)
+	// ListLiveQuizzesForOwner returns the subset of ListLiveQuizzes created
+	// by the given player (#1207). The host picker uses this for a plain Host
+	// so they see only their own live-eligible quizzes; an admin uses the
+	// unscoped ListLiveQuizzes.
+	ListLiveQuizzesForOwner(ctx context.Context, ownerID int64) ([]*Quiz, error)
 	// QuestionCountsByQuiz returns the number of questions per quiz, keyed by
 	// quiz ID. Quizzes with no questions are absent from the map; callers
 	// should treat a missing entry as 0. Used alongside ListQuizzes by the

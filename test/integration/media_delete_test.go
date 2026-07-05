@@ -17,8 +17,8 @@ import (
 // TestMediaDelete_Integration covers the image-delete endpoint (#936 slice 4):
 // an owner deletes their own image; the IDOR guard refuses deleting another
 // quiz's image through this quiz's path; an admin moderates (deletes) another
-// host's image; a non-owner non-admin host is refused; and an unknown media id
-// is a 404.
+// host's image; a non-owner non-admin host gets the same opaque 404 an unknown
+// media id gives (#1207).
 func TestMediaDelete_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -81,13 +81,13 @@ func TestMediaDelete_Integration(t *testing.T) {
 		assertMediaGone(ctx, t, setup.Stores, mediaID)
 	})
 
-	t.Run("non-owner non-admin host is refused", func(t *testing.T) {
+	t.Run("non-owner non-admin host gets an opaque 404", func(t *testing.T) {
 		t.Parallel()
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Forbidden Delete Quiz")
 		uploadImage(ctx, t, owner, baseURL, quizID, "pic.png", pngBytes(t, 200, 120))
 		mediaID := latestMediaID(ctx, t, setup.Stores, quizID)
 
-		deleteMedia(ctx, t, other, baseURL, quizID, mediaID, http.StatusForbidden)
+		deleteMedia(ctx, t, other, baseURL, quizID, mediaID, http.StatusNotFound)
 
 		if _, err := setup.Stores.Media.GetMedia(ctx, mediaID); err != nil {
 			t.Errorf("GetMedia after refused delete err = %v, want nil (image must survive)", err)
@@ -136,8 +136,8 @@ func TestMediaDelete_Integration(t *testing.T) {
 // TestMediaDeleteView_Integration covers the delete affordance in the per-quiz
 // image library (#936 slice 4): the owner's quiz view renders a delete control
 // and a delete form posting to the media delete route for each image, while a
-// read-only viewer (a non-owner host) sees no delete form (the whole Images
-// section is gated on edit rights).
+// non-owner host cannot open the quiz view at all - it 404s under the owner-or-
+// admin view gate (#1207).
 func TestMediaDeleteView_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -169,11 +169,12 @@ func TestMediaDeleteView_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("read-only viewer sees no delete form", func(t *testing.T) {
+	t.Run("non-owner host cannot open the quiz view", func(t *testing.T) {
 		t.Parallel()
-		page := getQuizViewBody(ctx, t, viewer, baseURL, quizID)
-		if unwanted := fmt.Sprintf(`/media/%d/delete`, mediaID); strings.Contains(page, unwanted) {
-			t.Errorf("read-only viewer quiz view unexpectedly contains %q", unwanted)
+		resp := httpGet(ctx, t, viewer, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+			t.Errorf("non-owner quiz view status = %d, want %d", got, want)
 		}
 	})
 }

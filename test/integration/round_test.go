@@ -338,17 +338,17 @@ func TestRounds_NonOwnerForbidden(t *testing.T) {
 	makeHost(ctx, t, srv.DBURI, "rounds-owner-b")
 	quizID := createQuizAs(ctx, t, adminA, baseURL, "Owned Quiz With Rounds")
 
-	t.Run("non-owner GET new round form returns 403", func(t *testing.T) {
+	t.Run("non-owner GET new round form returns 404", func(t *testing.T) {
 		t.Parallel()
 		resp := httpGet(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d/rounds/new", quizID))
 		defer closeBody(t, resp.Body)
 
-		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("non-owner POST create returns 403", func(t *testing.T) {
+	t.Run("non-owner POST create returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
 		status, _, _ := postForm(
@@ -356,7 +356,7 @@ func TestRounds_NonOwnerForbidden(t *testing.T) {
 			baseURL+fmt.Sprintf("/admin/quizzes/%d/rounds", quizID),
 			url.Values{"title": {"hijacked"}, "csrf_token": {token}},
 		)
-		if got, want := status, http.StatusForbidden; got != want {
+		if got, want := status, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})

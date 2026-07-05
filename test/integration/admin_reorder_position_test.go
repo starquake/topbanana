@@ -337,17 +337,17 @@ func TestAdminPosition_NonOwnerGated(t *testing.T) {
 		t.Fatalf("GetDefaultRound err = %v, want nil", err)
 	}
 
-	t.Run("non-owner POST round position returns 403", func(t *testing.T) {
+	t.Run("non-owner POST round position returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
 		form := url.Values{"csrf_token": {token}, "new_position": {"1"}}
 		target := fmt.Sprintf("%s/admin/quizzes/%d/rounds/%d/position", baseURL, quizID, defaultRound.ID)
-		if got, want := postFormStatus(ctx, t, adminB, target, form), http.StatusForbidden; got != want {
+		if got, want := postFormStatus(ctx, t, adminB, target, form), http.StatusNotFound; got != want {
 			t.Errorf("round position status = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("non-owner POST question position returns 403", func(t *testing.T) {
+	t.Run("non-owner POST question position returns 404", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, adminB, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
 		form := url.Values{
@@ -356,7 +356,7 @@ func TestAdminPosition_NonOwnerGated(t *testing.T) {
 			"round_id":     {strconv.FormatInt(defaultRound.ID, 10)},
 		}
 		target := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/position", baseURL, quizID, 1)
-		if got, want := postFormStatus(ctx, t, adminB, target, form), http.StatusForbidden; got != want {
+		if got, want := postFormStatus(ctx, t, adminB, target, form), http.StatusNotFound; got != want {
 			t.Errorf("question position status = %d, want %d", got, want)
 		}
 	})
