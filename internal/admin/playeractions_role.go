@@ -154,17 +154,23 @@ func writeRoleChange(
 	return false
 }
 
-// roleLabel maps a role constant to its human word, so the success
-// flash and the notification email name the tier the same way.
-func roleLabel(role string) string {
+// roleLabelKey maps a role constant to the catalog key for its human word,
+// so the role->word mapping lives in exactly one place.
+func roleLabelKey(role string) locale.MessageID {
 	switch role {
 	case auth.RoleAdmin:
-		return "admin"
+		return emailRoleChangeRoleAdminKey
 	case auth.RoleHost:
-		return "host"
+		return emailRoleChangeRoleHostKey
 	default:
-		return "player"
+		return emailRoleChangeRolePlayerKey
 	}
+}
+
+// roleLabel names the tier in English for the admin success flash (the admin
+// UI is English); the player-facing email uses localizedRoleLabel instead.
+func roleLabel(role string) string {
+	return locale.Translate(locale.LocaleEN, roleLabelKey(role))
 }
 
 // roleChangeNotice is the success flash naming the new tier.
@@ -172,17 +178,10 @@ func roleChangeNotice(role string) string {
 	return "Player role set to " + roleLabel(role) + "."
 }
 
-// localizedRoleLabel maps a role constant to its word in loc, for the
-// player-facing role-change email.
+// localizedRoleLabel names the tier in loc, for the player-facing
+// role-change email.
 func localizedRoleLabel(loc, role string) string {
-	switch role {
-	case auth.RoleAdmin:
-		return locale.Translate(loc, emailRoleChangeRoleAdminKey)
-	case auth.RoleHost:
-		return locale.Translate(loc, emailRoleChangeRoleHostKey)
-	default:
-		return locale.Translate(loc, emailRoleChangeRolePlayerKey)
-	}
+	return locale.Translate(loc, roleLabelKey(role))
 }
 
 // maybeNotifyRoleChange honours the opt-in checkbox: when it is unset it
