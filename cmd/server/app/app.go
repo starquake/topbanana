@@ -337,6 +337,7 @@ type inviteSweeper interface {
 type retentionSweeper interface {
 	SweepStaleAnonymousPlayers(ctx context.Context, days int) error
 	SweepAbandonedGames(ctx context.Context, days int) error
+	SweepStaleAuditLog(ctx context.Context, days int) error
 }
 
 // mediaSweeper is the slice of the media service the sweep calls: drop the
@@ -354,15 +355,18 @@ func runMediaSweep(ctx context.Context, logger *slog.Logger, mediaSweep mediaSwe
 	}
 }
 
-// runRetentionSweep runs both data-retention sweeps once with the configured
+// runRetentionSweep runs the data-retention sweeps once with the configured
 // retention windows, logging each failure at warn so a transient error in one
-// does not skip the other or abort the surrounding token sweep.
+// does not skip the others or abort the surrounding token sweep.
 func runRetentionSweep(ctx context.Context, logger *slog.Logger, retention retentionSweeper) {
 	if err := retention.SweepStaleAnonymousPlayers(ctx, store.AnonymousRetentionDays); err != nil {
 		logger.WarnContext(ctx, "anonymous-player retention sweep failed", slog.Any("err", err))
 	}
 	if err := retention.SweepAbandonedGames(ctx, store.AbandonedGameDays); err != nil {
 		logger.WarnContext(ctx, "abandoned-game retention sweep failed", slog.Any("err", err))
+	}
+	if err := retention.SweepStaleAuditLog(ctx, store.AdminAuditRetentionDays); err != nil {
+		logger.WarnContext(ctx, "admin-audit retention sweep failed", slog.Any("err", err))
 	}
 }
 
@@ -383,8 +387,9 @@ func startSweeps(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 
 // sweepExpiredAtStartup runs the one-shot expiry sweep across the verify,
 // reset, and invite token tables plus the data-retention sweeps (stale
-// anonymous players and abandoned games) and the stale not-ready media sweep
-// at boot, before the periodic sweep goroutine takes over. Each failure is
+// anonymous players, abandoned games, and the admin-audit log) and the stale
+// not-ready media sweep at boot, before the periodic sweep goroutine takes
+// over. Each failure is
 // logged at warn and the others still run; a single table's transient error
 // must not skip the rest.
 func sweepExpiredAtStartup(
@@ -405,8 +410,9 @@ func sweepExpiredAtStartup(
 
 // runTokenSweep ticks at interval and on each iteration runs the verify,
 // reset, and invite token expiry sweeps plus the data-retention sweeps
-// (stale anonymous players and abandoned games) and the stale not-ready
-// media sweep. Returns when ctx is cancelled (which is the signal-driven
+// (stale anonymous players, abandoned games, and the admin-audit log) and the
+// stale not-ready media sweep. Returns when ctx is cancelled (which is the
+// signal-driven
 // shutdown context, so a graceful shutdown stops the sweep before the DB is
 // closed). A sweep failure is logged at warn and the loop continues; one bad
 // tick should not silence the next hour's pass.

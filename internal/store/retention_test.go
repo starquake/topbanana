@@ -72,6 +72,36 @@ func TestRetentionSweep(t *testing.T) {
 	assertRetention(ctx, t, db, seed)
 }
 
+// TestSweepStaleAuditLog prunes admin_audit rows older than the 180-day
+// retention window while keeping rows inside it, including the rows straddling
+// the cutoff boundary (#628). created_at is stamped via SQLite datetime
+// expressions so the cutoff comparison runs against production-shaped
+// timestamps.
+func TestSweepStaleAuditLog(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := dbtest.Open(t)
+
+	actorID := insertSignedInPlayer(ctx, t, db, "audit-actor", seedRecent)
+	targetID := insertAnonPlayer(ctx, t, db, "audit-target", seedRecent)
+
+	oldID := insertAuditLog(ctx, t, db, actorID, targetID, "datetime('now', '-200 days')")
+	justOverID := insertAuditLog(ctx, t, db, actorID, targetID, "datetime('now', '-181 days')")
+	justUnderID := insertAuditLog(ctx, t, db, actorID, targetID, "datetime('now', '-179 days')")
+	recentID := insertAuditLog(ctx, t, db, actorID, targetID, seedRecent)
+
+	retention := NewRetentionStore(db, slog.Default())
+	if err := retention.SweepStaleAuditLog(ctx, AdminAuditRetentionDays); err != nil {
+		t.Fatalf("SweepStaleAuditLog err = %v, want nil", err)
+	}
+
+	assertAuditAbsent(ctx, t, db, oldID)
+	assertAuditAbsent(ctx, t, db, justOverID)
+	assertAuditPresent(ctx, t, db, justUnderID)
+	assertAuditPresent(ctx, t, db, recentID)
+}
+
 // TestDeletePlayersByIDs_SkipsClaimedPlayer: DeletePlayersByIDs deletes a still-
 // anonymous id but spares a since-claimed one in the same call (#1175).
 func TestDeletePlayersByIDs_SkipsClaimedPlayer(t *testing.T) {
@@ -528,6 +558,26 @@ func insertSeenRound(
 	}
 }
 
+func insertAuditLog(
+	ctx context.Context,
+	t *testing.T,
+	db *sql.DB,
+	actorID, targetID int64,
+	at string,
+) int64 {
+	t.Helper()
+	res, err := db.ExecContext(ctx,
+		`INSERT INTO admin_audit (actor_player_id, target_player_id, action, payload, created_at)
+		 VALUES (?, ?, 'verify', '{}', `+at+`)`,
+		actorID, targetID,
+	)
+	if err != nil {
+		t.Fatalf("insert admin_audit err = %v, want nil", err)
+	}
+
+	return lastID(t, res)
+}
+
 func lastID(t *testing.T, res sql.Result) int64 {
 	t.Helper()
 	id, err := res.LastInsertId()
@@ -573,6 +623,20 @@ func assertGamePresent(ctx context.Context, t *testing.T, db *sql.DB, id string)
 	t.Helper()
 	if got := countRows(ctx, t, db, `SELECT COUNT(*) FROM games WHERE id = ?`, id); got != 1 {
 		t.Errorf("game %q rows = %d, want 1 (should survive)", id, got)
+	}
+}
+
+func assertAuditAbsent(ctx context.Context, t *testing.T, db *sql.DB, id int64) {
+	t.Helper()
+	if got := countRows(ctx, t, db, `SELECT COUNT(*) FROM admin_audit WHERE id = ?`, id); got != 0 {
+		t.Errorf("admin_audit %d rows = %d, want 0 (should be swept)", id, got)
+	}
+}
+
+func assertAuditPresent(ctx context.Context, t *testing.T, db *sql.DB, id int64) {
+	t.Helper()
+	if got := countRows(ctx, t, db, `SELECT COUNT(*) FROM admin_audit WHERE id = ?`, id); got != 1 {
+		t.Errorf("admin_audit %d rows = %d, want 1 (should survive)", id, got)
 	}
 }
 
