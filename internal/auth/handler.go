@@ -278,7 +278,7 @@ func handleRegisterError(
 ) {
 	switch {
 	case errors.Is(err, ErrEmailTaken):
-		dispatchRegisterExisting(r.Context(), logger, deps, input.CleanedEmail, locale.Resolve(r))
+		dispatchRegisterExisting(r.Context(), logger, deps, input.CleanedEmail)
 		renderers.renderPending(w, r, input.CleanedEmail)
 	case errors.Is(err, ErrDisplayNameTaken):
 		renderers.form.Render(w, r, http.StatusConflict, formData{
@@ -352,11 +352,16 @@ const (
 // nothing. Runs detached with a bounded timeout, mirroring dispatchVerifyEmail,
 // so the collision response keeps the same timing as the success path. A nil
 // Mailer (unit tests) skips the send; failures are logged, never surfaced.
+//
+// This notice goes to the existing account owner but is triggered by an
+// unauthenticated submitter who controls their own request locale, so it is not
+// localized to that locale; English is the safe default until a stored recipient
+// locale exists.
 func dispatchRegisterExisting(
 	ctx context.Context,
 	logger *slog.Logger,
 	deps RegisterDeps,
-	recipient, loc string,
+	recipient string,
 ) {
 	if deps.Mailer == nil {
 		return
@@ -366,8 +371,8 @@ func dispatchRegisterExisting(
 		defer cancel()
 		msg := mailer.Message{
 			To:      recipient,
-			Subject: locale.Translate(loc, emailRegisterExistingSubjectKey),
-			Body:    locale.Translate(loc, emailRegisterExistingBodyKey),
+			Subject: locale.Translate(locale.LocaleEN, emailRegisterExistingSubjectKey),
+			Body:    locale.Translate(locale.LocaleEN, emailRegisterExistingBodyKey),
 			Kind:    mailer.KindRegisterExisting,
 		}
 		if err := deps.Mailer.Send(bg, msg); err != nil {

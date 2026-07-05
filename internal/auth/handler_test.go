@@ -350,9 +350,12 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	}
 }
 
-// TestHandleRegisterSubmit_DuplicateEmailDutch pins that the out-of-band
-// register-existing notice is localized to the submitter's request locale.
-func TestHandleRegisterSubmit_DuplicateEmailDutch(t *testing.T) {
+// TestHandleRegisterSubmit_DuplicateEmailStaysEnglish pins that the
+// register-existing notice stays English even when the submitter's request
+// carries a lang=nl cookie: the notice reaches the existing account owner but is
+// triggered by an unauthenticated submitter who controls their own locale, so it
+// must not be localized to that attacker-chosen locale.
+func TestHandleRegisterSubmit_DuplicateEmailStaysEnglish(t *testing.T) {
 	t.Parallel()
 
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
@@ -380,11 +383,11 @@ func TestHandleRegisterSubmit_DuplicateEmailDutch(t *testing.T) {
 	if got, want := len(sent), 1; got != want {
 		t.Fatalf("sender.Sent() len = %d, want %d", got, want)
 	}
-	if got, want := sent[0].Subject, "Iemand probeerde te registreren met je Top Banana!-e-mailadres"; got != want {
+	if got, want := sent[0].Subject, "Someone tried to register with your Top Banana! email"; got != want {
 		t.Errorf("sent[0].Subject = %q, want %q", got, want)
 	}
 	if got, want := sent[0].Body,
-		"Iemand heeft geprobeerd een Top Banana!-account aan te maken"; !strings.Contains(got, want) {
+		"Someone tried to create a Top Banana! account with this email address."; !strings.Contains(got, want) {
 		t.Errorf("sent[0].Body = %q, should contain %q", got, want)
 	}
 }
