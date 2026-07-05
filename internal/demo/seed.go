@@ -54,23 +54,66 @@ func SeedIfEnabled(
 		return nil
 	}
 
+	// Open every archive up front so a corrupt zip container fails before any DB
+	// side effect, never leaving a partially-seeded demo set.
+	readers := make([]*zip.Reader, 0, len(archives))
+	for i, archive := range archives {
+		zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+		if err != nil {
+			return fmt.Errorf("open demo archive %d: %w", i, err)
+		}
+		readers = append(readers, zr)
+	}
+
 	hostID, err := ensureDemoHost(ctx, stores.Players, stores.AdminPlayers)
 	if err != nil {
 		return fmt.Errorf("ensure demo host: %w", err)
 	}
-	for _, archive := range archives {
-		qz, err := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger, archive)
-		if err != nil {
-			return fmt.Errorf("ensure demo quiz: %w", err)
+
+	var created []*quiz.Quiz
+	for _, zr := range readers {
+		qz, importErr := ensureDemoQuiz(ctx, cfg, stores.Quizzes, mediaSvc, hostID, logger, zr)
+		if importErr != nil {
+			return fmt.Errorf("ensure demo quiz: %w", importErr)
 		}
 		if qz != nil {
-			if err := seedDemoPlays(ctx, stores, qz, logger); err != nil {
-				return fmt.Errorf("seed demo plays: %w", err)
-			}
+			created = append(created, qz)
 		}
+	}
+	if len(created) == 0 {
+		return nil
+	}
+
+	poolIDs, err := buildDemoPlayerPool(ctx, stores.Players)
+	if err != nil {
+		return fmt.Errorf("build demo player pool: %w", err)
+	}
+	for _, qz := range created {
+		seedDemoPlays(ctx, stores.Games, qz, poolIDs, logger)
 	}
 
 	return nil
+}
+
+// buildDemoPlayerPool creates one anonymous player per name in demoPlayerNames
+// and returns the ids of those it created. A name already taken is skipped
+// (not looked up) so a real, pre-existing account holding a pool name is never
+// attributed a synthesised demo play. Any other create error aborts.
+func buildDemoPlayerPool(ctx context.Context, players auth.PlayerStore) ([]int64, error) {
+	ids := make([]int64, 0, len(demoPlayerNames))
+	for _, name := range demoPlayerNames {
+		p, err := players.CreateAnonymousPlayer(ctx, name)
+		if err != nil {
+			if errors.Is(err, auth.ErrDisplayNameTaken) {
+				continue
+			}
+
+			return nil, fmt.Errorf("create anonymous player %q: %w", name, err)
+		}
+		ids = append(ids, p.ID)
+	}
+
+	return ids, nil
 }
 
 // ensureDemoHost returns the id of the shared demo Host, creating it on first
@@ -102,19 +145,15 @@ func ensureDemoHost(ctx context.Context, players auth.PlayerStore, adminPlayers 
 	return host.ID, nil
 }
 
-// ensureDemoQuiz restores one quiz (from archive) attributed to the demo Host
+// ensureDemoQuiz restores one quiz (from zr) attributed to the demo Host
 // through the same HTTP-free import path the admin upload uses. A slug collision
 // (the quiz already exists) is the idempotent no-op and returns (nil, nil). A
 // newly created quiz is returned with its questions populated (IDs set).
 func ensureDemoQuiz(
 	ctx context.Context, cfg *config.Config,
 	quizzes quiz.Store, mediaSvc *media.Service, hostID int64, logger *slog.Logger,
-	archive []byte,
+	zr *zip.Reader,
 ) (*quiz.Quiz, error) {
-	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
-	if err != nil {
-		return nil, fmt.Errorf("open baseline archive: %w", err)
-	}
 	limits := admin.NewArchiveImportLimits(
 		cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes,
 	)
@@ -136,49 +175,22 @@ func ensureDemoQuiz(
 	return qz, nil
 }
 
-// seedDemoPlays records a finished game for each of the pooled demo players
-// against qz, so the quiz appears in the home Popular list. Play-seeding is
-// intentionally tied to quiz creation (qz non-nil only when newly created) so
-// idempotent boots that find the quiz already present skip this step and leave
-// existing play counts untouched. The players are get-or-created because a
-// second newly-created quiz in the same run reuses the pool created for the
-// first.
-func seedDemoPlays(ctx context.Context, stores *store.Stores, qz *quiz.Quiz, logger *slog.Logger) error {
-	for _, name := range demoPlayerNames {
-		p, err := ensureDemoPlayer(ctx, stores.Players, name)
-		if err != nil {
-			return fmt.Errorf("ensure demo player %q: %w", name, err)
-		}
-		if err := finishDemoGame(ctx, stores.Games, p.ID, qz); err != nil {
+// seedDemoPlays records a finished game against qz for each player id in the
+// pre-built demo player pool, so the quiz appears in the home Popular list.
+// Play-seeding is only called for newly-created quizzes, so idempotent boots
+// that find every quiz already present leave existing play counts untouched. A
+// per-play failure is logged and skipped: a transient error against one player
+// should not abort the whole demo seed.
+func seedDemoPlays(ctx context.Context, games game.Store, qz *quiz.Quiz, poolIDs []int64, logger *slog.Logger) {
+	for _, playerID := range poolIDs {
+		if err := finishDemoGame(ctx, games, playerID, qz); err != nil {
 			logger.Warn("finish demo game",
-				slog.String("player", name),
+				slog.Int64("player_id", playerID),
 				slog.String("quiz", qz.Title),
 				slog.Any("err", err),
 			)
 		}
 	}
-
-	return nil
-}
-
-// ensureDemoPlayer returns the anonymous demo player with the given display
-// name, creating it on first use and looking up the existing row when the name
-// is already taken (display_name is UNIQUE).
-func ensureDemoPlayer(ctx context.Context, players auth.PlayerStore, name string) (*auth.Player, error) {
-	p, err := players.CreateAnonymousPlayer(ctx, name)
-	if err == nil {
-		return p, nil
-	}
-	if !errors.Is(err, auth.ErrDisplayNameTaken) {
-		return nil, fmt.Errorf("create anonymous player: %w", err)
-	}
-
-	existing, err := players.GetPlayerByDisplayName(ctx, name)
-	if err != nil {
-		return nil, fmt.Errorf("get player by display name: %w", err)
-	}
-
-	return existing, nil
 }
 
 // finishDemoGame creates a game + participant + one game_question per quiz

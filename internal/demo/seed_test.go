@@ -1,16 +1,16 @@
 package demo_test
 
 import (
+	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/demo"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -31,19 +31,15 @@ func demoTestConfig() *config.Config {
 func demoArchives(t *testing.T) [][]byte {
 	t.Helper()
 
-	const dir = "../../dev/fixtures/demo"
-	entries, err := os.ReadDir(dir)
+	paths, err := demo.ArchivePaths("../../dev/fixtures/demo")
 	if err != nil {
-		t.Fatalf("read demo archive dir: %v", err)
+		t.Fatalf("ArchivePaths() err = %v, want nil", err)
 	}
-	var archives [][]byte
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".zip") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+	archives := make([][]byte, 0, len(paths))
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read demo archive %q: %v", entry.Name(), err)
+			t.Fatalf("read demo archive %q: %v", path, err)
 		}
 		archives = append(archives, raw)
 	}
@@ -139,6 +135,76 @@ func TestSeedIfEnabled(t *testing.T) {
 	for _, p := range popular {
 		if got, want := p.PlayCount, firstPlayCounts[p.Title]; got != want {
 			t.Errorf("popular quiz %q PlayCount after re-seed = %d, want %d (idempotent)", p.Title, got, want)
+		}
+	}
+}
+
+// TestSeedIfEnabled_CorruptArchiveNoPartialSeed pins that a corrupt zip in the
+// set fails before any DB side effect: the demo Host and the earlier quizzes
+// must not be created, so a bad archive never leaves a partially-seeded set.
+func TestSeedIfEnabled_CorruptArchiveNoPartialSeed(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := store.New(dbtest.Open(t), logger)
+	mediaSvc := media.NewService(stores.Media, t.TempDir(),
+		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger)
+	cfg := demoTestConfig()
+	cfg.DemoMode = true
+
+	// A valid archive first, then a corrupt one: the corrupt zip must abort the
+	// whole seed even though the valid one precedes it.
+	archives := [][]byte{demoArchives(t)[0], []byte("not a zip")}
+
+	if err := demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger, archives); err == nil {
+		t.Fatal("SeedIfEnabled() err = nil, want non-nil for a corrupt archive")
+	}
+
+	if _, err := stores.Players.GetPlayerByDisplayName(t.Context(), "Demo Host"); err == nil {
+		t.Error("demo host was created despite a corrupt archive, want none")
+	}
+	quizzes, err := stores.Quizzes.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListQuizzes() err = %v, want nil", err)
+	}
+	if got, want := len(quizzes), 0; got != want {
+		t.Errorf("quiz count = %d, want %d (no partial seed)", got, want)
+	}
+}
+
+// TestSeedIfEnabled_SkipsPreExistingPoolName pins that a pool display name
+// already held by a pre-existing account is never attributed a synthesised demo
+// play, so a real player's history and play_count stay untouched.
+func TestSeedIfEnabled_SkipsPreExistingPoolName(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := store.New(dbtest.Open(t), logger)
+	mediaSvc := media.NewService(stores.Media, t.TempDir(),
+		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger)
+	cfg := demoTestConfig()
+	cfg.DemoMode = true
+
+	// A real account already holds the first pool display name.
+	const takenName = "Allegro Alicia"
+	existing, err := stores.Players.CreateAnonymousPlayer(t.Context(), takenName)
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer() err = %v, want nil", err)
+	}
+
+	if seedErr := demo.SeedIfEnabled(t.Context(), cfg, stores, mediaSvc, logger, demoArchives(t)); seedErr != nil {
+		t.Fatalf("SeedIfEnabled() err = %v, want nil", seedErr)
+	}
+
+	quizzes, err := stores.Quizzes.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListQuizzes() err = %v, want nil", err)
+	}
+	for _, q := range quizzes {
+		_, err := stores.Games.GetGameByPlayerAndQuiz(t.Context(), existing.ID, q.ID)
+		if got, want := err, game.ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("GetGameByPlayerAndQuiz(pre-existing %q, quiz %q) err = %v, want %v",
+				takenName, q.Title, got, want)
 		}
 	}
 }
