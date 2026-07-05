@@ -487,6 +487,12 @@ WHERE players.id = sqlc.arg('id')
   AND players.role = 'admin'
   AND (SELECT COUNT(*) FROM players AS admins WHERE admins.role = 'admin') > 1;
 
+-- name: HasAnyAdmin :one
+-- Reports whether any player currently holds the admin role. Backs the
+-- first-boot bootstrap that mints an admin from env vars only when none
+-- exists yet, so a populated deployment ignores the bootstrap vars.
+SELECT EXISTS(SELECT 1 FROM players WHERE role = 'admin') AS has_admin;
+
 -- name: ListAdmins :many
 -- Every current Admin, ordered by display_name so the admin settings page
 -- (#320/#538) renders a stable list. Only the columns the list needs are

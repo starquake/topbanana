@@ -701,6 +701,20 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 	return i, err
 }
 
+const hasAnyAdmin = `-- name: HasAnyAdmin :one
+SELECT EXISTS(SELECT 1 FROM players WHERE role = 'admin') AS has_admin
+`
+
+// Reports whether any player currently holds the admin role. Backs the
+// first-boot bootstrap that mints an admin from env vars only when none
+// exists yet, so a populated deployment ignores the bootstrap vars.
+func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasAnyAdmin)
+	var has_admin bool
+	err := row.Scan(&has_admin)
+	return has_admin, err
+}
+
 const linkProviderIdentity = `-- name: LinkProviderIdentity :exec
 INSERT INTO player_identities (player_id, provider, subject)
 VALUES (?, ?, ?)

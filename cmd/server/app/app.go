@@ -172,6 +172,10 @@ func Run(
 
 	stores := store.New(conn, logger)
 
+	if err = bootstrapInitialAdmin(signalCtx, cfg, store.NewPlayerStore(conn, logger), logger); err != nil {
+		return err
+	}
+
 	startSweeps(signalCtx, cfg, logger, stores)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
 	// Own the runner's context so shutdown waits for its goroutine to exit
