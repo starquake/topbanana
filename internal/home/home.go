@@ -272,7 +272,7 @@ func executeTemplate(
 		"viewerName": func() string { return viewerName },
 		"isSignedIn": func() bool { return rc.viewer != nil },
 		"demoMode":   func() bool { return rc.demoMode },
-		"t":          func(key string) string { return locale.Translate(loc, key) },
+		"t":          func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"lang":       func() string { return loc },
 	}
 	if rc.csrfToken != nil {

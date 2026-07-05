@@ -29,7 +29,7 @@ func ForgotPasswordCooldown() time.Duration { return forgotPasswordCooldown }
 // forgotPasswordSuccessMsgKey is the account-existence-opaque success flash the
 // POST handler always sets: the phrasing never confirms a match, so probing a
 // list of emails reveals nothing from the response or timing.
-const forgotPasswordSuccessMsgKey = "forgotPassword.sentNotice"
+const forgotPasswordSuccessMsgKey locale.MessageID = "forgotPassword.sentNotice"
 
 // forgotPageData backs the forgot-password.gohtml template.
 type forgotPageData struct {

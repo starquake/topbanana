@@ -22,7 +22,7 @@ const verifyEmailRequestPath = "/verify-email/request"
 // verifyRequestSuccessMsgKey is the account-existence-opaque flash the POST
 // handler always sets, like the forgot-password banner: the phrasing never
 // reveals whether an address is registered or already verified.
-const verifyRequestSuccessMsgKey = "verifyEmailRequest.sentNotice"
+const verifyRequestSuccessMsgKey locale.MessageID = "verifyEmailRequest.sentNotice"
 
 // verifyEmailRequestData backs the verify_email_request.gohtml template.
 type verifyEmailRequestData struct {

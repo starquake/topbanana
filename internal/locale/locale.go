@@ -144,25 +144,32 @@ func parseLanguageRange(part string) (tag string, q float64, ok bool) {
 	return tag, q, true
 }
 
+// MessageID is a catalog message key. It is distinct from a display string so
+// the compiler stops a translated value being passed where a key is wanted, and
+// vice versa. The template FuncMap boundary is the one place a raw string is
+// converted to a MessageID, because templates are inherently stringly-typed.
+type MessageID string
+
 // Translate returns the message for key in loc, falling back to the English
-// value and then to key itself so a missing translation is visible.
-func Translate(loc, key string) string {
+// value and then to the key itself so a missing translation is visible.
+func Translate(loc string, key MessageID) string {
+	k := string(key)
 	if messages, ok := catalog[loc]; ok {
-		if v, ok := messages[key]; ok {
+		if v, ok := messages[k]; ok {
 			return v
 		}
 	}
-	if v, ok := catalog[LocaleEN][key]; ok {
+	if v, ok := catalog[LocaleEN][k]; ok {
 		return v
 	}
 
-	return key
+	return k
 }
 
 // TranslateWith translates key for loc and replaces each {token} placeholder in
 // the message with its value from tokens, so a message can carry dynamic values
 // without a non-constant format string that vet would flag.
-func TranslateWith(loc, key string, tokens map[string]string) string {
+func TranslateWith(loc string, key MessageID, tokens map[string]string) string {
 	msg := Translate(loc, key)
 	for token, value := range tokens {
 		msg = strings.ReplaceAll(msg, "{"+token+"}", value)
@@ -172,7 +179,7 @@ func TranslateWith(loc, key string, tokens map[string]string) string {
 }
 
 // TranslateCount translates key for loc and fills its {n} placeholder with n.
-func TranslateCount(loc, key string, n int) string {
+func TranslateCount(loc string, key MessageID, n int) string {
 	return TranslateWith(loc, key, map[string]string{"n": strconv.Itoa(n)})
 }
 
