@@ -19,6 +19,7 @@ type modeFlags struct {
 	resetPasswordFor *string
 	promoteAdminFor  *string
 	verifyEmailFor   *string
+	createAdminFor   *string
 	checkOnly        *bool
 	healthcheckOnly  *bool
 	seedDemo         *bool
@@ -36,13 +37,14 @@ func main() {
 		*f.resetPasswordFor != "",
 		*f.promoteAdminFor != "",
 		*f.verifyEmailFor != "",
+		*f.createAdminFor != "",
 		*f.checkOnly,
 		*f.healthcheckOnly,
 		*f.seedDemo,
 	) {
 		if _, err := fmt.Fprintln(os.Stderr,
-			"error: -reset-password, -promote-admin, -verify-email, -check, -healthcheck, and"+
-				" -seed-demo are mutually exclusive"); err != nil {
+			"error: -reset-password, -promote-admin, -verify-email, -create-admin, -check,"+
+				" -healthcheck, and -seed-demo are mutually exclusive"); err != nil {
 			panic(err)
 		}
 
@@ -59,6 +61,8 @@ func main() {
 		err = app.PromoteAdmin(ctx, os.Getenv, os.Stdout, os.Stderr, *f.promoteAdminFor)
 	case *f.verifyEmailFor != "":
 		err = app.VerifyEmail(ctx, os.Getenv, os.Stdout, os.Stderr, *f.verifyEmailFor)
+	case *f.createAdminFor != "":
+		err = app.CreateAdmin(ctx, os.Getenv, os.Stdin, os.Stdout, os.Stderr, *f.createAdminFor)
 	case *f.checkOnly:
 		err = app.Check(ctx, os.Getenv, os.Stdout)
 	case *f.healthcheckOnly:
@@ -109,6 +113,15 @@ func registerModeFlags() modeFlags {
 				" Break-glass path for a self-hoster with no SMTP configured, where the mailed"+
 				" verification link is a no-op. The server should not be running concurrently"+
 				" against the same database. Mutually exclusive with the other mode flags",
+		),
+		createAdminFor: flag.String(
+			"create-admin",
+			"",
+			"create a verified admin account for the given email; reads the new password from"+
+				" stdin and exits. Bootstraps the first admin without opening registration or"+
+				" configuring SMTP. Refuses an email that already exists (use -promote-admin /"+
+				" -verify-email for that). The server should not be running concurrently against"+
+				" the same database",
 		),
 		healthcheckOnly: flag.Bool(
 			"healthcheck",

@@ -377,6 +377,151 @@ func TestVerifyEmail_BlankEmail_ReturnsError(t *testing.T) {
 	}
 }
 
+// fetchPlayerByEmail re-opens dbURI and returns the player row for email.
+func fetchPlayerByEmail(t *testing.T, dbURI, email string) *auth.Player {
+	t.Helper()
+
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	players := store.NewPlayerStore(conn, slog.Default())
+	p, err := players.GetPlayerByEmail(t.Context(), email)
+	if err != nil {
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
+	}
+
+	return p
+}
+
+func TestCreateAdmin_HappyPath_CreatesVerifiedAdmin(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const (
+		email    = "founder@example.test"
+		password = "correct-horse-battery"
+	)
+	stdin := strings.NewReader(password + "\n" + password + "\n")
+	var stdout, stderr bytes.Buffer
+	if err := CreateAdmin(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, email); err != nil {
+		t.Fatalf("CreateAdmin err = %v, want nil", err)
+	}
+
+	p := fetchPlayerByEmail(t, dbURI, email)
+	if got, want := p.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+	if !p.IsAdmin() {
+		t.Error("IsAdmin() = false, want true")
+	}
+	if !p.IsEmailVerified() {
+		t.Error("IsEmailVerified() = false, want true")
+	}
+	if err := auth.CheckPassword(p.PasswordHash, password); err != nil {
+		t.Errorf("CheckPassword(password) err = %v, want nil", err)
+	}
+	if got, want := p.DisplayName, "founder"; got != want {
+		t.Errorf("DisplayName = %q, want %q", got, want)
+	}
+	if got, want := stdout.String(), "Created admin"; !strings.Contains(got, want) {
+		t.Errorf("stdout = %q, want substring %q", got, want)
+	}
+}
+
+func TestCreateAdmin_ExistingEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+	seedPlayer(t, dbURI, "alice")
+
+	stdin := strings.NewReader("correct-horse-battery\ncorrect-horse-battery\n")
+	var stdout, stderr bytes.Buffer
+	err := CreateAdmin(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice@example.test")
+	if got, want := err, ErrCreateAdminEmailExists; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestCreateAdmin_BlankEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := CreateAdmin(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "   ")
+	if got, want := err, ErrCreateAdminEmailRequired; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestCreateAdmin_MalformedEmail_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := CreateAdmin(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "admin@localhost")
+	if got, want := err, ErrCreateAdminInvalidEmail; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestCreateAdmin_PasswordTooShort_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	stdin := strings.NewReader("short\n")
+	var stdout, stderr bytes.Buffer
+	err := CreateAdmin(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "founder@example.test")
+	if got, want := err, ErrPasswordTooShort; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestCreateAdmin_DisplayNameCollision_FallsBackToPetname(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+	// seedPlayer claims display name "founder"; the new admin's email local
+	// part is also "founder", forcing the petname fallback.
+	seedPlayer(t, dbURI, "founder")
+
+	const (
+		email    = "founder@other.test"
+		password = "correct-horse-battery"
+	)
+	stdin := strings.NewReader(password + "\n" + password + "\n")
+	var stdout, stderr bytes.Buffer
+	if err := CreateAdmin(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, email); err != nil {
+		t.Fatalf("CreateAdmin err = %v, want nil", err)
+	}
+
+	p := fetchPlayerByEmail(t, dbURI, email)
+	if got, want := p.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+	if !p.IsEmailVerified() {
+		t.Error("IsEmailVerified() = false, want true")
+	}
+	if got := p.DisplayName; got == "founder" {
+		t.Errorf("DisplayName = %q, want a petname fallback distinct from the taken name", got)
+	}
+}
+
 // TestSeedDemo_DisabledMode_ReturnsError pins the guard: SeedDemo refuses to
 // seed when demo mode is off, so it can never populate a non-demo DB. The guard
 // runs before any DB or archive access, so neither is needed. APP_ENV=development
@@ -508,7 +653,7 @@ func TestResetPassword_PasswordTooShort_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-short password")
 	}
-	if got, want := err, ErrResetPasswordTooShort; !errors.Is(got, want) {
+	if got, want := err, ErrPasswordTooShort; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -537,7 +682,7 @@ func TestResetPassword_PasswordTooLong_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-long password")
 	}
-	if got, want := err, ErrResetPasswordTooLong; !errors.Is(got, want) {
+	if got, want := err, ErrPasswordTooLong; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -561,7 +706,7 @@ func TestResetPassword_ConfirmationMismatch_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for mismatching confirmation")
 	}
-	if got, want := err, ErrResetPasswordsDontMatch; !errors.Is(got, want) {
+	if got, want := err, ErrPasswordsDontMatch; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -587,7 +732,7 @@ func TestResetPassword_ClosedStdin_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for empty stdin")
 	}
-	if got, want := err, ErrResetEmptyInput; !errors.Is(got, want) {
+	if got, want := err, ErrEmptyInput; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 

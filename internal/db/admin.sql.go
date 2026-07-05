@@ -87,7 +87,7 @@ VALUES (
     ?2,
     ?3,
     CURRENT_TIMESTAMP,
-    'player',
+    ?4,
     1
 )
 RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
@@ -97,16 +97,22 @@ type CreatePlayerByAdminParams struct {
 	DisplayName  string
 	Email        sql.NullString
 	PasswordHash sql.NullString
+	Role         string
 }
 
 // Admin-initiated player creation (#450). Stamps email_verified_at at
 // CURRENT_TIMESTAMP so the new row bypasses the email loop entirely; the
 // admin hands the credentials to the recipient out-of-band. password_hash
 // is nullable on the column but the handler enforces a non-empty hash so
-// the row can log in immediately. role is fixed to 'player' - the admin
-// promotion CASE only fires on the public register/oauth paths.
+// the row can log in immediately. role is passed explicitly so callers can
+// create a verified account at any tier in one write.
 func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdminParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createPlayerByAdmin, arg.DisplayName, arg.Email, arg.PasswordHash)
+	row := q.db.QueryRowContext(ctx, createPlayerByAdmin,
+		arg.DisplayName,
+		arg.Email,
+		arg.PasswordHash,
+		arg.Role,
+	)
 	var i Player
 	err := row.Scan(
 		&i.ID,

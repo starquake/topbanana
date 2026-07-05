@@ -8,16 +8,16 @@ package app
 var (
 	// ErrResetEmailRequired re-exports errResetEmailRequired for tests.
 	ErrResetEmailRequired = errResetEmailRequired
-	// ErrResetPasswordTooShort re-exports errResetPasswordTooShort for tests.
-	ErrResetPasswordTooShort = errResetPasswordTooShort
-	// ErrResetPasswordTooLong re-exports errResetPasswordTooLong for tests.
-	ErrResetPasswordTooLong = errResetPasswordTooLong
+	// ErrPasswordTooShort re-exports errPasswordTooShort for tests.
+	ErrPasswordTooShort = errPasswordTooShort
+	// ErrPasswordTooLong re-exports errPasswordTooLong for tests.
+	ErrPasswordTooLong = errPasswordTooLong
 	// ErrResetUserNotFound re-exports errResetUserNotFound for tests.
 	ErrResetUserNotFound = errResetUserNotFound
-	// ErrResetEmptyInput re-exports errResetEmptyInput for tests.
-	ErrResetEmptyInput = errResetEmptyInput
-	// ErrResetPasswordsDontMatch re-exports errResetPasswordsDontMatch for tests.
-	ErrResetPasswordsDontMatch = errResetPasswordsDontMatch
+	// ErrEmptyInput re-exports errEmptyInput for tests.
+	ErrEmptyInput = errEmptyInput
+	// ErrPasswordsDontMatch re-exports errPasswordsDontMatch for tests.
+	ErrPasswordsDontMatch = errPasswordsDontMatch
 	// ErrPromoteEmailRequired re-exports errPromoteEmailRequired for tests.
 	ErrPromoteEmailRequired = errPromoteEmailRequired
 	// ErrPromoteEmailNotFound re-exports errPromoteEmailNotFound for tests.
@@ -26,6 +26,12 @@ var (
 	ErrVerifyEmailRequired = errVerifyEmailRequired
 	// ErrVerifyEmailNotFound re-exports errVerifyEmailNotFound for tests.
 	ErrVerifyEmailNotFound = errVerifyEmailNotFound
+	// ErrCreateAdminEmailRequired re-exports errCreateAdminEmailRequired for tests.
+	ErrCreateAdminEmailRequired = errCreateAdminEmailRequired
+	// ErrCreateAdminEmailExists re-exports errCreateAdminEmailExists for tests.
+	ErrCreateAdminEmailExists = errCreateAdminEmailExists
+	// ErrCreateAdminInvalidEmail re-exports errCreateAdminInvalidEmail for tests.
+	ErrCreateAdminInvalidEmail = errCreateAdminInvalidEmail
 	// ErrSeedDemoDisabled re-exports errSeedDemoDisabled for tests.
 	ErrSeedDemoDisabled = errSeedDemoDisabled
 	// ErrSeedDemoArchiveNotSet re-exports errSeedDemoArchiveNotSet for tests.
