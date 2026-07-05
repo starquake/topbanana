@@ -235,7 +235,7 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail)
+		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail, locale.Resolve(r))
 		renderers.renderPending(w, r, input.CleanedEmail)
 	})
 }
@@ -321,7 +321,7 @@ func dispatchVerifyEmail(
 	logger *slog.Logger,
 	deps RegisterDeps,
 	playerID int64,
-	recipient string,
+	recipient, loc string,
 ) {
 	if deps.Mailer == nil || deps.Tokens == nil {
 		return
@@ -336,9 +336,15 @@ func dispatchVerifyEmail(
 	deps.Tasks.Go(func() {
 		defer cancel()
 		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
-			deps.BaseURL, recipient, playerID, time.Now().UTC())
+			deps.BaseURL, recipient, loc, playerID, time.Now().UTC())
 	})
 }
+
+// Register-existing notice catalog keys.
+const (
+	emailRegisterExistingSubjectKey locale.MessageID = "email.registerExisting.subject"
+	emailRegisterExistingBodyKey    locale.MessageID = "email.registerExisting.body"
+)
 
 // dispatchRegisterExisting notifies the owner of an already-registered address
 // that someone tried to register with it. The collided address IS the owner's
@@ -346,6 +352,9 @@ func dispatchVerifyEmail(
 // nothing. Runs detached with a bounded timeout, mirroring dispatchVerifyEmail,
 // so the collision response keeps the same timing as the success path. A nil
 // Mailer (unit tests) skips the send; failures are logged, never surfaced.
+//
+// Uses English, not the submitter's request locale: the submitter is
+// unauthenticated and does not own the recipient mailbox.
 func dispatchRegisterExisting(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -360,11 +369,9 @@ func dispatchRegisterExisting(
 		defer cancel()
 		msg := mailer.Message{
 			To:      recipient,
-			Subject: "Someone tried to register with your Top Banana! email",
-			Body: "Someone tried to create a Top Banana! account with this email address.\n\n" +
-				"An account already exists for this address. If it was you, sign in or reset your password instead.\n\n" +
-				"If it was not you, no action is needed.\n",
-			Kind: mailer.KindRegisterExisting,
+			Subject: locale.Translate(locale.LocaleEN, emailRegisterExistingSubjectKey),
+			Body:    locale.Translate(locale.LocaleEN, emailRegisterExistingBodyKey),
+			Kind:    mailer.KindRegisterExisting,
 		}
 		if err := deps.Mailer.Send(bg, msg); err != nil {
 			logger.WarnContext(bg, "register-existing notice failed", slog.Any("err", err))
@@ -828,11 +835,12 @@ func dispatchVerifyResend(
 	if _, allowed := deps.ResendLimiter.Allow(deps.ResendLimiter.ClientIP(r)); !allowed {
 		return
 	}
+	loc := locale.Resolve(r)
 	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), verifyEmailDispatchTimeout)
 	deps.Tasks.Go(func() {
 		defer cancel()
 		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
-			deps.BaseURL, player.Email, player.ID, time.Now().UTC())
+			deps.BaseURL, player.Email, loc, player.ID, time.Now().UTC())
 	})
 }
 

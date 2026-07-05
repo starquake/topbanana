@@ -16,12 +16,14 @@ import (
 // observable from the redirect timing. Returns false without dispatching
 // when email is not configured (nil tokens/sender or empty baseURL) so
 // the caller can skip the audit row and the success notice.
+//
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func dispatchAdminResendVerification(
 	ctx context.Context,
 	logger *slog.Logger,
 	tokens auth.VerifyTokenStore,
 	sender auth.VerifyEmailSender,
-	baseURL, recipient string,
+	baseURL, recipient, loc string,
 	playerID int64,
 	tasks *bgtasks.Tracker,
 ) bool {
@@ -38,7 +40,7 @@ func dispatchAdminResendVerification(
 	tasks.Go(func() {
 		defer cancel()
 		auth.SendVerifyEmailBestEffort(bg, logger, tokens, sender,
-			baseURL, recipient, playerID, time.Now().UTC())
+			baseURL, recipient, loc, playerID, time.Now().UTC())
 	})
 
 	return true

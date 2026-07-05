@@ -8,7 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
+)
+
+// Invite-email catalog keys.
+const (
+	emailInviteSubjectKey locale.MessageID = "email.invite.subject"
+	emailInviteBodyKey    locale.MessageID = "email.invite.body"
 )
 
 // InviteTokenTTL is the lifetime of an admin-issued invite link (#318).
@@ -127,11 +134,13 @@ func HashInviteToken(raw string) string {
 // caller so the admin handler can flash a meaningful message; the invite
 // row is still committed so a future resend (slice 2) can run
 // independently of SMTP availability.
+//
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendInviteEmail(
 	ctx context.Context,
 	invites InviteStore,
 	sender VerifyEmailSender,
-	baseURL, recipient, note string,
+	baseURL, recipient, note, loc string,
 	invitedByPlayerID int64,
 	now time.Time,
 ) error {
@@ -149,8 +158,8 @@ func SendInviteEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "You are invited to Top Banana!",
-		Body:    inviteEmailBody(link),
+		Subject: locale.Translate(loc, emailInviteSubjectKey),
+		Body:    inviteEmailBody(loc, link),
 		Kind:    mailer.KindInvite,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
@@ -171,7 +180,7 @@ func ResendInviteEmail(
 	ctx context.Context,
 	invites InviteStore,
 	sender VerifyEmailSender,
-	baseURL string,
+	baseURL, loc string,
 	inviteID int64,
 	now time.Time,
 ) error {
@@ -189,8 +198,8 @@ func ResendInviteEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "You are invited to Top Banana!",
-		Body:    inviteEmailBody(link),
+		Subject: locale.Translate(loc, emailInviteSubjectKey),
+		Body:    inviteEmailBody(loc, link),
 		Kind:    mailer.KindInvite,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
@@ -223,12 +232,7 @@ func buildInviteLink(baseURL, rawToken string) (string, error) {
 	return u.String(), nil
 }
 
-// inviteEmailBody is the plain-text body of the invite email. Mirrors
-// the reset/verify body shape so the channels read consistently.
-func inviteEmailBody(link string) string {
-	return "You have been invited to join Top Banana!\n\n" +
-		"Use the link below to choose a display name and password and set up your account:\n\n" +
-		link + "\n\n" +
-		"This link is valid for 7 days. If you were not expecting this invite, " +
-		"you can ignore this email.\n"
+// inviteEmailBody is the plain-text body of the invite email for loc.
+func inviteEmailBody(loc, link string) string {
+	return locale.TranslateWith(loc, emailInviteBodyKey, map[string]string{"link": link})
 }

@@ -186,6 +186,19 @@ func postEmailChange(
 ) emailChangeResult {
 	t.Helper()
 
+	return postEmailChangeLang(t, players, player, currentPassword, "")
+}
+
+// postEmailChangeLang is postEmailChange with an explicit UI language: a
+// non-empty lang sets the lang cookie so the handler resolves that locale.
+func postEmailChangeLang(
+	t *testing.T,
+	players *store.PlayerStore,
+	player *auth.Player,
+	currentPassword, lang string,
+) emailChangeResult {
+	t.Helper()
+
 	var logs strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	sender := newEmailStubSender()
@@ -211,6 +224,9 @@ func postEmailChange(
 		t.Context(), http.MethodPost, "/profile/email", strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if lang != "" {
+		req.AddCookie(&http.Cookie{Name: locale.CookieName, Value: lang})
+	}
 	req = req.WithContext(auth.WithPlayer(req.Context(), player))
 
 	rec := httptest.NewRecorder()
@@ -327,6 +343,40 @@ func TestHandleProfileEmailChange_CorrectPasswordDispatchesAndNotifiesOldAddress
 	}
 	if got, want := noticeTo, emailChangeOldAddr; got != want {
 		t.Errorf("notice mail To = %q, want old address %q", got, want)
+	}
+}
+
+func TestHandleProfileEmailChange_DutchNotice(t *testing.T) {
+	t.Parallel()
+
+	players, player := seedPasswordPlayer(t)
+	res := postEmailChangeLang(t, players, player, "correct-battery-13", locale.LocaleNL)
+
+	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+
+	res.sender.waitForSends(t, 2)
+
+	for _, m := range res.sender.snapshot() {
+		if m.Kind == mailer.KindVerify {
+			if got, want := m.Subject, "Bevestig je nieuwe Top Banana!-e-mailadres"; got != want {
+				t.Errorf("verify subject = %q, want %q", got, want)
+			}
+
+			continue
+		}
+		if m.Kind == mailer.KindEmailChangeNotice {
+			if got, want := m.Subject, "E-mailwijziging aangevraagd voor je Top Banana!-account"; got != want {
+				t.Errorf("notice subject = %q, want %q", got, want)
+			}
+			if got, want := m.Body, "dat gebeurt pas als op de verificatielink"; !strings.Contains(got, want) {
+				t.Errorf("notice body = %q, should contain %q", got, want)
+			}
+
+			continue
+		}
+		t.Errorf("unexpected mail Kind %q", m.Kind)
 	}
 }
 

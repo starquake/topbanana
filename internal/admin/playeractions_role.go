@@ -10,7 +10,17 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
+)
+
+// Role-change notice catalog keys.
+const (
+	emailRoleChangeSubjectKey    locale.MessageID = "email.roleChange.subject"
+	emailRoleChangeBodyKey       locale.MessageID = "email.roleChange.body"
+	emailRoleChangeRolePlayerKey locale.MessageID = "email.roleChange.rolePlayer"
+	emailRoleChangeRoleHostKey   locale.MessageID = "email.roleChange.roleHost"
+	emailRoleChangeRoleAdminKey  locale.MessageID = "email.roleChange.roleAdmin"
 )
 
 // roleIsValid reports whether the "role" form value is one of the three
@@ -144,22 +154,34 @@ func writeRoleChange(
 	return false
 }
 
-// roleLabel maps a role constant to its human word, so the success
-// flash and the notification email name the tier the same way.
-func roleLabel(role string) string {
+// roleLabelKey maps a role constant to the catalog key for its human word,
+// so the role->word mapping lives in exactly one place.
+func roleLabelKey(role string) locale.MessageID {
 	switch role {
 	case auth.RoleAdmin:
-		return "admin"
+		return emailRoleChangeRoleAdminKey
 	case auth.RoleHost:
-		return "host"
+		return emailRoleChangeRoleHostKey
 	default:
-		return "player"
+		return emailRoleChangeRolePlayerKey
 	}
+}
+
+// roleLabel names the tier in English for the admin success flash (the admin
+// UI is English); the player-facing email uses localizedRoleLabel instead.
+func roleLabel(role string) string {
+	return locale.Translate(locale.LocaleEN, roleLabelKey(role))
 }
 
 // roleChangeNotice is the success flash naming the new tier.
 func roleChangeNotice(role string) string {
 	return "Player role set to " + roleLabel(role) + "."
+}
+
+// localizedRoleLabel names the tier in loc, for the player-facing
+// role-change email.
+func localizedRoleLabel(loc, role string) string {
+	return locale.Translate(loc, roleLabelKey(role))
 }
 
 // maybeNotifyRoleChange honours the opt-in checkbox: when it is unset it
@@ -189,7 +211,9 @@ func maybeNotifyRoleChange(
 	if detail.Email == "" || detail.EmailVerifiedAt == nil {
 		return " The player has no verified email, so no notification was sent."
 	}
-	dispatchRoleChangeNotice(r.Context(), logger, sender, detail.Email, desired, playerID, tasks)
+	// The player's own locale is not stored, so the notice uses the
+	// acting admin's request locale.
+	dispatchRoleChangeNotice(r.Context(), logger, sender, detail.Email, desired, playerID, tasks, locale.Resolve(r))
 
 	return " A notification email was sent to the player."
 }
@@ -207,12 +231,13 @@ func dispatchRoleChangeNotice(
 	recipient, role string,
 	playerID int64,
 	tasks *bgtasks.Tracker,
+	loc string,
 ) {
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "Your Top Banana! account role changed",
-		Body: "An administrator changed the role on your Top Banana! account to " + roleLabel(role) + ".\n\n" +
-			"If you have questions about this change, contact the site administrator.\n",
+		Subject: locale.Translate(loc, emailRoleChangeSubjectKey),
+		Body: locale.TranslateWith(loc, emailRoleChangeBodyKey,
+			map[string]string{"role": localizedRoleLabel(loc, role)}),
 		Kind: mailer.KindRoleChangeNotice,
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)

@@ -13,7 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
+)
+
+// Verify-email catalog keys.
+const (
+	emailVerifySubjectKey       locale.MessageID = "email.verify.subject"
+	emailVerifyBodyKey          locale.MessageID = "email.verify.body"
+	emailChangeVerifySubjectKey locale.MessageID = "email.emailChangeVerify.subject"
+	emailChangeVerifyBodyKey    locale.MessageID = "email.emailChangeVerify.body"
 )
 
 // VerifyTokenTTL is the lifetime of a freshly minted verify-email link.
@@ -124,11 +133,11 @@ func SendVerifyEmail(
 	ctx context.Context,
 	tokens VerifyTokenStore,
 	sender VerifyEmailSender,
-	baseURL, recipient string,
+	baseURL, recipient, loc string,
 	playerID int64,
 	now time.Time,
 ) error {
-	return SendVerifyEmailWithPending(ctx, tokens, sender, baseURL, recipient, "", playerID, now)
+	return SendVerifyEmailWithPending(ctx, tokens, sender, baseURL, recipient, "", loc, playerID, now)
 }
 
 // SendVerifyEmailWithPending is the extended variant used by the
@@ -139,11 +148,13 @@ func SendVerifyEmail(
 // from pendingEmail so a future "notify old address" flow can reuse
 // the same plumbing. An empty pendingEmail mints a register-time row
 // that behaves identically to today's flow.
+//
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendVerifyEmailWithPending(
 	ctx context.Context,
 	tokens VerifyTokenStore,
 	sender VerifyEmailSender,
-	baseURL, recipient, pendingEmail string,
+	baseURL, recipient, pendingEmail, loc string,
 	playerID int64,
 	now time.Time,
 ) error {
@@ -161,8 +172,8 @@ func SendVerifyEmailWithPending(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: verifyEmailSubject(pendingEmail),
-		Body:    verifyEmailBody(link, pendingEmail),
+		Subject: verifyEmailSubject(loc, pendingEmail),
+		Body:    verifyEmailBody(loc, link, pendingEmail),
 		Kind:    mailer.KindVerify,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
@@ -176,16 +187,18 @@ func SendVerifyEmailWithPending(
 // any failure rather than surfacing it. Used by the register handler
 // so an SMTP outage or a mis-typed recipient does not block the
 // signup from completing; the user can retry via the resend flow.
+//
+//nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendVerifyEmailBestEffort(
 	ctx context.Context,
 	logger *slog.Logger,
 	tokens VerifyTokenStore,
 	sender VerifyEmailSender,
-	baseURL, recipient string,
+	baseURL, recipient, loc string,
 	playerID int64,
 	now time.Time,
 ) {
-	if err := SendVerifyEmail(ctx, tokens, sender, baseURL, recipient, playerID, now); err != nil {
+	if err := SendVerifyEmail(ctx, tokens, sender, baseURL, recipient, loc, playerID, now); err != nil {
 		logger.WarnContext(ctx, "verify email dispatch failed",
 			slog.Int64("player_id", playerID),
 			slog.String("to", recipient),
@@ -216,38 +229,28 @@ func buildVerifyLink(baseURL, rawToken string) (string, error) {
 	return u.String(), nil
 }
 
-// verifyEmailSubject returns the subject line. The register-time
-// wording stays unchanged so existing inbox filters keep matching;
-// the email-change variant ships its own subject so a recipient who
-// did not initiate the change spots it before opening the message.
-func verifyEmailSubject(pendingEmail string) string {
+// verifyEmailSubject returns the subject line for loc. The register-time
+// and email-change variants ship separate subjects so a recipient who did
+// not initiate the change spots it before opening the message.
+func verifyEmailSubject(loc, pendingEmail string) string {
 	if pendingEmail == "" {
-		return "Confirm your Top Banana! email"
+		return locale.Translate(loc, emailVerifySubjectKey)
 	}
 
-	return "Confirm your new Top Banana! email"
+	return locale.Translate(loc, emailChangeVerifySubjectKey)
 }
 
-// verifyEmailBody is the plain-text body of the verification email.
-// Plain text only - HTML alternative is out of scope for #321/#111;
-// the link is on its own line so any mail client renders it as
-// clickable. When pendingEmail is set, the body explains that
-// clicking the link switches the account's address to that value, so
-// a recipient who did not request the change can stop and ignore the
-// message instead of being surprised on their next sign-in.
-func verifyEmailBody(link, pendingEmail string) string {
+// verifyEmailBody is the plain-text body of the verification email for
+// loc. When pendingEmail is set, the body explains that clicking the link
+// switches the account's address to that value, so a recipient who did not
+// request the change can stop and ignore the message.
+func verifyEmailBody(loc, link, pendingEmail string) string {
 	if pendingEmail == "" {
-		return "Welcome to Top Banana!\n\n" +
-			"Click the link below to confirm your email address:\n\n" +
-			link + "\n\n" +
-			"This link is valid for 24 hours. If you did not sign up, you can\n" +
-			"ignore this email.\n"
+		return locale.TranslateWith(loc, emailVerifyBodyKey, map[string]string{"link": link})
 	}
 
-	return "Someone (hopefully you) asked to change a Top Banana! account email\n" +
-		"to " + pendingEmail + ".\n\n" +
-		"Click the link below to confirm the change:\n\n" +
-		link + "\n\n" +
-		"This link is valid for 24 hours. If you did not request the change,\n" +
-		"you can ignore this email and the account email will stay as it is.\n"
+	return locale.TranslateWith(loc, emailChangeVerifyBodyKey, map[string]string{
+		"pendingEmail": pendingEmail,
+		"link":         link,
+	})
 }

@@ -114,7 +114,7 @@ func HandleVerifyEmailRequestSubmit(
 
 		email := strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
 		if email != "" {
-			dispatchVerifyRequestIfMatch(r.Context(), logger, players, dispatch, email)
+			dispatchVerifyRequestIfMatch(r.Context(), logger, players, dispatch, email, locale.Resolve(r))
 		}
 
 		flash.SetNotice(w, locale.Translate(locale.Resolve(r), verifyRequestSuccessMsgKey))
@@ -133,7 +133,7 @@ func dispatchVerifyRequestIfMatch(
 	logger *slog.Logger,
 	players PlayerStore,
 	dispatch VerifyRequestDispatchDeps,
-	email string,
+	email, loc string,
 ) {
 	p, err := players.GetPlayerByEmail(ctx, email)
 	if err != nil || p.Email == "" || p.IsEmailVerified() {
@@ -148,7 +148,7 @@ func dispatchVerifyRequestIfMatch(
 	dispatch.Tasks.Go(func() {
 		defer cancel()
 		if sendErr := SendVerifyEmail(sendCtx, dispatch.Tokens, dispatch.Sender, dispatch.BaseURL,
-			p.Email, p.ID, time.Now().UTC()); sendErr != nil {
+			p.Email, loc, p.ID, time.Now().UTC()); sendErr != nil {
 			logger.WarnContext(sendCtx, "verify-email request dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", sendErr))
 		}

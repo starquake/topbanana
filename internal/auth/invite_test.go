@@ -10,6 +10,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -33,7 +34,7 @@ func TestSendInviteEmail_StoresAndSends(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 
 	err := SendInviteEmail(t.Context(), invites, mailerStub,
-		"https://topbanana.example", "alice@example.test", "vip", 7, now)
+		"https://topbanana.example", "alice@example.test", "vip", locale.LocaleEN, 7, now)
 	if err != nil {
 		t.Fatalf("SendInviteEmail err = %v, want nil", err)
 	}
@@ -68,6 +69,34 @@ func TestSendInviteEmail_StoresAndSends(t *testing.T) {
 	if got, want := msg.Kind, mailer.KindInvite; got != want {
 		t.Errorf("msg.Kind = %q, want %q", got, want)
 	}
+	if got, want := msg.Subject, "You are invited to Top Banana!"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if !strings.Contains(msg.Body, "https://topbanana.example/accept-invite?token=") {
+		t.Errorf("msg.Body missing accept-invite link, got %q", msg.Body)
+	}
+}
+
+func TestSendInviteEmail_Dutch(t *testing.T) {
+	t.Parallel()
+
+	invites := &recordingInviteStore{}
+	mailerStub := &recordingSender{}
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+
+	err := SendInviteEmail(t.Context(), invites, mailerStub,
+		"https://topbanana.example", "alice@example.test", "", locale.LocaleNL, 7, now)
+	if err != nil {
+		t.Fatalf("SendInviteEmail err = %v, want nil", err)
+	}
+
+	msg := mailerStub.sent[0]
+	if got, want := msg.Subject, "Je bent uitgenodigd voor Top Banana!"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if got, want := msg.Body, "Deze link is 7 dagen geldig"; !strings.Contains(got, want) {
+		t.Errorf("msg.Body = %q, should contain %q", got, want)
+	}
 	if !strings.Contains(msg.Body, "https://topbanana.example/accept-invite?token=") {
 		t.Errorf("msg.Body missing accept-invite link, got %q", msg.Body)
 	}
@@ -82,7 +111,7 @@ func TestSendInviteEmail_StoreFailureSkipsSend(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 
 	err := SendInviteEmail(t.Context(), invites, mailerStub,
-		"https://topbanana.example", "alice@example.test", "", 1, now)
+		"https://topbanana.example", "alice@example.test", "", locale.LocaleEN, 1, now)
 	if got, want := err, wantErr; !errors.Is(got, want) {
 		t.Errorf("err = %v, want wrapping %v", got, want)
 	}
@@ -98,7 +127,7 @@ func TestResendInviteEmail_RotatesAndSends(t *testing.T) {
 	mailerStub := &recordingSender{}
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 
-	err := ResendInviteEmail(t.Context(), invites, mailerStub, "https://topbanana.example", 42, now)
+	err := ResendInviteEmail(t.Context(), invites, mailerStub, "https://topbanana.example", locale.LocaleEN, 42, now)
 	if err != nil {
 		t.Fatalf("ResendInviteEmail err = %v, want nil", err)
 	}
@@ -135,7 +164,8 @@ func TestResendInviteEmail_RotateFailureSkipsSend(t *testing.T) {
 	invites := &recordingInviteStore{rotateErr: ErrInviteNotPending}
 	mailerStub := &recordingSender{}
 
-	err := ResendInviteEmail(t.Context(), invites, mailerStub, "https://topbanana.example", 1, time.Now())
+	err := ResendInviteEmail(
+		t.Context(), invites, mailerStub, "https://topbanana.example", locale.LocaleEN, 1, time.Now())
 	if got, want := err, ErrInviteNotPending; !errors.Is(got, want) {
 		t.Errorf("err = %v, want wrapping %v", got, want)
 	}
@@ -150,7 +180,7 @@ func TestBuildInviteLink_HappyPath(t *testing.T) {
 	invites := &recordingInviteStore{}
 	mailerStub := &recordingSender{}
 	if err := SendInviteEmail(t.Context(), invites, mailerStub,
-		"https://topbanana.example", "x@example.test", "", 1, time.Now()); err != nil {
+		"https://topbanana.example", "x@example.test", "", locale.LocaleEN, 1, time.Now()); err != nil {
 		t.Fatalf("SendInviteEmail err = %v, want nil", err)
 	}
 	body := mailerStub.sent[0].Body

@@ -11,6 +11,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -167,7 +168,9 @@ func HandleInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteD
 			return
 		}
 
-		result := sendInvite(r.Context(), logger, deps, email, note, actor.ID)
+		// The recipient has no account yet, so no stored locale; the invite
+		// email uses the inviting admin's request locale.
+		result := sendInvite(r.Context(), logger, deps, email, note, actor.ID, locale.Resolve(r))
 		if !result.ok {
 			renderInviteFormError(w, r, logger, csrfMgr, deps.Invites, http.StatusInternalServerError, inviteFormError{
 				email: email, note: note, msg: result.banner,
@@ -195,7 +198,10 @@ func HandleInviteResend(logger *slog.Logger, deps InviteDeps) http.Handler {
 			return
 		}
 
-		err := auth.ResendInviteEmail(r.Context(), deps.Invites, deps.Sender, deps.BaseURL, inviteID, time.Now().UTC())
+		// The invited recipient has no account, so no stored locale; the
+		// resent email uses the inviting admin's request locale.
+		err := auth.ResendInviteEmail(
+			r.Context(), deps.Invites, deps.Sender, deps.BaseURL, locale.Resolve(r), inviteID, time.Now().UTC())
 		switch {
 		case err == nil:
 			setInviteNotice(deps.Flash, w,
@@ -337,7 +343,7 @@ type inviteSendResult struct {
 // the instant the admin sees the confirmation (and keeps the flow
 // trivially testable).
 func sendInvite(
-	ctx context.Context, logger *slog.Logger, deps InviteDeps, email, note string, invitedByID int64,
+	ctx context.Context, logger *slog.Logger, deps InviteDeps, email, note string, invitedByID int64, loc string,
 ) inviteSendResult {
 	err := auth.SendInviteEmail(
 		ctx,
@@ -346,6 +352,7 @@ func sendInvite(
 		deps.BaseURL,
 		email,
 		note,
+		loc,
 		invitedByID,
 		time.Now().UTC(),
 	)
