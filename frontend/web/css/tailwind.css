@@ -371,6 +371,12 @@
     .pill-public {
         @apply before:bg-cyan;
     }
+    .pill-unlisted {
+        @apply before:bg-accent;
+    }
+    .pill-private {
+        @apply before:bg-danger;
+    }
     /* Publish-status pills (#1192). Draft reads as a muted, in-progress
      * state (amber dot on a soft amber tint); Published as a settled,
      * locked state (green dot on a soft green tint). */

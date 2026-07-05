@@ -13,9 +13,14 @@
              edit affordance, description, share URL chip, action buttons. */}}
         <header class="mb-10 pb-6 border-b border-border-soft">
             <div class="mb-3 flex flex-wrap items-center gap-3">
-                {{/* Visibility is not yet modelled; show a default Public pill
-                     so the structure is in place for #103. */}}
-                <span class="pill pill-public">Public</span>
+                {{/* Visibility pill (#103, #1215), keyed on the quiz's real value. */}}
+                {{if eq .Quiz.Visibility "private"}}
+                    <span class="pill pill-private" data-testid="quiz-visibility">Private</span>
+                {{else if eq .Quiz.Visibility "unlisted"}}
+                    <span class="pill pill-unlisted" data-testid="quiz-visibility">Unlisted</span>
+                {{else}}
+                    <span class="pill pill-public" data-testid="quiz-visibility">Public</span>
+                {{end}}
                 {{/* Draft / Published status pill (#1192). */}}
                 {{if .Quiz.Published}}
                     <span class="pill pill-published" data-testid="quiz-status">Published</span>
@@ -42,13 +47,6 @@
 
             {{if .Quiz.Description}}
                 <p class="mb-5 max-w-[58ch] text-text-dim">{{.Quiz.Description}}</p>
-            {{end}}
-
-            {{if .Quiz.Visibility}}
-                <p class="mb-4 inline-flex items-center gap-2 max-w-max px-3 py-1 bg-surface border border-border-soft rounded-sm text-[0.72rem] uppercase tracking-[0.12em] text-text-dim">
-                    <span class="text-text-mute">Visibility</span>
-                    <span class="text-text">{{.Quiz.Visibility}}</span>
-                </p>
             {{end}}
 
             <div class="mb-4 flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm font-mono text-[0.78rem] text-text-dim">
