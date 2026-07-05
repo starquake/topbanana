@@ -310,5 +310,29 @@
   "join.joinError": "Meedoen aan het spel lukte niet. Probeer het opnieuw.",
   "join.noGameFound": "Geen spel gevonden met die code.",
   "join.gameStarted": "Dit spel is al begonnen.",
-  "join.alreadyPlayed": "Je hebt deze quiz al gespeeld."
+  "join.alreadyPlayed": "Je hebt deze quiz al gespeeld.",
+
+  "email.verify.subject": "Bevestig je Top Banana!-e-mailadres",
+  "email.verify.body": "Welkom bij Top Banana!\n\nKlik op de onderstaande link om je e-mailadres te bevestigen:\n\n{link}\n\nDeze link is 24 uur geldig. Als je je niet hebt aangemeld, kun je deze e-mail negeren.\n",
+
+  "email.emailChangeVerify.subject": "Bevestig je nieuwe Top Banana!-e-mailadres",
+  "email.emailChangeVerify.body": "Iemand (hopelijk jij) heeft gevraagd om het e-mailadres van een Top Banana!-account te wijzigen naar {pendingEmail}.\n\nKlik op de onderstaande link om de wijziging te bevestigen:\n\n{link}\n\nDeze link is 24 uur geldig. Als je de wijziging niet hebt aangevraagd, kun je deze e-mail negeren en blijft het account-e-mailadres ongewijzigd.\n",
+
+  "email.reset.subject": "Stel je Top Banana!-wachtwoord opnieuw in",
+  "email.reset.body": "We hebben een verzoek ontvangen om je Top Banana!-wachtwoord opnieuw in te stellen.\n\nKlik op de onderstaande link om een nieuw wachtwoord te kiezen:\n\n{link}\n\nDeze link is 30 minuten geldig. Als je geen reset hebt aangevraagd, kun je deze e-mail negeren.\n",
+
+  "email.invite.subject": "Je bent uitgenodigd voor Top Banana!",
+  "email.invite.body": "Je bent uitgenodigd voor Top Banana!\n\nGebruik de onderstaande link om een weergavenaam en wachtwoord te kiezen en je account in te stellen:\n\n{link}\n\nDeze link is 7 dagen geldig. Als je deze uitnodiging niet verwachtte, kun je deze e-mail negeren.\n",
+
+  "email.emailChangeNotice.subject": "E-mailwijziging aangevraagd voor je Top Banana!-account",
+  "email.emailChangeNotice.body": "Iemand heeft gevraagd om het e-mailadres van je Top Banana!-account te wijzigen naar {newEmail}.\n\nJe account-e-mailadres is nog niet gewijzigd; dat gebeurt pas als op de verificatielink naar het nieuwe adres wordt geklikt.\n\nAls jij dit was, hoef je niets te doen. Was jij dit niet, wijzig dan nu je wachtwoord om je account te beveiligen.\n",
+
+  "email.registerExisting.subject": "Iemand probeerde te registreren met je Top Banana!-e-mailadres",
+  "email.registerExisting.body": "Iemand heeft geprobeerd een Top Banana!-account aan te maken met dit e-mailadres.\n\nEr bestaat al een account voor dit adres. Als jij dit was, log dan in of stel in plaats daarvan je wachtwoord opnieuw in.\n\nWas jij dit niet, dan hoef je niets te doen.\n",
+
+  "email.roleChange.subject": "De rol van je Top Banana!-account is gewijzigd",
+  "email.roleChange.body": "Een beheerder heeft de rol op je Top Banana!-account gewijzigd naar {role}.\n\nHeb je vragen over deze wijziging, neem dan contact op met de sitebeheerder.\n",
+  "email.roleChange.rolePlayer": "speler",
+  "email.roleChange.roleHost": "host",
+  "email.roleChange.roleAdmin": "beheerder"
 }

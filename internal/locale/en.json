@@ -310,5 +310,29 @@
   "join.joinError": "Couldn't join the game. Try again.",
   "join.noGameFound": "No game found with that code.",
   "join.gameStarted": "This game has already started.",
-  "join.alreadyPlayed": "You've already played this quiz."
+  "join.alreadyPlayed": "You've already played this quiz.",
+
+  "email.verify.subject": "Confirm your Top Banana! email",
+  "email.verify.body": "Welcome to Top Banana!\n\nClick the link below to confirm your email address:\n\n{link}\n\nThis link is valid for 24 hours. If you did not sign up, you can ignore this email.\n",
+
+  "email.emailChangeVerify.subject": "Confirm your new Top Banana! email",
+  "email.emailChangeVerify.body": "Someone (hopefully you) asked to change a Top Banana! account email to {pendingEmail}.\n\nClick the link below to confirm the change:\n\n{link}\n\nThis link is valid for 24 hours. If you did not request the change, you can ignore this email and the account email will stay as it is.\n",
+
+  "email.reset.subject": "Reset your Top Banana! password",
+  "email.reset.body": "We received a request to reset your Top Banana! password.\n\nClick the link below to choose a new one:\n\n{link}\n\nThis link is valid for 30 minutes. If you did not request a reset, you can ignore this email.\n",
+
+  "email.invite.subject": "You are invited to Top Banana!",
+  "email.invite.body": "You have been invited to join Top Banana!\n\nUse the link below to choose a display name and password and set up your account:\n\n{link}\n\nThis link is valid for 7 days. If you were not expecting this invite, you can ignore this email.\n",
+
+  "email.emailChangeNotice.subject": "Email change requested for your Top Banana! account",
+  "email.emailChangeNotice.body": "Someone requested to change the email on your Top Banana! account to {newEmail}.\n\nYour account email has not changed yet; it only changes when the verification link sent to the new address is clicked.\n\nIf this was you, no action is needed. If it was not you, change your password now to secure your account.\n",
+
+  "email.registerExisting.subject": "Someone tried to register with your Top Banana! email",
+  "email.registerExisting.body": "Someone tried to create a Top Banana! account with this email address.\n\nAn account already exists for this address. If it was you, sign in or reset your password instead.\n\nIf it was not you, no action is needed.\n",
+
+  "email.roleChange.subject": "Your Top Banana! account role changed",
+  "email.roleChange.body": "An administrator changed the role on your Top Banana! account to {role}.\n\nIf you have questions about this change, contact the site administrator.\n",
+  "email.roleChange.rolePlayer": "player",
+  "email.roleChange.roleHost": "host",
+  "email.roleChange.roleAdmin": "admin"
 }
