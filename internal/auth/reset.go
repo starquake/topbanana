@@ -8,7 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
+)
+
+// Reset-email catalog keys.
+const (
+	emailResetSubjectKey locale.MessageID = "email.reset.subject"
+	emailResetBodyKey    locale.MessageID = "email.reset.body"
 )
 
 // ResetTokenTTL is the lifetime of a forgot-password link. Shorter than
@@ -80,7 +87,7 @@ func SendResetEmail(
 	ctx context.Context,
 	tokens ResetTokenStore,
 	sender VerifyEmailSender,
-	baseURL, recipient string,
+	baseURL, recipient, loc string,
 	playerID int64,
 	now time.Time,
 ) error {
@@ -98,8 +105,8 @@ func SendResetEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "Reset your Top Banana! password",
-		Body:    resetEmailBody(link),
+		Subject: locale.Translate(loc, emailResetSubjectKey),
+		Body:    resetEmailBody(loc, link),
 		Kind:    mailer.KindReset,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
@@ -132,12 +139,7 @@ func buildResetLink(baseURL, rawToken string) (string, error) {
 	return u.String(), nil
 }
 
-// resetEmailBody is the plain-text body of the reset email. Mirrors
-// the verify body shape so the two channels read consistently.
-func resetEmailBody(link string) string {
-	return "We received a request to reset your Top Banana! password.\n\n" +
-		"Click the link below to choose a new one:\n\n" +
-		link + "\n\n" +
-		"This link is valid for 30 minutes. If you did not request a reset,\n" +
-		"you can ignore this email.\n"
+// resetEmailBody is the plain-text body of the reset email for loc.
+func resetEmailBody(loc, link string) string {
+	return locale.TranslateWith(loc, emailResetBodyKey, map[string]string{"link": link})
 }

@@ -16,6 +16,7 @@ import (
 	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
@@ -24,8 +25,21 @@ import (
 func postForm(t *testing.T, handler http.Handler, path string, values url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 
+	return postFormLang(t, handler, path, values, "")
+}
+
+// postFormLang is postForm with an explicit UI language: a non-empty lang
+// sets the lang cookie so the handler resolves that locale.
+func postFormLang(
+	t *testing.T, handler http.Handler, path string, values url.Values, lang string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(values.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if lang != "" {
+		req.AddCookie(&http.Cookie{Name: locale.CookieName, Value: lang})
+	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -330,6 +344,48 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	}
 	if got, want := sent[0].To, "shared@example.test"; got != want {
 		t.Errorf("sent[0].To = %q, want %q", got, want)
+	}
+	if got, want := sent[0].Subject, "Someone tried to register with your Top Banana! email"; got != want {
+		t.Errorf("sent[0].Subject = %q, want %q", got, want)
+	}
+}
+
+// TestHandleRegisterSubmit_DuplicateEmailDutch pins that the out-of-band
+// register-existing notice is localized to the submitter's request locale.
+func TestHandleRegisterSubmit_DuplicateEmailDutch(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	if _, err := players.CreatePlayer(t.Context(), "alice", "shared@example.test", "h", RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+
+	sender := &recordingSender{}
+	tracker := bgtasks.New()
+	handler := HandleRegisterSubmit(
+		discardLogger(), nil, players, session.New([]byte("k"), true),
+		RegisterDeps{Mailer: sender, Tasks: tracker},
+	)
+	postFormLang(t, handler, "/register", url.Values{
+		"display_name":     {"bob"},
+		"email":            {"shared@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
+	}, locale.LocaleNL)
+
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+	sent := sender.Sent()
+	if got, want := len(sent), 1; got != want {
+		t.Fatalf("sender.Sent() len = %d, want %d", got, want)
+	}
+	if got, want := sent[0].Subject, "Iemand probeerde te registreren met je Top Banana!-e-mailadres"; got != want {
+		t.Errorf("sent[0].Subject = %q, want %q", got, want)
+	}
+	if got, want := sent[0].Body,
+		"Iemand heeft geprobeerd een Top Banana!-account aan te maken"; !strings.Contains(got, want) {
+		t.Errorf("sent[0].Body = %q, should contain %q", got, want)
 	}
 }
 

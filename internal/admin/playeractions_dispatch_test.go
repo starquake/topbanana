@@ -8,6 +8,7 @@ import (
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -67,7 +68,8 @@ func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 
 			tracker := bgtasks.New()
 			got := DispatchAdminResendVerification(
-				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID, tracker,
+				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test",
+				locale.LocaleEN, testAdminID, tracker,
 			)
 			if want := tc.wantResult; got != want {
 				t.Errorf("DispatchAdminResendVerification = %v, want %v", got, want)

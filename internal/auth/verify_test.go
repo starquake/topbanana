@@ -11,6 +11,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -111,7 +112,7 @@ func TestSendVerifyEmail_StoresHashSendsMessage(t *testing.T) {
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 
 	err := SendVerifyEmail(t.Context(), tokens, mailerStub,
-		"https://topbanana.example", "alice@example.test", 42, now)
+		"https://topbanana.example", "alice@example.test", locale.LocaleEN, 42, now)
 	if err != nil {
 		t.Fatalf("SendVerifyEmail err = %v, want nil", err)
 	}
@@ -140,8 +141,61 @@ func TestSendVerifyEmail_StoresHashSendsMessage(t *testing.T) {
 	if got, want := msg.Kind, mailer.KindVerify; got != want {
 		t.Errorf("msg.Kind = %q, want %q", got, want)
 	}
+	if got, want := msg.Subject, "Confirm your Top Banana! email"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
 	if !strings.Contains(msg.Body, "https://topbanana.example/verify-email?token=") {
 		t.Errorf("msg.Body missing verify link, got %q", msg.Body)
+	}
+}
+
+func TestSendVerifyEmail_Dutch(t *testing.T) {
+	t.Parallel()
+
+	tokens := &recordingVerifyTokenStore{}
+	mailerStub := &recordingSender{}
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+
+	err := SendVerifyEmail(t.Context(), tokens, mailerStub,
+		"https://topbanana.example", "alice@example.test", locale.LocaleNL, 42, now)
+	if err != nil {
+		t.Fatalf("SendVerifyEmail err = %v, want nil", err)
+	}
+
+	msg := mailerStub.sent[0]
+	if got, want := msg.Subject, "Bevestig je Top Banana!-e-mailadres"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if got, want := msg.Body, "Welkom bij Top Banana!"; !strings.Contains(got, want) {
+		t.Errorf("msg.Body = %q, should contain %q", got, want)
+	}
+	if !strings.Contains(msg.Body, "https://topbanana.example/verify-email?token=") {
+		t.Errorf("msg.Body missing verify link, got %q", msg.Body)
+	}
+}
+
+func TestSendVerifyEmailWithPending_Dutch(t *testing.T) {
+	t.Parallel()
+
+	tokens := &recordingVerifyTokenStore{}
+	mailerStub := &recordingSender{}
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+
+	err := SendVerifyEmailWithPending(t.Context(), tokens, mailerStub,
+		"https://topbanana.example", "new@example.test", "new@example.test", locale.LocaleNL, 42, now)
+	if err != nil {
+		t.Fatalf("SendVerifyEmailWithPending err = %v, want nil", err)
+	}
+
+	msg := mailerStub.sent[0]
+	if got, want := msg.Subject, "Bevestig je nieuwe Top Banana!-e-mailadres"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if got, want := msg.Body, "new@example.test"; !strings.Contains(got, want) {
+		t.Errorf("msg.Body = %q, should name the pending address %q", got, want)
+	}
+	if got, want := msg.Body, "wijzigen naar"; !strings.Contains(got, want) {
+		t.Errorf("msg.Body = %q, should contain %q", got, want)
 	}
 }
 
@@ -154,7 +208,7 @@ func TestSendVerifyEmail_StoreFailureSkipsSend(t *testing.T) {
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 
 	err := SendVerifyEmail(t.Context(), tokens, mailerStub,
-		"https://topbanana.example", "alice@example.test", 1, now)
+		"https://topbanana.example", "alice@example.test", locale.LocaleEN, 1, now)
 	if got, want := err, wantErr; !errors.Is(got, want) {
 		t.Errorf("err = %v, want wrapping %v", got, want)
 	}
@@ -173,7 +227,7 @@ func TestSendVerifyEmailBestEffort_SwallowsError(t *testing.T) {
 
 	// Best-effort path must not panic or block when the store fails.
 	SendVerifyEmailBestEffort(t.Context(), logger, tokens, mailerStub,
-		"https://topbanana.example", "alice@example.test", 1, now)
+		"https://topbanana.example", "alice@example.test", locale.LocaleEN, 1, now)
 
 	if got, want := len(mailerStub.sent), 0; got != want {
 		t.Errorf("mailer.sent len = %d, want %d", got, want)

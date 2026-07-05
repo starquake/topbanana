@@ -121,7 +121,7 @@ func HandleForgotSubmit(
 
 		identifier := strings.TrimSpace(r.PostFormValue("identifier"))
 		if identifier != "" {
-			dispatchForgotIfMatch(r.Context(), logger, players, dispatch, identifier)
+			dispatchForgotIfMatch(r.Context(), logger, players, dispatch, identifier, locale.Resolve(r))
 		}
 
 		// Always flash the same success message - never reveal whether
@@ -141,7 +141,7 @@ func dispatchForgotIfMatch(
 	logger *slog.Logger,
 	players PlayerStore,
 	dispatch ForgotDispatchDeps,
-	identifier string,
+	identifier, loc string,
 ) {
 	p, ok := resolveForgotIdentifier(ctx, players, identifier)
 	if !ok || p.Email == "" {
@@ -157,7 +157,7 @@ func dispatchForgotIfMatch(
 	dispatch.Tasks.Go(func() {
 		defer cancel()
 		if err := SendResetEmail(sendCtx, dispatch.Tokens, dispatch.Sender, dispatch.BaseURL,
-			p.Email, p.ID, time.Now().UTC()); err != nil {
+			p.Email, loc, p.ID, time.Now().UTC()); err != nil {
 			logger.WarnContext(sendCtx, "forgot-password dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", err))
 		}

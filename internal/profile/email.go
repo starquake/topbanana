@@ -24,6 +24,14 @@ const (
 	EmailChangeFlashCookiePath = "/profile/email"
 )
 
+// Email-change-notice catalog keys. The notice goes to the account's
+// current address (the authenticated user's own mailbox), so the
+// triggering request's locale is the right one.
+const (
+	emailChangeNoticeSubjectKey locale.MessageID = "email.emailChangeNotice.subject"
+	emailChangeNoticeBodyKey    locale.MessageID = "email.emailChangeNotice.body"
+)
+
 // emailDispatchTimeout caps the detached SMTP attempt the POST
 // handler spawns. Matches the verify-resend / forgot-password
 // timeout: above mailer.SendTimeout so the inner dial gets its own
@@ -159,7 +167,7 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 			return
 		}
 
-		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, player.Email, newEmail)
+		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, player.Email, newEmail, loc)
 
 		// Always flash the same notice regardless of whether the
 		// address was free. The "if not already in use" wording is
@@ -204,7 +212,7 @@ func dispatchEmailChangeIfFree(
 	logger *slog.Logger,
 	deps EmailChangeDeps,
 	playerID int64,
-	oldEmail, newEmail string,
+	oldEmail, newEmail, loc string,
 ) {
 	existing, err := deps.Players.GetPlayerByEmail(ctx, newEmail)
 	switch {
@@ -231,12 +239,12 @@ func dispatchEmailChangeIfFree(
 		defer cancel()
 		if sendErr := auth.SendVerifyEmailWithPending(
 			sendCtx, deps.Tokens, deps.Sender, deps.BaseURL,
-			newEmail, newEmail, playerID, time.Now().UTC(),
+			newEmail, newEmail, loc, playerID, time.Now().UTC(),
 		); sendErr != nil {
 			logger.WarnContext(sendCtx, "profile email change dispatch failed",
 				slog.Int64("player_id", playerID), slog.Any("err", sendErr))
 		}
-		notifyOldAddressOfChange(sendCtx, logger, deps.Sender, playerID, oldEmail, newEmail)
+		notifyOldAddressOfChange(sendCtx, logger, deps.Sender, playerID, oldEmail, newEmail, loc)
 	})
 }
 
@@ -251,15 +259,13 @@ func notifyOldAddressOfChange(
 	logger *slog.Logger,
 	sender auth.VerifyEmailSender,
 	playerID int64,
-	oldEmail, newEmail string,
+	oldEmail, newEmail, loc string,
 ) {
 	msg := mailer.Message{
 		To:      oldEmail,
-		Subject: "Email change requested for your Top Banana! account",
-		Body: "Someone requested to change the email on your Top Banana! account to " + newEmail + ".\n\n" +
-			"Your account email has not changed yet; it only changes when the verification link sent to the new address is clicked.\n\n" +
-			"If this was you, no action is needed. If it was not you, change your password now to secure your account.\n",
-		Kind: mailer.KindEmailChangeNotice,
+		Subject: locale.Translate(loc, emailChangeNoticeSubjectKey),
+		Body:    locale.TranslateWith(loc, emailChangeNoticeBodyKey, map[string]string{"newEmail": newEmail}),
+		Kind:    mailer.KindEmailChangeNotice,
 	}
 	if err := sender.Send(ctx, msg); err != nil {
 		logger.WarnContext(ctx, "profile email change notice to old address failed",

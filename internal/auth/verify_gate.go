@@ -182,7 +182,7 @@ func HandleVerifyResend(
 		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), verifyEmailDispatchTimeout)
 		defer cancel()
 		if err := SendVerifyEmail(sendCtx, tokens, sender, baseURL,
-			p.Email, p.ID, time.Now().UTC()); err != nil {
+			p.Email, locale.Resolve(r), p.ID, time.Now().UTC()); err != nil {
 			logger.WarnContext(r.Context(), "verify resend dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", err))
 			flash.SetError(w, locale.Translate(locale.Resolve(r), "verifyEmailPending.sendFailed"), 0)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -33,7 +34,7 @@ func TestSendResetEmail_StoresAndSends(t *testing.T) {
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 
 	err := SendResetEmail(t.Context(), tokens, mailerStub,
-		"https://topbanana.example", "alice@example.test", 42, now)
+		"https://topbanana.example", "alice@example.test", locale.LocaleEN, 42, now)
 	if err != nil {
 		t.Fatalf("SendResetEmail err = %v, want nil", err)
 	}
@@ -62,6 +63,34 @@ func TestSendResetEmail_StoresAndSends(t *testing.T) {
 	if got, want := msg.Kind, mailer.KindReset; got != want {
 		t.Errorf("msg.Kind = %q, want %q", got, want)
 	}
+	if got, want := msg.Subject, "Reset your Top Banana! password"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if !strings.Contains(msg.Body, "https://topbanana.example/reset-password?token=") {
+		t.Errorf("msg.Body missing reset link, got %q", msg.Body)
+	}
+}
+
+func TestSendResetEmail_Dutch(t *testing.T) {
+	t.Parallel()
+
+	tokens := &recordingResetTokenStore{}
+	mailerStub := &recordingSender{}
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+
+	err := SendResetEmail(t.Context(), tokens, mailerStub,
+		"https://topbanana.example", "alice@example.test", locale.LocaleNL, 42, now)
+	if err != nil {
+		t.Fatalf("SendResetEmail err = %v, want nil", err)
+	}
+
+	msg := mailerStub.sent[0]
+	if got, want := msg.Subject, "Stel je Top Banana!-wachtwoord opnieuw in"; got != want {
+		t.Errorf("msg.Subject = %q, want %q", got, want)
+	}
+	if got, want := msg.Body, "Deze link is 30 minuten geldig"; !strings.Contains(got, want) {
+		t.Errorf("msg.Body = %q, should contain %q", got, want)
+	}
 	if !strings.Contains(msg.Body, "https://topbanana.example/reset-password?token=") {
 		t.Errorf("msg.Body missing reset link, got %q", msg.Body)
 	}
@@ -76,7 +105,7 @@ func TestSendResetEmail_StoreFailureSkipsSend(t *testing.T) {
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 
 	err := SendResetEmail(t.Context(), tokens, mailerStub,
-		"https://topbanana.example", "alice@example.test", 1, now)
+		"https://topbanana.example", "alice@example.test", locale.LocaleEN, 1, now)
 	if got, want := err, wantErr; !errors.Is(got, want) {
 		t.Errorf("err = %v, want wrapping %v", got, want)
 	}
@@ -93,7 +122,7 @@ func TestBuildResetLink_HappyPath(t *testing.T) {
 	tokens := &recordingResetTokenStore{}
 	mailerStub := &recordingSender{}
 	if err := SendResetEmail(t.Context(), tokens, mailerStub,
-		"https://topbanana.example", "x@example.test", 1, time.Now()); err != nil {
+		"https://topbanana.example", "x@example.test", locale.LocaleEN, 1, time.Now()); err != nil {
 		t.Fatalf("SendResetEmail err = %v, want nil", err)
 	}
 	body := mailerStub.sent[0].Body

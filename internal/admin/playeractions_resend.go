@@ -9,6 +9,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 )
 
 // HandlePlayerResendVerification handles
@@ -59,7 +60,7 @@ func HandlePlayerResendVerification(
 		}
 
 		if !dispatchAdminResendVerification(
-			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID, tasks,
+			r.Context(), logger, tokens, sender, baseURL, detail.Email, locale.Resolve(r), playerID, tasks,
 		) {
 			// No mail went out (email not configured), so roll the stamp
 			// back: an operator on a misconfigured instance is not throttled

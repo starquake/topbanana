@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -268,7 +269,7 @@ func TestSendVerifyEmail_RoundtripStoresAndSends(t *testing.T) {
 	tester := mailer.NewTester(mailer.NewNoop())
 	err = auth.SendVerifyEmail(
 		ctx, stores.VerifyTokens, tester,
-		"https://topbanana.example", player.Email, player.ID, time.Now(),
+		"https://topbanana.example", player.Email, locale.LocaleEN, player.ID, time.Now(),
 	)
 	if got, want := err, mailer.ErrNotConfigured; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v (no-op mailer wraps to ErrNotConfigured)", got, want)
