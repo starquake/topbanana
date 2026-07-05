@@ -21,23 +21,32 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// Sentinel errors for ResetPassword; defined at package level so err113 stays
-// quiet while keeping the failure modes typed for callers and tests. Tests
-// in the external app_test package match on these via [errors.Is]; see
-// export_test.go for the re-exports.
+// Sentinel errors for the password-prompt commands; defined at package level
+// so err113 stays quiet while keeping the failure modes typed for callers and
+// tests. Tests in the external app_test package match on these via [errors.Is];
+// see export_test.go for the re-exports. The errPassword* set is shared by
+// ResetPassword and CreateAdmin via [readNewPassword].
 var (
-	errResetEmailRequired      = errors.New("email is required")
-	errResetPasswordTooShort   = errors.New("password too short")
-	errResetPasswordTooLong    = errors.New("password too long")
-	errResetUserNotFound       = errors.New("email not found")
-	errResetEmptyInput         = errors.New("empty password input")
-	errResetPasswordsDontMatch = errors.New("passwords do not match")
+	errResetEmailRequired = errors.New("email is required")
+	errResetUserNotFound  = errors.New("email not found")
+	errPasswordTooShort   = errors.New("password too short")
+	errPasswordTooLong    = errors.New("password too long")
+	errEmptyInput         = errors.New("empty password input")
+	errPasswordsDontMatch = errors.New("passwords do not match")
 )
 
 // resetWrap is the error-wrap prefix used by every ResetPassword failure
 // path so error messages stay consistent and revive's add-constant linter
 // stays quiet.
 const resetWrap = "reset password: %w"
+
+// opWrap wraps an error under a runtime operation label; keeps revive's
+// add-constant linter quiet across its several uses.
+const opWrap = "%s: %w"
+
+// emailKey is the slog attribute key the admin commands log the target email
+// under; a shared const keeps revive's add-constant linter quiet.
+const emailKey = "email"
 
 // ResetPassword reads a new password from stdin and overwrites the
 // password_hash for the row identified by email. Operator-only tool
@@ -85,7 +94,7 @@ func ResetPassword(
 		return fmt.Errorf(resetWrap, lookupErr)
 	}
 
-	password, err := readNewPassword(stdin, stdout)
+	password, err := readNewPassword(stdin, stdout, "reset password")
 	if err != nil {
 		return err
 	}
@@ -103,7 +112,7 @@ func ResetPassword(
 		return fmt.Errorf(resetWrap, err)
 	}
 
-	logger.InfoContext(ctx, "password reset", slog.String("email", email))
+	logger.InfoContext(ctx, "password reset", slog.String(emailKey, email))
 
 	return nil
 }
@@ -191,7 +200,7 @@ func PromoteAdmin(
 	if _, err := fmt.Fprintf(stdout, "Promoted %q to admin.\n", email); err != nil {
 		return fmt.Errorf("promote admin: write confirmation: %w", err)
 	}
-	logger.InfoContext(ctx, "promoted to admin", slog.String("email", email))
+	logger.InfoContext(ctx, "promoted to admin", slog.String(emailKey, email))
 
 	return nil
 }
@@ -245,9 +254,145 @@ func VerifyEmail(
 	if _, err := fmt.Fprintf(stdout, "Verified email for %q.\n", email); err != nil {
 		return fmt.Errorf("verify email: write confirmation: %w", err)
 	}
-	logger.InfoContext(ctx, "email verified", slog.String("email", email))
+	logger.InfoContext(ctx, "email verified", slog.String(emailKey, email))
 
 	return nil
+}
+
+// errCreateAdminEmailRequired is wrapped by [CreateAdmin] when the supplied
+// email trims to empty.
+var errCreateAdminEmailRequired = errors.New("email is required")
+
+// errCreateAdminEmailExists is wrapped by [CreateAdmin] when a player already
+// owns the email; the operator should use -promote-admin / -verify-email
+// instead.
+var errCreateAdminEmailExists = errors.New("email already exists")
+
+// errCreateAdminInvalidEmail is wrapped by [CreateAdmin] when the supplied
+// email fails the [auth.LooksLikeEmail] shape check, so a malformed address
+// never becomes a verified admin that later breaks the email-change flows.
+var errCreateAdminInvalidEmail = errors.New("invalid email")
+
+// createAdminWrap is the error-wrap prefix shared by [CreateAdmin] failure
+// paths so revive's add-constant linter stays quiet.
+const createAdminWrap = "create admin: %w"
+
+// CreateAdmin creates a verified admin account whose password is read from stdin.
+func CreateAdmin(
+	ctx context.Context,
+	getenv func(string) string,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	email string,
+) error {
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return fmt.Errorf(createAdminWrap, errCreateAdminEmailRequired)
+	}
+	if !auth.LooksLikeEmail(email) {
+		return fmt.Errorf("create admin: %w (%q)", errCreateAdminInvalidEmail, email)
+	}
+
+	dbc, err := config.ParseDatabase(getenv)
+	if err != nil {
+		return fmt.Errorf("create admin: parse config: %w", err)
+	}
+
+	conn, err := setupDB(ctx, dbc, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+		}
+	}()
+
+	players := store.NewPlayerStore(conn, logger)
+	switch _, lookupErr := players.GetPlayerByEmail(ctx, email); {
+	case lookupErr == nil:
+		return errCreateAdminEmailExistsFor(email)
+	case !errors.Is(lookupErr, auth.ErrPlayerNotFound):
+		return fmt.Errorf(createAdminWrap, lookupErr)
+	}
+
+	password, err := readNewPassword(stdin, stdout, "create admin")
+	if err != nil {
+		return err
+	}
+
+	hashed, err := auth.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("create admin: hash password: %w", err)
+	}
+
+	player, err := createVerifiedAdmin(ctx, players, email, hashed)
+	if err != nil {
+		if errors.Is(err, auth.ErrEmailTaken) {
+			return errCreateAdminEmailExistsFor(email)
+		}
+
+		return err
+	}
+
+	if _, err := fmt.Fprintf(stdout, "Created admin %q (display name %q).\n", email, player.DisplayName); err != nil {
+		return fmt.Errorf("create admin: write confirmation: %w", err)
+	}
+	logger.InfoContext(ctx, "created admin",
+		slog.String(emailKey, email), slog.String("display_name", player.DisplayName))
+
+	return nil
+}
+
+// createVerifiedAdmin inserts a verified admin row in one write. It first tries
+// the email's local-part display name, then falls back to petnames for a bounded
+// number of attempts when the name is already taken.
+func createVerifiedAdmin(
+	ctx context.Context, players *store.PlayerStore, email, passwordHash string,
+) (*auth.Player, error) {
+	const maxPetnameAttempts = 5
+	displayName := displayNameFromEmail(email)
+	var err error
+	for attempt := 0; attempt <= maxPetnameAttempts; attempt++ {
+		var player *auth.Player
+		player, err = players.CreatePlayerByAdmin(ctx, displayName, email, passwordHash, auth.RoleAdmin)
+		if err == nil {
+			return player, nil
+		}
+		if !errors.Is(err, auth.ErrDisplayNameTaken) {
+			break
+		}
+		displayName = auth.GeneratePetname()
+	}
+
+	return nil, fmt.Errorf(createAdminWrap, err)
+}
+
+// errCreateAdminEmailExistsFor wraps errCreateAdminEmailExists with the offending
+// email and the recovery guidance, shared by the pre-check and the insert race.
+func errCreateAdminEmailExistsFor(email string) error {
+	return fmt.Errorf(
+		"create admin: %w (%q); use -promote-admin or -verify-email instead",
+		errCreateAdminEmailExists, email,
+	)
+}
+
+// displayNameFromEmail derives a display name from an email's local part,
+// capping it at [auth.MaxDisplayNameLength] runes and falling back to a
+// [auth.GeneratePetname] when the local part is empty.
+func displayNameFromEmail(email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	local = strings.TrimSpace(local)
+	if runes := []rune(local); len(runes) > auth.MaxDisplayNameLength {
+		local = string(runes[:auth.MaxDisplayNameLength])
+	}
+	if local == "" {
+		return auth.GeneratePetname()
+	}
+
+	return local
 }
 
 // SeedDemo seeds the demo baseline (the shared demo Host and the demo quiz set)
@@ -323,34 +468,37 @@ func readDemoArchives(dir string) ([][]byte, error) {
 // and returns the password if the two reads match and the value falls within
 // the [auth.MinPasswordLength] / [auth.MaxPasswordLength] range. Length is
 // validated *before* the second prompt so a too-short or too-long password
-// fails fast with a single typed line - same UX as `passwd(1)`.
-func readNewPassword(stdin io.Reader, stdout io.Writer) (string, error) {
+// fails fast with a single typed line - same UX as `passwd(1)`. op labels
+// the wrapping error prefix so both -reset-password and -create-admin reuse it.
+func readNewPassword(stdin io.Reader, stdout io.Writer, op string) (string, error) {
 	readPassword := newPasswordReader(stdin, stdout)
 
 	password, err := readPassword("New password: ")
 	if err != nil {
-		return "", fmt.Errorf(resetWrap, err)
+		return "", fmt.Errorf(opWrap, op, err)
 	}
 	if len(password) < auth.MinPasswordLength {
 		return "", fmt.Errorf(
-			"reset password: %w (need at least %d characters)",
-			errResetPasswordTooShort,
+			"%s: %w (need at least %d characters)",
+			op,
+			errPasswordTooShort,
 			auth.MinPasswordLength,
 		)
 	}
 	if len(password) > auth.MaxPasswordLength {
 		return "", fmt.Errorf(
-			"reset password: %w (bcrypt accepts at most %d bytes)",
-			errResetPasswordTooLong,
+			"%s: %w (bcrypt accepts at most %d bytes)",
+			op,
+			errPasswordTooLong,
 			auth.MaxPasswordLength,
 		)
 	}
 	confirm, err := readPassword("Confirm password: ")
 	if err != nil {
-		return "", fmt.Errorf(resetWrap, err)
+		return "", fmt.Errorf(opWrap, op, err)
 	}
 	if confirm != password {
-		return "", fmt.Errorf(resetWrap, errResetPasswordsDontMatch)
+		return "", fmt.Errorf(opWrap, op, errPasswordsDontMatch)
 	}
 
 	return password, nil
@@ -392,7 +540,7 @@ func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (s
 				return "", fmt.Errorf("read password: %w", err)
 			}
 
-			return "", fmt.Errorf("read password: %w", errResetEmptyInput)
+			return "", fmt.Errorf("read password: %w", errEmptyInput)
 		}
 
 		return scanner.Text(), nil
@@ -458,7 +606,7 @@ func Check(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 		msg := "error parsing config"
 		logger.ErrorContext(ctx, msg, slog.Any("err", err))
 
-		return fmt.Errorf("%s: %w", msg, err)
+		return fmt.Errorf(opWrap, msg, err)
 	}
 	logConfigSummary(ctx, logger, cfg)
 

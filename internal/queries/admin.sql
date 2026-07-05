@@ -178,15 +178,15 @@ WHERE id = sqlc.arg('id');
 -- CURRENT_TIMESTAMP so the new row bypasses the email loop entirely; the
 -- admin hands the credentials to the recipient out-of-band. password_hash
 -- is nullable on the column but the handler enforces a non-empty hash so
--- the row can log in immediately. role is fixed to 'player' - the admin
--- promotion CASE only fires on the public register/oauth paths.
+-- the row can log in immediately. role is passed explicitly so callers can
+-- create a verified account at any tier in one write.
 INSERT INTO players (display_name, email, password_hash, email_verified_at, role, display_name_claimed)
 VALUES (
     sqlc.arg('display_name'),
     sqlc.arg('email'),
     sqlc.arg('password_hash'),
     CURRENT_TIMESTAMP,
-    'player',
+    sqlc.arg('role'),
     1
 )
 RETURNING *;

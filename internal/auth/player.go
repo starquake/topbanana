@@ -349,10 +349,10 @@ type AdminPlayerStore interface {
 	// a UNIQUE collision, ErrPlayerNotFound when the id matches no row.
 	SetPlayerEmail(ctx context.Context, playerID int64, email string) error
 	// CreatePlayerByAdmin inserts a fresh credentialled row with
-	// email_verified_at stamped. role is fixed to 'player'. Returns
+	// email_verified_at stamped. role sets the new row's tier. Returns
 	// ErrDisplayNameTaken / ErrEmailTaken on UNIQUE collisions.
 	CreatePlayerByAdmin(
-		ctx context.Context, displayName, email, passwordHash string,
+		ctx context.Context, displayName, email, passwordHash, role string,
 	) (*Player, error)
 	// SetPlayerRole sets the role on the row identified by id (#538), so the
 	// id-based role selector can move a player to any tier. role is one of

@@ -238,7 +238,7 @@ func HandlePlayerCreateSubmit(
 			return
 		}
 
-		player, err := store.CreatePlayerByAdmin(r.Context(), input.DisplayName, input.Email, hash)
+		player, err := store.CreatePlayerByAdmin(r.Context(), input.DisplayName, input.Email, hash, auth.RolePlayer)
 		if err != nil {
 			renderCreatePlayerError(w, r, renderer, input, err)
 

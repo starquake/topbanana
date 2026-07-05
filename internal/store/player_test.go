@@ -1030,7 +1030,7 @@ func TestPlayerStore_SetPlayerEmail_ClearsVerification(t *testing.T) {
 	// CreatePlayerByAdmin stamps email_verified_at, so the row starts
 	// in the verified bucket.
 	created, err := ps.CreatePlayerByAdmin(
-		t.Context(), "verified-then-changed", "before@example.test", "hashed-secret",
+		t.Context(), "verified-then-changed", "before@example.test", "hashed-secret", auth.RolePlayer,
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
@@ -1245,7 +1245,7 @@ func TestPlayerStore_GetPlayerDetail_ExposesRole(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	created, err := ps.CreatePlayerByAdmin(t.Context(), "detail-role", "detail-role@example.test", "h")
+	created, err := ps.CreatePlayerByAdmin(t.Context(), "detail-role", "detail-role@example.test", "h", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
 	}
@@ -1297,11 +1297,11 @@ func TestPlayerStore_ListAdminAuditForTarget_SurvivesActorDeletion(t *testing.T)
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	actor, err := ps.CreatePlayerByAdmin(t.Context(), "audit-actor", "actor@example.test", "h")
+	actor, err := ps.CreatePlayerByAdmin(t.Context(), "audit-actor", "actor@example.test", "h", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayerByAdmin actor err = %v, want nil", err)
 	}
-	target, err := ps.CreatePlayerByAdmin(t.Context(), "audit-target", "target@example.test", "h")
+	target, err := ps.CreatePlayerByAdmin(t.Context(), "audit-target", "target@example.test", "h", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayerByAdmin target err = %v, want nil", err)
 	}
@@ -1536,7 +1536,9 @@ func TestPlayerStore_SetPlayerEmail(t *testing.T) {
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
 
-		created, err := ps.CreatePlayerByAdmin(t.Context(), "set-email-happy", "before@example.test", "hashed-secret")
+		created, err := ps.CreatePlayerByAdmin(
+			t.Context(), "set-email-happy", "before@example.test", "hashed-secret", auth.RolePlayer,
+		)
 		if err != nil {
 			t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
 		}
@@ -1560,11 +1562,13 @@ func TestPlayerStore_SetPlayerEmail(t *testing.T) {
 		ps := NewPlayerStore(db, slog.Default())
 
 		if _, err := ps.CreatePlayerByAdmin(
-			t.Context(), "set-email-owner", "taken@example.test", "hashed-secret",
+			t.Context(), "set-email-owner", "taken@example.test", "hashed-secret", auth.RolePlayer,
 		); err != nil {
 			t.Fatalf("CreatePlayerByAdmin (owner) err = %v, want nil", err)
 		}
-		other, err := ps.CreatePlayerByAdmin(t.Context(), "set-email-other", "other@example.test", "hashed-secret")
+		other, err := ps.CreatePlayerByAdmin(
+			t.Context(), "set-email-other", "other@example.test", "hashed-secret", auth.RolePlayer,
+		)
 		if err != nil {
 			t.Fatalf("CreatePlayerByAdmin (other) err = %v, want nil", err)
 		}

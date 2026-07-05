@@ -897,10 +897,10 @@ func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email 
 // CreatePlayerByAdmin inserts a fresh credentialled row with
 // email_verified_at stamped (#450). Email is trimmed + lowercased;
 // passwordHash must be non-empty (the handler enforces it before
-// reaching the store). Returns auth.ErrDisplayNameTaken / auth.ErrEmailTaken
-// on UNIQUE collisions.
+// reaching the store). role sets the new row's tier. Returns
+// auth.ErrDisplayNameTaken / auth.ErrEmailTaken on UNIQUE collisions.
 func (s *PlayerStore) CreatePlayerByAdmin(
-	ctx context.Context, displayName, email, passwordHash string,
+	ctx context.Context, displayName, email, passwordHash, role string,
 ) (*auth.Player, error) {
 	cleanedDisplayName := strings.TrimSpace(displayName)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
@@ -908,6 +908,7 @@ func (s *PlayerStore) CreatePlayerByAdmin(
 		DisplayName:  cleanedDisplayName,
 		Email:        sql.NullString{String: cleanedEmail, Valid: cleanedEmail != ""},
 		PasswordHash: sql.NullString{String: passwordHash, Valid: passwordHash != ""},
+		Role:         role,
 	})
 	if err != nil {
 		return nil, s.classifyCredentialConflict(ctx, cleanedDisplayName, cleanedEmail, err)
