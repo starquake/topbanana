@@ -22,6 +22,10 @@ var (
 	ErrPromoteEmailRequired = errPromoteEmailRequired
 	// ErrPromoteEmailNotFound re-exports errPromoteEmailNotFound for tests.
 	ErrPromoteEmailNotFound = errPromoteEmailNotFound
+	// ErrVerifyEmailRequired re-exports errVerifyEmailRequired for tests.
+	ErrVerifyEmailRequired = errVerifyEmailRequired
+	// ErrVerifyEmailNotFound re-exports errVerifyEmailNotFound for tests.
+	ErrVerifyEmailNotFound = errVerifyEmailNotFound
 	// ErrSeedDemoDisabled re-exports errSeedDemoDisabled for tests.
 	ErrSeedDemoDisabled = errSeedDemoDisabled
 	// ErrSeedDemoArchiveNotSet re-exports errSeedDemoArchiveNotSet for tests.

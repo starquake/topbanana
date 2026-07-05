@@ -117,6 +117,15 @@ var errPromoteEmailRequired = errors.New("email is required")
 // matches the supplied email.
 var errPromoteEmailNotFound = errors.New("email not found")
 
+// errVerifyEmailRequired is wrapped by [VerifyEmail] when the supplied email
+// trims to empty; defined at package scope so callers and tests can match it
+// via [errors.Is].
+var errVerifyEmailRequired = errors.New("email is required")
+
+// errVerifyEmailNotFound is wrapped by [VerifyEmail] when no player row
+// matches the supplied email.
+var errVerifyEmailNotFound = errors.New("email not found")
+
 // errSeedDemoDisabled is returned by SeedDemo when demo mode (Config.DemoMode,
 // from DEMO_MODE_ENABLED) is off; defined at package scope so callers can match
 // it via [errors.Is].
@@ -183,6 +192,60 @@ func PromoteAdmin(
 		return fmt.Errorf("promote admin: write confirmation: %w", err)
 	}
 	logger.InfoContext(ctx, "promoted to admin", slog.String("email", email))
+
+	return nil
+}
+
+// VerifyEmail stamps email_verified_at for the player with the given email, the
+// break-glass path to verify an account when no SMTP is configured to send the
+// mailed link. The server should not be running concurrently against the same
+// database.
+func VerifyEmail(
+	ctx context.Context,
+	getenv func(string) string,
+	stdout, stderr io.Writer,
+	email string,
+) error {
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return fmt.Errorf("verify email: %w", errVerifyEmailRequired)
+	}
+
+	dbc, err := config.ParseDatabase(getenv)
+	if err != nil {
+		return fmt.Errorf("verify email: parse config: %w", err)
+	}
+
+	conn, err := setupDB(ctx, dbc, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+		}
+	}()
+
+	players := store.NewPlayerStore(conn, logger)
+	player, err := players.GetPlayerByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, auth.ErrPlayerNotFound) {
+			return fmt.Errorf("verify email: %w (%q)", errVerifyEmailNotFound, email)
+		}
+
+		return fmt.Errorf("verify email: %w", err)
+	}
+
+	if err := players.SetPlayerEmailVerifiedNow(ctx, player.ID); err != nil {
+		return fmt.Errorf("verify email: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(stdout, "Verified email for %q.\n", email); err != nil {
+		return fmt.Errorf("verify email: write confirmation: %w", err)
+	}
+	logger.InfoContext(ctx, "email verified", slog.String("email", email))
 
 	return nil
 }
