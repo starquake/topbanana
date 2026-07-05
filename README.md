@@ -125,7 +125,7 @@ In a Compose `environment:` list, write values **unquoted** (`- BASE_URL=https:/
 
 Outgoing mail (email verification, password reset, invites) is optional. Without `SMTP_HOST` the mailer is a no-op: the server boots and the diagnostics page at `/admin/email` shows a "disabled" badge.
 
-- **`SMTP_HOST`**, **`SMTP_PORT`**, **`SMTP_FROM`** — SMTP server, port (1-65535), and From address. All three are required to enable mail; `SMTP_USERNAME` / `SMTP_PASSWORD` add optional auth.
+- **`SMTP_HOST`**, **`SMTP_PORT`**, **`SMTP_FROM`** — SMTP server, port (1-65535), and From address (a bare `you@example.com`, or `Name <you@example.com>` for a display name). All three are required to enable mail; `SMTP_USERNAME` / `SMTP_PASSWORD` add optional auth.
 - **`SMTP_TLS`** — require STARTTLS on the connection. Defaults to `true`; set `false` only for a plain local catch-all like Mailpit.
 - **`BASE_URL`** — public URL of the instance (e.g. `https://quiz.example.com`), used as the prefix for links embedded in outgoing emails. Set it in production so verify/reset/invite links point at your real host.
 
