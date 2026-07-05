@@ -310,6 +310,76 @@ func writeQuizLeaderboardError(
 	writeInternalError(w, r, logger, "error retrieving quiz leaderboard", err)
 }
 
+// HandleQuizMeta resolves a deep-linked quiz to its client-facing metadata
+// (id, slug, title, description, mode) so the play/start screen can render a
+// private or unlisted quiz that never appears in the public list (#1214).
+//
+// Metadata is returned only for a quiz that is actually solo-deep-link
+// playable; everything else 404s opaquely, matching applyQuizOG's withholding
+// (internal/client/share.go) and CreateGame's accept rule: a draft leaks a
+// hidden quiz (#1192/#783) and a live quiz spoilers a hosted game (#677), so
+// both stay indistinguishable from a missing quiz. The #103 visibility gate
+// still applies on top: a private quiz 404s for an anonymous caller. No
+// questions, options, or answer key are ever exposed.
+func HandleQuizMeta(logger *slog.Logger, service *game.Service) http.Handler {
+	type quizMetaResponse struct {
+		ID          int64     `json:"id"`
+		Title       string    `json:"title"`
+		Slug        string    `json:"slug"`
+		Description string    `json:"description"`
+		CreatedAt   time.Time `json:"createdAt"`
+		Mode        string    `json:"mode"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
+		if !ok {
+			return
+		}
+
+		qz, err := service.GetQuizMeta(ctx, quizID)
+		if err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			writeInternalError(w, r, logger, "error retrieving quiz metadata", err)
+
+			return
+		}
+
+		// Draft and live quizzes are not solo-deep-link playable; 404 keeps
+		// them indistinguishable from a missing quiz (#1192/#677).
+		if !qz.Published || qz.Mode == quiz.ModeLive {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		if !canReadQuiz(w, r, qz.Visibility) {
+			return
+		}
+
+		res := quizMetaResponse{
+			ID:          qz.ID,
+			Title:       qz.Title,
+			Slug:        qz.Slug,
+			Description: qz.Description,
+			CreatedAt:   qz.CreatedAt,
+			Mode:        qz.Mode,
+		}
+
+		if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+			logger.ErrorContext(ctx, "error encoding quizMetaResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
 // HandleQuizLeaderboard returns the top scoring players for the given quiz.
 // Each player appears at most once, with their total score for the quiz; ties
 // are broken by ascending displayName for a stable order. IsCurrentPlayer is set

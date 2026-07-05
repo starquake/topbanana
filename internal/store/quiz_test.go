@@ -734,6 +734,51 @@ func TestQuizStore_GetQuizVisibility(t *testing.T) {
 	})
 }
 
+func TestQuizStore_GetQuizMeta(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns metadata without the question tree", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		qz, err := quizStore.GetQuizMeta(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("GetQuizMeta err = %v, want nil", err)
+		}
+		if got, want := qz.Title, testQuiz.Title; got != want {
+			t.Errorf("GetQuizMeta Title = %q, want %q", got, want)
+		}
+		if got, want := qz.Slug, testQuiz.Slug; got != want {
+			t.Errorf("GetQuizMeta Slug = %q, want %q", got, want)
+		}
+		if got, want := qz.Mode, quiz.ModeSolo; got != want {
+			t.Errorf("GetQuizMeta Mode = %q, want %q", got, want)
+		}
+		if got := qz.Questions; got != nil {
+			t.Errorf("GetQuizMeta Questions = %v, want nil (metadata read)", got)
+		}
+	})
+
+	t.Run("returns ErrQuizNotFound for a missing quiz", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		_, err := quizStore.GetQuizMeta(t.Context(), 999)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestQuizStore_GetQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

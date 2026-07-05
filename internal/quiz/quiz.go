@@ -43,6 +43,12 @@ type Store interface {
 	// GetQuiz returns a quiz including related questions and options by its ID.
 	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuiz(ctx context.Context, id int64) (*Quiz, error)
+	// GetQuizMeta returns a quiz's own columns (title, slug, description,
+	// mode, visibility, ...) by its ID without loading its questions or
+	// options. Prefer this over GetQuiz when the caller needs the quiz
+	// metadata but not the question tree. Returns ErrQuizNotFound when the
+	// quiz does not exist.
+	GetQuizMeta(ctx context.Context, id int64) (*Quiz, error)
 	// QuizExists is a cheap existence check for a quiz by ID. It runs a
 	// single one-row SELECT EXISTS probe and does not load the quiz's
 	// questions or options. Prefer this over GetQuiz when the caller only

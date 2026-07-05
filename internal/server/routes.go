@@ -1040,6 +1040,10 @@ func addAPIRoutes(
 	)
 	mux.Handle("GET /api/quizzes", ensurePlayer(clientapi.HandleQuizList(logger, stores.Quizzes)))
 	mux.Handle(
+		"GET /api/quizzes/{slugID}",
+		ensurePlayer(clientapi.HandleQuizMeta(logger, gameService)),
+	)
+	mux.Handle(
 		"GET /api/quizzes/{slugID}/leaderboard",
 		ensurePlayer(clientapi.HandleQuizLeaderboard(logger, gameService)),
 	)
