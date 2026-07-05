@@ -1,15 +1,14 @@
 # Demo quiz asset credits
 
 The demo seed (`make seed-dev-demo`, or `go run ./cmd/seed-dev/ -seed=demo`)
-restores the quiz **"Composers of Classical Music: Sights & Sounds"** from
-`dev/fixtures/demo/demo-quiz.zip`. That archive bundles the audio clips and
-composer portraits listed below.
+restores every quiz archive under `dev/fixtures/demo/`. All bundled assets are in
+the public domain; no attribution is legally required, so this file documents
+provenance as a courtesy.
 
-All assets are in the public domain. The recordings come from
-[Musopen](https://musopen.org); the portraits come from
-[Wikimedia Commons](https://commons.wikimedia.org). The works themselves and the
-sourced files are public domain, so no attribution is legally required; this file
-documents provenance as a courtesy.
+# Composers of Classical Music: Sights & Sounds (`demo-quiz.zip`)
+
+Audio recordings from [Musopen](https://musopen.org); portraits from
+[Wikimedia Commons](https://commons.wikimedia.org).
 
 The file names below are the entries inside `demo-quiz.zip` (`media/<id>.<ext>`).
 The media IDs are reassigned on import, so a seeded database will number them
@@ -33,3 +32,13 @@ differently.
 | `media/9.jpg` | Ludwig van Beethoven |
 | `media/10.jpg` | Claude Debussy (Nadar studio photograph) |
 | `media/11.jpg` | Sergei Rachmaninoff |
+
+# Name That Critter (`name-that-critter.zip`)
+
+Animal sound clips (`media/<id>.mp3`) sourced from the
+[Partners in Rhyme public-domain sound library](https://www.partnersinrhyme.com/soundfx/PUBLIC-DOMAIN-SOUNDS/animal1.shtml).
+All clips are in the public domain.
+
+# Free as in Public Domain (`free-as-in-public-domain.zip`)
+
+A text-only quiz; the archive bundles no media assets.
