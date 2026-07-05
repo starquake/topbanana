@@ -366,11 +366,14 @@ func TestSeedQuizzesAudioRounds(t *testing.T) {
 	}
 }
 
-// demoArchivePath is the committed demo quiz archive the seeder restores, from
-// the seed-dev package directory. The TestSeedDemoQuiz test doubles as a
-// rot-guard: if the committed archive is removed or its shape drifts, this test
-// fails.
-const demoArchivePath = "../../dev/fixtures/demo-quiz.zip"
+// demoArchiveDir is the committed directory of demo quiz archives the seeder
+// restores, from the seed-dev package directory. demoArchivePath is one archive
+// in it. The TestSeedDemoQuiz test doubles as a rot-guard: if the committed
+// archive is removed or its shape drifts, this test fails.
+const (
+	demoArchiveDir  = "../../dev/fixtures/demo"
+	demoArchivePath = demoArchiveDir + "/demo-quiz.zip"
+)
 
 // TestSeedDemoQuiz restores the real committed demo archive through the seeder's
 // HTTP-free import path against a real DB and a real media service writing into a
@@ -416,6 +419,61 @@ func TestSeedDemoQuiz(t *testing.T) {
 	}
 	if again != nil {
 		t.Errorf("second ExportSeedDemoQuiz() quiz = %v, want nil (idempotent)", again)
+	}
+}
+
+// TestSeedDemoArchiveSet restores every committed archive in the demo directory
+// through the seeder's HTTP-free import path and asserts all of them land as
+// distinct, published quizzes. It pins the demo seed set to more than one quiz
+// so the showcase is a set rather than a single quiz (#1136).
+func TestSeedDemoArchiveSet(t *testing.T) {
+	t.Parallel()
+
+	h := newAudioSeedHarness(t)
+
+	readers, err := ExportOpenDemoArchives(demoArchiveDir)
+	if err != nil {
+		t.Fatalf("ExportOpenDemoArchives() err = %v, want nil", err)
+	}
+	if got := len(readers); got < 2 {
+		t.Fatalf("demo archive count = %d, want at least 2 (multi-quiz set)", got)
+	}
+
+	slugs := make(map[string]struct{}, len(readers))
+	for _, zr := range readers {
+		qz, seedErr := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, zr)
+		if seedErr != nil {
+			t.Fatalf("ExportSeedDemoQuiz() err = %v, want nil", seedErr)
+		}
+		if qz == nil {
+			t.Fatal("created quiz = nil, want a quiz per archive")
+		}
+		if !qz.Published {
+			t.Errorf("demo quiz %q Published = false, want true", qz.Title)
+		}
+		if _, dup := slugs[qz.Slug]; dup {
+			t.Errorf("duplicate slug %q across demo archives", qz.Slug)
+		}
+		slugs[qz.Slug] = struct{}{}
+	}
+
+	quizzes, err := h.stores.Quizzes.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListQuizzes() err = %v, want nil", err)
+	}
+	if got, want := len(quizzes), len(readers); got != want {
+		t.Errorf("seeded quiz count = %d, want %d (one per archive)", got, want)
+	}
+}
+
+// TestOpenDemoArchivesEmptyDir pins the fail-fast guard: an archive directory
+// with no .zip files errors rather than silently seeding nothing.
+func TestOpenDemoArchivesEmptyDir(t *testing.T) {
+	t.Parallel()
+
+	_, err := ExportOpenDemoArchives(t.TempDir())
+	if got, want := err, ErrExportNoDemoArchives; !errors.Is(got, want) {
+		t.Errorf("ExportOpenDemoArchives() err = %v, want %v", got, want)
 	}
 }
 

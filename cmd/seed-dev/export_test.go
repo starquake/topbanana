@@ -9,12 +9,14 @@ var (
 	ExportSeedQuizzes                  = seedQuizzes
 	ExportSeedDemoQuiz                 = seedDemoQuiz
 	ExportOpenDemoArchive              = openDemoArchive
+	ExportOpenDemoArchives             = openDemoArchives
 	ExportSeedPlayerName               = seedPlayerName
 	ExportSeedPlayerNames              = seedPlayerNames
 	ExportSeedPlays                    = seedPlays
 	ErrExportFixtureQuestionsOrRounds  = errFixtureQuestionsOrRounds
 	ErrExportFixtureRoundTitleRequired = errFixtureRoundTitleRequired
 	ErrExportFixtureRoundNoQuestions   = errFixtureRoundNoQuestions
+	ErrExportNoDemoArchives            = errNoDemoArchives
 )
 
 // ExportSampleAudio re-exports the bundled sample clip so a test can assert the
