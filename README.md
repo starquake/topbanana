@@ -77,7 +77,13 @@ volumes:
   topbanana_data:
 ```
 
-Then `docker compose up -d` and run the same `/healthz` check.
+Then start it and verify it's up:
+
+```bash
+docker compose up -d
+curl http://localhost:8080/healthz
+# {"status":"ok","checks":{"database":"healthy"}}
+```
 
 Building the image from source instead (and the bundled Mailpit mail catcher for local development) is covered in [`docs/development.md`](docs/development.md).
 
