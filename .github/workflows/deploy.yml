@@ -176,6 +176,10 @@ jobs:
             EOF
             mv -f docker-compose.staging.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Shared host: serialize the daemon-touching steps so a concurrent deploy's
+            # `docker image prune -af` cannot collect this deploy's in-flight pull lease.
+            exec 9>/tmp/topbanana-deploy.lock
+            flock -w 300 9 || { echo "another deploy holds the host lock; retry this deploy" >&2; exit 1; }
             docker compose pull
             docker compose up -d
             docker image prune -af
@@ -361,6 +365,10 @@ jobs:
             EOF
             mv -f docker-compose.production.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Shared host: serialize the daemon-touching steps so a concurrent deploy's
+            # `docker image prune -af` cannot collect this deploy's in-flight pull lease.
+            exec 9>/tmp/topbanana-deploy.lock
+            flock -w 300 9 || { echo "another deploy holds the host lock; retry this deploy" >&2; exit 1; }
             docker compose pull
             docker compose up -d
             docker image prune -af
@@ -527,6 +535,10 @@ jobs:
             EOF
             mv -f docker-compose.demo.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Shared host: serialize the daemon-touching steps so a concurrent deploy's
+            # `docker image prune -af` cannot collect this deploy's in-flight pull lease.
+            exec 9>/tmp/topbanana-deploy.lock
+            flock -w 300 9 || { echo "another deploy holds the host lock; retry this deploy" >&2; exit 1; }
             docker compose pull
             docker compose up -d
             docker image prune -af
