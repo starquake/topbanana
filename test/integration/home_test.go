@@ -390,12 +390,12 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 
 	t.Run("log-out form actually clears the session", func(t *testing.T) {
 		// Submit the form the home page rendered. The handler returns
-		// 303 to /login on success and clears the session cookie.
+		// 303 to / on success and clears the session cookie.
 		logoutSnap := postLogoutFromHome(ctx, t, regClient, srv.BaseURL)
 		if got, want := logoutSnap.StatusCode, http.StatusSeeOther; got != want {
 			t.Fatalf("logout status = %d, want %d", got, want)
 		}
-		if got, want := logoutSnap.Location, "/login"; got != want {
+		if got, want := logoutSnap.Location, "/"; got != want {
 			t.Errorf("logout Location = %q, want %q", got, want)
 		}
 
