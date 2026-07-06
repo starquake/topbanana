@@ -360,6 +360,7 @@ func parseTemplate(path string) *template.Template {
 		"versionLabel":      version.Label,
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
+		"add":               func(a, b int) int { return a + b },
 		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
 		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
