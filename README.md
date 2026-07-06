@@ -94,6 +94,13 @@ To serve Top Banana! over HTTPS on your own domain, run it behind a reverse prox
 
 Building the image from source instead (and the bundled Mailpit mail catcher for local development) is covered in [`docs/development.md`](docs/development.md).
 
+## Bootstrapping the first admin
+
+Registration is closed by default. Two ways to create the first admin:
+
+1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
+2. **Whitelist an email.** Set `ADMIN_EMAILS=alice@example.test` (comma-separated), keep registration open, and any user that registers with one of those emails is promoted on signup. Useful for self-hosted deployments where you control the email up front.
+
 ## Configuration
 
 Top Banana! is configured through environment variables. Sensible defaults apply in development; production deployments must set at least `SESSION_KEY` and `DB_URI` (the Docker image already sets `DB_URI`).
@@ -133,13 +140,6 @@ Outgoing mail (email verification, password reset, invites) is optional. Without
 
 - **`REVEAL_DELAY`** — Go duration string (e.g. `1500ms`) for the per-question reveal beat. Defaults to a small value chosen for live play.
 - **`SESSION_START_COUNTDOWN`** — Go duration string (e.g. `60s`) for the host's "Start in 60s" last-call countdown in a hosted live session. Defaults to 60 seconds.
-
-## Bootstrapping the first admin
-
-Registration is closed by default. Two ways to create the first admin:
-
-1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
-2. **Whitelist an email.** Set `ADMIN_EMAILS=alice@example.test` (comma-separated), keep registration open, and any user that registers with one of those emails is promoted on signup. Useful for self-hosted deployments where you control the email up front.
 
 ## Version stamp
 
