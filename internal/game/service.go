@@ -77,6 +77,16 @@ func (s *Service) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	return qz, nil
 }
 
+// GetQuizMeta proxies to the quiz store's metadata read.
+func (s *Service) GetQuizMeta(ctx context.Context, id int64) (*quiz.Quiz, error) {
+	qz, err := s.quizStore.GetQuizMeta(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get quiz meta %d: %w", id, err)
+	}
+
+	return qz, nil
+}
+
 // GetQuizVisibility proxies to the wrapped quiz store. Exposed so the
 // clientapi read-path visibility gate can check existence + visibility
 // without paying the questions/options fan-out GetQuiz performs.

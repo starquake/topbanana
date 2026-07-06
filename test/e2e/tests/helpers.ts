@@ -162,6 +162,30 @@ export function publishQuiz(title: string): void {
   }
 }
 
+// setQuizVisibility flips a seeded quiz's visibility column by title, the same
+// direct-SQL shortcut publishQuiz uses (the E2E authoring flow has no
+// visibility control), so a spec can seed a private or unlisted quiz that never
+// surfaces on the public list.
+export function setQuizVisibility(
+  title: string,
+  visibility: 'public' | 'unlisted' | 'private',
+): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot set quiz visibility');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const output = execSqlite(
+    dbFile,
+    `UPDATE quizzes SET visibility = '${visibility}' WHERE title = '${escapedTitle}'; SELECT changes();`,
+  );
+  const changed = Number.parseInt(output, 10);
+  if (changed !== 1) {
+    throw new Error(`setQuizVisibility(${title}): expected 1 row updated, got ${changed}`);
+  }
+}
+
 // attachQuizAudio stamps an audio clip onto every question of a quiz by title,
 // shelling out to the sqlite3 CLI (#1088). The admin authoring UI has no audio
 // upload in the E2E flow, so this seeds one audio media row for the quiz and

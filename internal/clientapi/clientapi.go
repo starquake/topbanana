@@ -310,6 +310,70 @@ func writeQuizLeaderboardError(
 	writeInternalError(w, r, logger, "error retrieving quiz leaderboard", err)
 }
 
+// HandleQuizMeta returns a deep-linked quiz's client metadata (id, slug, title,
+// description, mode) so the play screen can resolve a private or unlisted quiz
+// absent from the public list (#1214). Anything not solo-deep-link playable -- a
+// draft, a live quiz, or a private quiz for an anonymous caller -- 404s opaquely
+// so a hidden quiz stays indistinguishable from a missing one.
+func HandleQuizMeta(logger *slog.Logger, service *game.Service) http.Handler {
+	type quizMetaResponse struct {
+		ID          int64     `json:"id"`
+		Title       string    `json:"title"`
+		Slug        string    `json:"slug"`
+		Description string    `json:"description"`
+		CreatedAt   time.Time `json:"createdAt"`
+		Mode        string    `json:"mode"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
+		if !ok {
+			return
+		}
+
+		qz, err := service.GetQuizMeta(ctx, quizID)
+		if err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			writeInternalError(w, r, logger, "error retrieving quiz metadata", err)
+
+			return
+		}
+
+		// Draft and live quizzes are not solo-deep-link playable; 404 keeps
+		// them indistinguishable from a missing quiz (#1192/#677).
+		if !qz.Published || qz.Mode == quiz.ModeLive {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		if !canReadQuiz(w, r, qz.Visibility) {
+			return
+		}
+
+		res := quizMetaResponse{
+			ID:          qz.ID,
+			Title:       qz.Title,
+			Slug:        qz.Slug,
+			Description: qz.Description,
+			CreatedAt:   qz.CreatedAt,
+			Mode:        qz.Mode,
+		}
+
+		if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+			logger.ErrorContext(ctx, "error encoding quizMetaResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
 // HandleQuizLeaderboard returns the top scoring players for the given quiz.
 // Each player appears at most once, with their total score for the quiz; ties
 // are broken by ascending displayName for a stable order. IsCurrentPlayer is set

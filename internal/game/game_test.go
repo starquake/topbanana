@@ -212,6 +212,10 @@ func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
 	return s.quizExists(ctx, id)
 }
 
+func (stubQuizStore) GetQuizMeta(_ context.Context, _ int64) (*quiz.Quiz, error) {
+	return nil, errStub
+}
+
 func (stubQuizStore) GetQuizVisibility(_ context.Context, _ int64) (string, error) {
 	return "", errStub
 }

@@ -263,7 +263,35 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
 	}
 
-	qz := &quiz.Quiz{
+	qz := quizFromRow(row)
+
+	questions, err := s.ListQuestions(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list questions for quiz %d: %w", id, err)
+	}
+	qz.Questions = questions
+
+	return qz, nil
+}
+
+// GetQuizMeta reads the quiz row by ID without its questions or options.
+func (s *QuizStore) GetQuizMeta(ctx context.Context, id int64) (*quiz.Quiz, error) {
+	row, err := s.q.GetQuiz(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, quiz.ErrQuizNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get quiz meta: %w", err)
+	}
+
+	return quizFromRow(row), nil
+}
+
+// quizFromRow projects a single-quiz row onto the domain type. Questions are
+// left nil; callers that need the tree load it separately.
+func quizFromRow(row db.GetQuizRow) *quiz.Quiz {
+	return &quiz.Quiz{
 		ID:                row.ID,
 		Title:             row.Title,
 		Slug:              row.Slug,
@@ -280,14 +308,6 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		// INNER JOIN, see ListQuizzes (#359).
 		CreatedByDisplayName: row.CreatedByDisplayName,
 	}
-
-	questions, err := s.ListQuestions(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list questions for quiz %d: %w", id, err)
-	}
-	qz.Questions = questions
-
-	return qz, nil
 }
 
 // GetQuizVisibility returns just the visibility of a quiz by its ID,
