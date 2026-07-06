@@ -4,12 +4,6 @@ Top Banana! is a self-hosted quiz service built with Go, focussing on simplicity
 [![Go Report Card](https://goreportcard.com/badge/github.com/starquake/topbanana)](https://goreportcard.com/report/github.com/starquake/topbanana)
 ![coverage](https://raw.githubusercontent.com/starquake/topbanana/badges/.badges/main/coverage.svg)
 
-## AI use
-
-I use AI extensively while writing this codebase. Every single line of code is reviewed and signed off before it lands. Media (sounds, images, videos) is not AI-generated.
-
-If contributions come in later, I'll start from [Ghostty's AI_POLICY.md](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md) as a baseline.
-
 ## Demo
 
 Try it live at **[demo.topbanana.app](https://demo.topbanana.app/)**. One click signs you in to a shared host account — no sign-up — so you can build and host a quiz. Everything resets daily.
@@ -85,13 +79,6 @@ curl http://localhost:8080/healthz
 # {"status":"ok","checks":{"database":"healthy"}}
 ```
 
-### Behind a reverse proxy (HTTPS)
-
-To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you — point a SWAG `proxy-conf` at the `topbanana` container on port 8080. There is a ready-made one at [`deployments/swag/topbanana.subdomain.conf`](deployments/swag/topbanana.subdomain.conf). Two settings pair with a proxy:
-
-- **`BASE_URL`** — set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
-- **`TRUSTED_PROXY_IPS`** — set it to the proxy's address or CIDR so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's.
-
 Building the image from source instead (and the bundled Mailpit mail catcher for local development) is covered in [`docs/development.md`](docs/development.md).
 
 ## Bootstrapping the first admin
@@ -141,6 +128,13 @@ Outgoing mail (email verification, password reset, invites) is optional. Without
 - **`REVEAL_DELAY`** — Go duration string (e.g. `1500ms`) for the per-question reveal beat. Defaults to a small value chosen for live play.
 - **`SESSION_START_COUNTDOWN`** — Go duration string (e.g. `60s`) for the host's "Start in 60s" last-call countdown in a hosted live session. Defaults to 60 seconds.
 
+## Behind a reverse proxy (HTTPS)
+
+To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you — point a SWAG `proxy-conf` at the `topbanana` container on port 8080. There is a ready-made one at [`deployments/swag/topbanana.subdomain.conf`](deployments/swag/topbanana.subdomain.conf). Two settings pair with a proxy:
+
+- **`BASE_URL`** — set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
+- **`TRUSTED_PROXY_IPS`** — set it to the proxy's address or CIDR so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's.
+
 ## Version stamp
 
 The admin footer and the public `GET /version` endpoint report which release and commit are running. There is nothing to set: the release version is baked in from the committed `VERSION` file at build time, and the commit comes from the build. A `production` deploy shows the release (`v2026.6.0 (abc1234)`); a development build shows the commit (`development (abc1234)`).
@@ -156,3 +150,9 @@ To self-host **production** with an accurate release number, run a release image
 ## Development
 
 Building from source, the project layout, the dev server, and the test suite are covered in [`docs/development.md`](docs/development.md). To contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## AI use
+
+I use AI extensively while writing this codebase. Every single line of code is reviewed and signed off before it lands. Media (sounds, images, videos) is not AI-generated.
+
+If contributions come in later, I'll start from [Ghostty's AI_POLICY.md](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md) as a baseline.
