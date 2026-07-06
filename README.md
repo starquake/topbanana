@@ -83,10 +83,19 @@ Building the image from source instead (and the bundled Mailpit mail catcher for
 
 ## Bootstrapping the first admin
 
-Registration is closed by default. Two ways to create the first admin:
+Registration is closed by default, and a registered account cannot sign in until its email is verified. Without SMTP configured no verification mail is sent, so pick the method that matches whether you have email set up.
 
-1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
-2. **Whitelist an email.** Set `ADMIN_EMAILS=alice@example.test` (comma-separated), keep registration open, and any user that registers with one of those emails is promoted on signup. Useful for self-hosted deployments where you control the email up front.
+**No email configured (simplest for a fresh instance).** Both of these create an already-verified admin, so no verification mail is needed:
+
+- Set `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`, then start the server. It creates a verified admin from them on first boot and skips this step once any admin exists.
+- Or run the server once with `-create-admin=you@example.com`. It reads a password on stdin and creates a verified admin.
+
+**Email configured.** Once `SMTP_*` is set so verification mail is delivered:
+
+- Start with `REGISTRATION_ENABLED=true`, open `/register`, and sign up. The first password-bearing registrant becomes admin. Verify the address from the email you receive, then restart with `REGISTRATION_ENABLED` unset.
+- Or set `ADMIN_EMAILS` (comma-separated) and keep registration open: anyone who registers with a listed address becomes admin on signup.
+
+Already registered but locked out because mail was not configured? Run the server once with `-verify-email=you@example.com` to mark that account verified.
 
 ## Configuration
 
