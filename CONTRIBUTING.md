@@ -1,7 +1,7 @@
 # Contributing
 
-How AI is used on this project -- the ownership rule for any change, how it
-applies to pull requests and issues, and how the maintainer works -- lives in
+How AI is used on this project (the ownership rule for any change, how it applies
+to pull requests and issues, and how the maintainer works) lives in
 [`AI_POLICY.md`](AI_POLICY.md). Read it first: it sets the bar every contribution
 is held to.
 

@@ -8,8 +8,8 @@ contribute see [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 Prerequisites:
 
-- **Go** — the version pinned in [`go.mod`](../go.mod).
-- **Node.js 20+** — only needed for `make test-e2e`. The rest of the workflow runs without it.
+- **Go**: the version pinned in [`go.mod`](../go.mod).
+- **Node.js 20+**: only needed for `make test-e2e`. The rest of the workflow runs without it.
 - **`golangci-lint` and `sqlc`** are downloaded automatically into `build/bin/` by the Makefile targets that need them.
 
 Clone, build, and run:
@@ -59,7 +59,7 @@ Following the official guidelines for a [standard Go server project layout](http
   - `absurl`: Builds absolute URLs from a request for share links and Open Graph cards.
   - `admin`: Business logic for the admin interface.
   - `auth`: Session players and role-based access helpers.
-  - `client`: Player client shell — embedded HTML/JS/CSS.
+  - `client`: Player client shell (embedded HTML/JS/CSS).
   - `clientapi`: JSON API used by the player client.
   - `config`: Configuration management.
   - `csrf`: CSRF token issuance and validation.
@@ -107,7 +107,7 @@ This project uses conventions used by the standard library and the following sty
 - To run all tests: `make test-all`
 - To check test coverage for all packages: `make test-coverage`
 - To view test coverage in your browser: `make test-coverage-html`
-- To run end-to-end browser tests: `make test-e2e` (requires Node.js — see [`e2e.md`](e2e.md))
+- To run end-to-end browser tests: `make test-e2e` (requires Node.js; see [`e2e.md`](e2e.md))
 
 ## Pre-commit check
 
@@ -115,5 +115,5 @@ Run `make check` to run linters, build the project, and run all tests with cover
 
 ## Troubleshooting
 
-- **`make check` reports `app.css is out of date`** — Tailwind output drifted. Run `make tailwind` and commit the regenerated `internal/assets/static/css/app.css`.
-- **E2E setup** — see [`e2e.md`](e2e.md) for Playwright prerequisites and the `make test-e2e` workflow.
+- **`make check` reports `app.css is out of date`**: Tailwind output drifted. Run `make tailwind` and commit the regenerated `internal/assets/static/css/app.css`.
+- **E2E setup**: see [`e2e.md`](e2e.md) for Playwright prerequisites and the `make test-e2e` workflow.
