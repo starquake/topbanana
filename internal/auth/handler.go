@@ -886,11 +886,11 @@ func redirectAfterLogin(w http.ResponseWriter, r *http.Request, role string) {
 }
 
 // HandleLogout returns a handler for POST /logout. It clears the session cookie and
-// redirects to /login.
+// redirects to the home page.
 func HandleLogout(sessions *session.Manager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessions.Clear(w)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }
 

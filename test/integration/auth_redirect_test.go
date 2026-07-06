@@ -101,13 +101,13 @@ func TestAuthRedirect_NextRoundTrip(t *testing.T) {
 	registerVerifyAndSignIn(ctx, t, client, baseURL, srv.DBURI, "next-admin", "next-admin-pass-123")
 
 	// Log out: the home page carries the log-out form, so POST /logout
-	// with its CSRF token. The handler 303s to /login and clears the
+	// with its CSRF token. The handler 303s to / and clears the
 	// session cookie.
 	logout := postLogoutFromHome(ctx, t, client, baseURL)
 	if got, want := logout.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("logout status = %d, want %d", got, want)
 	}
-	if got, want := logout.Location, "/login"; got != want {
+	if got, want := logout.Location, "/"; got != want {
 		t.Errorf("logout Location = %q, want %q", got, want)
 	}
 

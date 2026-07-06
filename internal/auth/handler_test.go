@@ -1208,7 +1208,7 @@ func TestHandleLogout_NoCookie(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+	if got, want := rec.Header().Get("Location"), "/"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }
@@ -1225,7 +1225,7 @@ func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+	if got, want := rec.Header().Get("Location"), "/"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 
