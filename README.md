@@ -135,12 +135,6 @@ To serve Top Banana! over HTTPS on your own domain, run it behind a reverse prox
 - **`BASE_URL`** — set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
 - **`TRUSTED_PROXY_IPS`** — set it to the proxy's address or CIDR so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's.
 
-## Version stamp
-
-The admin footer and the public `GET /version` endpoint report which release and commit are running. There is nothing to set: the release version is baked in from the committed `VERSION` file at build time, and the commit comes from the build. A `production` deploy shows the release (`v2026.6.0 (abc1234)`); a development build shows the commit (`development (abc1234)`).
-
-To self-host **production** with an accurate release number, run a release image (`:latest` or a pinned `:2026.7.1`) rather than `:edge`. An `:edge` image run as production shows the last release's `VERSION` alongside its newer commit, because `VERSION` only changes when a release is cut — the commit is the disambiguator.
-
 ## Troubleshooting
 
 - **`address already in use` on `:8080`** — another process holds the port. Publish a different host port (`-p 8081:8080`) or, when running the binary directly, set `PORT` to a free one.
