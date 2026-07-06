@@ -2,6 +2,30 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.7.2 — 2026-07-06
+
+This release adds a draft and published status for quizzes, Dutch language support, and playing private and unlisted quizzes from a direct link.
+
+### Players
+- The player interface is available in English and Dutch, chosen from the browser language with a footer switcher that is remembered between visits.
+- Account emails follow the selected language.
+- Private and unlisted quizzes now open and play from their direct link, with the title and leaderboard shown.
+- Auto-generated display names now use quiz-themed words.
+- Signing out returns to the home page instead of the sign-in page.
+
+### Hosts
+- A quiz starts as a draft and must be published before players can play it; a draft can be preview-played without changing its leaderboard.
+- A published quiz is locked from edits, and can be unpublished only until its first real game.
+- A quiz page shows its actual visibility: public, unlisted, or private.
+- Hosts see and manage only the quizzes they created.
+
+### Behind the scenes
+- A `verify-email` server command marks an account's email confirmed without sending mail.
+- A `create-admin` server command creates a confirmed admin account.
+- Setting `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` creates the first admin on startup when no admin exists.
+- Admin audit-log entries are removed after a retention period.
+- Demo mode seeds a set of example quizzes.
+
 ## v2026.7.1 — 2026-07-04
 
 This release fixes scoring, connection recovery, uploads, and account safety, and adds host-facing details on the quiz and upload screens.
