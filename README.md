@@ -155,4 +155,4 @@ Building from source, the project layout, the dev server, and the test suite are
 
 I use AI extensively while writing this codebase. Every single line of code is reviewed and signed off before it lands. Media (sounds, images, videos) is not AI-generated.
 
-If contributions come in later, I'll start from [Ghostty's AI_POLICY.md](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md) as a baseline.
+See [`AI_POLICY.md`](AI_POLICY.md) for the full policy, including how AI-assisted contributions are handled.
