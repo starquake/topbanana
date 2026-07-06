@@ -41,31 +41,32 @@
 
         {{if .Rounds}}
             <div class="flex flex-col gap-6">
-                {{range .Rounds}}
-                    {{$round := .Round}}
-                    <section class="round-section" data-round-id="{{$round.ID}}">
-                        <header class="flex items-center justify-between gap-3 mb-3 pb-2 border-b border-border-soft">
-                            <h3 class="font-display font-bold uppercase tracking-[0.08em] text-[0.95rem]">{{$round.Title}}</h3>
+                {{range $ri, $r := .Rounds}}
+                    {{$round := $r.Round}}
+                    <section class="overflow-hidden rounded-xl border border-border-soft bg-surface/40" data-round-id="{{$round.ID}}">
+                        <header class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border-soft bg-surface-2/40 px-5 py-4">
+                            <div class="flex items-baseline gap-3 min-w-0">
+                                <span class="font-display text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-text-mute">Round {{add $ri 1}}</span>
+                                <h3 class="truncate font-display font-bold uppercase tracking-[0.08em] text-[1.05rem] text-text">{{$round.Title}}</h3>
+                            </div>
+                            <span class="text-[0.8rem] font-medium tabular-nums text-text-mute">{{len $r.Questions}} question{{if ne (len $r.Questions) 1}}s{{end}}</span>
                         </header>
                         {{if $round.Summary}}
-                            <div class="mb-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
-                                <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
-                                <p class="mt-1 text-text">{{$round.Summary}}</p>
-                            </div>
+                            <p class="px-5 pt-4 text-[0.9rem] italic leading-relaxed text-text-dim">{{$round.Summary}}</p>
                         {{end}}
-                        <div class="flex flex-col gap-3">
-                            {{range .Questions}}
+                        <div class="flex flex-col gap-3 p-5">
+                            {{range $r.Questions}}
                                 {{$q := .}}
-                                <article class="q-row" data-question-id="{{$q.ID}}">
-                                    <div class="q-position">{{printf "%02d" $q.Position}}</div>
-                                    <div class="q-body">
-                                        <p class="q-text">{{$q.Text}}</p>
-                                        <ul class="q-options">
+                                <article class="grid grid-cols-[auto_1fr] items-start gap-4 rounded-lg border border-border-soft bg-surface p-4" data-question-id="{{$q.ID}}">
+                                    <div class="pt-0.5 font-display text-[1.5rem] font-extrabold leading-none tabular-nums text-accent">{{printf "%02d" $q.Position}}</div>
+                                    <div class="min-w-0">
+                                        <p class="m-0 text-base font-medium leading-snug text-text">{{$q.Text}}</p>
+                                        <ul class="q-options sm:grid-cols-2">
                                             {{range $q.Options}}
                                                 <li{{if .Correct}} class="correct"{{end}}>
                                                     <span>{{.Text}}</span>
                                                     {{if .Correct}}
-                                                        <span class="ml-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em]">Correct</span>
+                                                        <span class="ml-1 inline-flex items-center rounded-full bg-cyan/15 px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-cyan">Correct</span>
                                                     {{end}}
                                                 </li>
                                             {{end}}
@@ -73,15 +74,15 @@
                                     </div>
                                 </article>
                             {{end}}
-                            {{if not .Questions}}
-                                <p class="text-text-dim text-[0.9rem] italic">No questions in this round yet.</p>
+                            {{if not $r.Questions}}
+                                <p class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-[0.9rem] italic text-text-dim">No questions in this round yet.</p>
                             {{end}}
                         </div>
                     </section>
                 {{end}}
             </div>
         {{else}}
-            <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
+            <div class="rounded-xl border border-dashed border-border p-10 text-center text-text-dim">
                 This quiz has no rounds yet.
             </div>
         {{end}}

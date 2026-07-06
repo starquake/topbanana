@@ -122,8 +122,11 @@ func TestHandleQuizPublishConfirm(t *testing.T) {
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}
-		if got, want := rr.Body.String(), "locked from edits"; !strings.Contains(got, want) {
-			t.Errorf("confirm page body = %q, should contain %q", got, want)
+		body := rr.Body.String()
+		for _, want := range []string{"locked from edits", "What is the capital of France?", "Paris", "Correct"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("confirm page body should contain %q", want)
+			}
 		}
 	})
 
