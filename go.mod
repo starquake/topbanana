@@ -6,7 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.15.0
-	github.com/pressly/goose/v3 v3.27.1
+	github.com/pressly/goose/v3 v3.27.2
 	github.com/rs/xid v1.6.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wneessen/go-mail v0.7.3
