@@ -55,9 +55,9 @@ type playerDetailData struct {
 	AuditEntries []playerDetailAudit
 	CanVerify    bool
 	CanResend    bool
-	// ApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); the approval
-	// status row and the Approve action only render when it is on. CanApprove
-	// gates the Approve button to a confirmed-but-unapproved account.
+	// ApprovalRequired gates the status row + Approve action on
+	// LOGIN_APPROVAL_REQUIRED; CanApprove narrows it to a confirmed-but-unapproved
+	// account (#1227).
 	ApprovalRequired bool
 	CanApprove       bool
 	Notice           string

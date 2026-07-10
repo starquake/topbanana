@@ -59,10 +59,9 @@ type Player struct {
 	// cookie (which carries the version it was issued at) becomes
 	// invalid the moment the reset commits (#112).
 	SessionVersion int64
-	// ApprovedAt is nil until an admin clears the account to sign in under
-	// LOGIN_APPROVAL_REQUIRED (#1227). Admins are stamped automatically, and
-	// every pre-existing row was backfilled, so a nil value only ever marks a
-	// registrant still waiting for approval.
+	// ApprovedAt is nil until an admin clears the account to sign in (#1227).
+	// Admins are stamped automatically and every pre-existing row was backfilled,
+	// so nil only ever marks a registrant still waiting for approval.
 	ApprovedAt *time.Time
 }
 
@@ -85,9 +84,7 @@ func (p *Player) IsEmailVerified() bool {
 	return p.EmailVerifiedAt != nil
 }
 
-// IsApproved reports whether an admin has cleared this account to sign in.
-// Only consulted on the login path when LOGIN_APPROVAL_REQUIRED is on (#1227);
-// admins are always approved and every pre-existing row was backfilled.
+// IsApproved reports whether an admin has cleared this account to sign in (#1227).
 func (p *Player) IsApproved() bool {
 	return p.ApprovedAt != nil
 }
@@ -158,8 +155,7 @@ type PlayerListRow struct {
 	OAuthProvider   string
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
-	// ApprovedAt is nil until an admin approves the account (#1227); the admin
-	// list surfaces a "pending approval" marker when LOGIN_APPROVAL_REQUIRED is on.
+	// ApprovedAt is nil until an admin approves the account (#1227).
 	ApprovedAt *time.Time
 	// OnboardingState is the SQL-derived bucket label (#450). One of
 	// [OnboardingStateAnonymous], [OnboardingStateUnverified],
@@ -261,9 +257,7 @@ type PlayerDetail struct {
 	OAuthProvider   string
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
-	// ApprovedAt is nil until an admin approves the account (#1227). The detail
-	// view shows the approval status and, under LOGIN_APPROVAL_REQUIRED, the
-	// Approve action for a confirmed-but-unapproved account.
+	// ApprovedAt is nil until an admin approves the account (#1227).
 	ApprovedAt      *time.Time
 	OnboardingState string
 }
@@ -364,9 +358,8 @@ type AdminPlayerStore interface {
 	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when
 	// the id matches no row.
 	SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error
-	// SetPlayerApprovedNow stamps approved_at when it is still NULL, clearing
-	// the account to sign in under LOGIN_APPROVAL_REQUIRED (#1227). Idempotent:
-	// approving an already-approved row is a no-op that returns nil.
+	// SetPlayerApprovedNow stamps approved_at when it is still NULL (#1227).
+	// Idempotent: approving an already-approved row is a no-op that returns nil.
 	SetPlayerApprovedNow(ctx context.Context, playerID int64) error
 	// SetPlayerEmail rewrites players.email and clears email_verified_at
 	// so the changed address must be re-proven. Returns ErrEmailTaken on

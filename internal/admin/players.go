@@ -30,11 +30,8 @@ type playerRow struct {
 	OnboardingState string
 	IsAdmin         bool
 	IsHost          bool
-	// PendingApproval marks a password account with a confirmed email still
-	// waiting for admin approval (#1227). Scoped to password holders because the
-	// login gate only ever holds a password sign-in; OAuth sign-in bypasses it.
-	// Surfaced only when LOGIN_APPROVAL_REQUIRED is on, gated by
-	// playersPageData.ApprovalRequired in the template.
+	// PendingApproval marks a confirmed password account still waiting for admin
+	// approval (#1227). Password-only: the login gate never holds an OAuth sign-in.
 	PendingApproval bool
 	CreatedAt       time.Time
 	FinishedCount   int64
@@ -70,8 +67,7 @@ type playersPageData struct {
 	NextURL    string
 	RangeStart int64
 	RangeEnd   int64
-	// ApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); gates the
-	// per-row "pending approval" marker so it never shows when approval is off.
+	// ApprovalRequired gates the per-row "pending approval" marker (#1227).
 	ApprovalRequired bool
 }
 

@@ -19,11 +19,9 @@ const (
 	emailApprovedBodyKey    locale.MessageID = "email.approved.body"
 )
 
-// HandlePlayerApprove handles POST /admin/players/{playerID}/approve (#1227).
-// Admin only (gated by RequireAdmin at the route). Approves a confirmed account
-// so it can sign in under LOGIN_APPROVAL_REQUIRED, writes an admin_audit row, and
-// notifies the player that their account is approved. Already-approved accounts
-// are a 400-style flash so a stale tab does not re-stamp the timestamp.
+// HandlePlayerApprove handles POST /admin/players/{playerID}/approve (#1227):
+// approves a confirmed account, writes an admin_audit row, and emails the player.
+// An already-approved account flashes an error so a stale tab cannot re-stamp it.
 func HandlePlayerApprove(
 	logger *slog.Logger,
 	store auth.AdminPlayerStore,
@@ -70,10 +68,8 @@ func HandlePlayerApprove(
 	})
 }
 
-// maybeNotifyApproved dispatches the approval-granted email to the player when
-// SMTP is configured and the account has an email; it returns the sentence to
-// append to the success flash. An account without an email, or an instance
-// without email configured, gets no mail and a flash saying so.
+// maybeNotifyApproved emails the player when SMTP is configured and the account
+// has an address, returning the sentence to append to the success flash.
 //
 //nolint:revive // mailConfigured reflects whether SMTP is wired (an instance fact carried from mailer.StatusView), not a behavioural toggle the caller flips per request.
 func maybeNotifyApproved(
@@ -97,12 +93,9 @@ func maybeNotifyApproved(
 	return " The player was emailed that their account is approved."
 }
 
-// dispatchApprovedNotice sends a best-effort notice that the player's account is
-// approved and links to the login page. Mirrors dispatchRoleChangeNotice: the
-// send runs detached with a bounded timeout so a closed tab does not cancel it
-// and SMTP latency is not observable from the redirect; a failure is logged and
-// never blocks the response. The player's own locale is not stored, so the
-// notice uses English.
+// dispatchApprovedNotice sends a best-effort notice that the account is approved,
+// linking to the login page. Detached + bounded so SMTP latency is not observable
+// from the redirect. English (the player's locale is not stored).
 func dispatchApprovedNotice(
 	ctx context.Context,
 	logger *slog.Logger,

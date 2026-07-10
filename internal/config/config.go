@@ -276,10 +276,8 @@ type Config struct {
 	RegistrationEnabled bool
 
 	// LoginApprovalRequired holds a confirmed-email account back from signing in
-	// until an admin approves it. Defaults to false so existing installs are
-	// unaffected. Parsed from the LOGIN_APPROVAL_REQUIRED env var via
-	// strconv.ParseBool. Admins are always approved, so an operator can never
-	// lock themselves out by turning this on.
+	// until an admin approves it. Defaults to false (LOGIN_APPROVAL_REQUIRED);
+	// admins are always approved so an operator cannot lock themselves out.
 	LoginApprovalRequired bool
 
 	// DemoMode turns the deployment into the public shared demo (#1147).

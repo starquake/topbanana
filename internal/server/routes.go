@@ -501,9 +501,8 @@ type adminPlayerDeps struct {
 	// tasks tracks the detached resend / role-change-notice dispatches so a
 	// graceful shutdown drains them before the DB closes (#740).
 	tasks *bgtasks.Tracker
-	// loginApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); the player
-	// list + detail surface the approval status and the approve action only
-	// when it is on.
+	// loginApprovalRequired gates the approval status + approve action in the
+	// admin player list and detail views (#1227).
 	loginApprovalRequired bool
 }
 

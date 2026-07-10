@@ -16,9 +16,8 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
-// Awaiting-approval notice catalog keys (#1227). The registrant notice (a) and
-// the admin fan-out notice (b) live here at their dispatch site; the
-// approval-granted notice (c) lives with the admin approve action.
+// Awaiting-approval notice catalog keys (#1227): the registrant notice and the
+// admin fan-out. The approval-granted notice lives with the admin approve action.
 const (
 	emailApprovalPendingSubjectKey locale.MessageID = "email.approvalPending.subject"
 	emailApprovalPendingBodyKey    locale.MessageID = "email.approvalPending.body"
@@ -30,19 +29,16 @@ const (
 // file's best-effort verify/approval warnings.
 const logPlayerIDKey = "player_id"
 
-// AdminEmailLister returns the address of every admin. Backs the "an account is
-// awaiting approval" fan-out (#1227); the narrow interface lives here so the
-// verify handler can reach it without importing internal/store.
+// AdminEmailLister returns the address of every admin, backing the
+// awaiting-approval fan-out (#1227). Narrow so the verify handler need not import
+// internal/store.
 type AdminEmailLister interface {
 	// ListAdminEmails returns the email of every admin with an address on file.
 	ListAdminEmails(ctx context.Context) ([]string, error)
 }
 
-// VerifyEmailDeps bundles the dependencies HandleVerifyEmail needs. It grew a
-// second responsibility with LOGIN_APPROVAL_REQUIRED (#1227): after confirming
-// an address it may notify the registrant and every admin that the account is
-// waiting for approval. Bundling keeps the constructor under revive's argument
-// limit.
+// VerifyEmailDeps bundles the dependencies HandleVerifyEmail needs. Bundling
+// keeps the constructor under revive's argument limit.
 type VerifyEmailDeps struct {
 	Tokens   VerifyTokenStore
 	Players  PlayerStore
@@ -51,13 +47,13 @@ type VerifyEmailDeps struct {
 	// AdminEmails is the ADMIN_EMAILS allowlist consulted at verify time.
 	AdminEmails []string
 	// LoginApprovalRequired gates the awaiting-approval notices below; when off,
-	// verify behaves exactly as before and the mail deps go unused.
+	// verify behaves exactly as before and the mail deps go unused (#1227).
 	LoginApprovalRequired bool
 	Sender                VerifyEmailSender
 	AdminEmailLister      AdminEmailLister
 	BaseURL               string
-	// Tasks tracks the detached approval notices so a graceful shutdown drains
-	// them before the DB closes (#740). Nil in unit tests, which run untracked.
+	// Tasks drains the detached approval notices on graceful shutdown (#740).
+	// Nil in unit tests, which run untracked.
 	Tasks *bgtasks.Tracker
 }
 
@@ -145,12 +141,9 @@ func HandleVerifyEmail(
 }
 
 // maybeNotifyAwaitingApproval fires the awaiting-approval notices after a
-// first-time verify (#1227). It only runs when LOGIN_APPROVAL_REQUIRED is on and
-// the freshly confirmed account is neither an admin (admins are auto-approved)
-// nor already approved (a backfilled row, or an email-change on an existing
-// account). It re-reads the player so the check sees the role/approval state
-// after any allowlist promotion above. Best-effort: a lookup failure is logged
-// and verify still renders success.
+// first-time verify (#1227), only when approval is required and the account is
+// neither admin nor already approved. Re-reads the player so the check sees any
+// allowlist promotion above. Best-effort: a lookup failure is logged.
 func maybeNotifyAwaitingApproval(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -175,15 +168,13 @@ func maybeNotifyAwaitingApproval(
 	dispatchApprovalAdminNotice(ctx, logger, deps, p)
 }
 
-// approvalNoticeMargin is added to mailer.SendTimeout to bound each detached
-// awaiting-approval send, matching the role-change notice margin so SMTP latency
-// is never observable from the verify response.
+// approvalNoticeMargin bounds each detached awaiting-approval send so SMTP
+// latency is never observable from the verify response.
 const approvalNoticeMargin = 15 * time.Second
 
 // dispatchApprovalPending tells the registrant their address is confirmed and an
-// admin will review the account before they can sign in. Detached + bounded so a
-// closed tab does not cancel it; a nil sender (unit tests) skips the send. Uses
-// the registrant's own resolved locale.
+// admin will review the account. Detached + bounded so a closed tab does not
+// cancel it; a nil sender (unit tests) skips the send.
 func dispatchApprovalPending(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -210,11 +201,10 @@ func dispatchApprovalPending(
 	})
 }
 
-// dispatchApprovalAdminNotice tells every admin that an account is waiting for
-// approval, naming the registrant and linking to the players list. Admins are
-// operators, so the copy is English. Detached + bounded; a nil sender or lister
-// (unit tests) skips it. The admin lookup runs inside the detached goroutine so
-// the verify response is never held open on it.
+// dispatchApprovalAdminNotice tells every admin an account is waiting, naming the
+// registrant and linking to the players list. English (admins are operators).
+// The admin lookup runs inside the detached goroutine so the verify response is
+// never held open on it; a nil sender or lister (unit tests) skips it.
 func dispatchApprovalAdminNotice(
 	ctx context.Context,
 	logger *slog.Logger,

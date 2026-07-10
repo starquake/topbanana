@@ -668,11 +668,9 @@ func completeLogin(
 		return
 	}
 
-	// Hold a confirmed-but-unapproved account at the door until an admin
-	// approves it (#1227). Reachable only after correct credentials, so unlike
-	// the unverified gate this renders a clear informative page rather than the
-	// generic invalid-credentials response. Admins are always approved, so this
-	// never blocks an operator.
+	// Hold a confirmed-but-unapproved account until an admin approves it (#1227).
+	// Reachable only after correct credentials, so unlike the unverified gate this
+	// renders a clear informative page, not the generic invalid-credentials one.
 	if deps.LoginApprovalRequired && !player.IsApproved() {
 		logger.InfoContext(r.Context(), "login blocked: account not approved",
 			slog.Int64(logPlayerKey, player.ID),
@@ -830,17 +828,13 @@ func renderUnverifiedLogin(
 	renderInvalidCredentials(cfg, w, r, email)
 }
 
-// loginPendingApprovalData backs the login_pending_approval.gohtml page. Title
-// feeds the base layout; the body copy is static and pulled from the catalog by
-// the template, so no other fields are needed.
+// loginPendingApprovalData backs the login_pending_approval.gohtml page.
 type loginPendingApprovalData struct {
 	Title string
 }
 
-// renderLoginPendingApproval renders the "awaiting admin approval" page shown
-// when a confirmed account signs in with correct credentials while
-// LOGIN_APPROVAL_REQUIRED is on (#1227). Status 200: the visitor authenticated
-// successfully, they are simply not cleared to proceed yet.
+// renderLoginPendingApproval renders the "awaiting admin approval" page (#1227).
+// Status 200: the visitor authenticated but is not cleared to proceed yet.
 func renderLoginPendingApproval(cfg loginFormCfg, w http.ResponseWriter, r *http.Request) {
 	cfg.approvalPending.Render(w, r, http.StatusOK, loginPendingApprovalData{
 		Title: locale.Translate(locale.Resolve(r), "loginPendingApproval.heading"),

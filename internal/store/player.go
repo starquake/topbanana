@@ -875,11 +875,9 @@ func (s *PlayerStore) SetPlayerEmailVerifiedNow(ctx context.Context, playerID in
 	return nil
 }
 
-// SetPlayerApprovedNow stamps approved_at when it is currently NULL, clearing
-// the account to sign in under LOGIN_APPROVAL_REQUIRED (#1227). Idempotent: a
-// second approval matches no rows (the guard filters an already-approved row
-// out), which is treated as success rather than ErrPlayerNotFound - the caller
-// pre-checks existence via GetPlayerDetail before acting.
+// SetPlayerApprovedNow stamps approved_at when it is currently NULL (#1227).
+// Idempotent: a no-match (already approved) is success, not ErrPlayerNotFound;
+// the caller pre-checks existence via GetPlayerDetail.
 func (s *PlayerStore) SetPlayerApprovedNow(ctx context.Context, playerID int64) error {
 	if _, err := s.q.SetPlayerApprovedNow(ctx, playerID); err != nil {
 		return fmt.Errorf("failed to set approved now: %w", err)
@@ -889,8 +887,7 @@ func (s *PlayerStore) SetPlayerApprovedNow(ctx context.Context, playerID int64) 
 }
 
 // ListAdminEmails returns the email of every admin with an address on file,
-// alphabetically. Backs the "a new account is awaiting approval" fan-out
-// (#1227). Empty slice when no admin has an email.
+// alphabetically. Backs the awaiting-approval fan-out to admins (#1227).
 func (s *PlayerStore) ListAdminEmails(ctx context.Context) ([]string, error) {
 	emails, err := s.q.ListAdminEmails(ctx)
 	if err != nil {
