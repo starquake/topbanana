@@ -31,7 +31,10 @@ LIMIT 1;
 -- their display_name at the register form. The column tracks "did the player
 -- pick this name themselves" (vs auto-generated petname), so a fresh
 -- registrant must be marked as claimed from the moment the row is written.
-INSERT INTO players (display_name, password_hash, email, role, role_changed_at, display_name_claimed)
+-- approved_at is stamped in lockstep with the admin role: an account that lands
+-- as admin is always approved so LOGIN_APPROVAL_REQUIRED can never lock out the
+-- bootstrap admin (#1227). A non-admin registrant starts unapproved (NULL).
+INSERT INTO players (display_name, password_hash, email, role, role_changed_at, approved_at, display_name_claimed)
 VALUES (
     sqlc.arg('display_name'),
     sqlc.arg('password_hash'),
@@ -44,6 +47,15 @@ VALUES (
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN 'admin'
         ELSE 'player'
+    END,
+    CASE
+        WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
     END,
     CASE
         WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
@@ -119,6 +131,18 @@ SET display_name = sqlc.arg('display_name'),
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
+    -- Stamp approved_at whenever the claim resolves to admin so the bootstrap
+    -- admin is never held back by LOGIN_APPROVAL_REQUIRED (#1227). COALESCE keeps
+    -- an already-approved timestamp intact on the non-admin path.
+    approved_at = CASE
+        WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE approved_at
+    END,
     display_name_claimed = 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
@@ -187,7 +211,7 @@ LIMIT 1;
 -- deployments from promoting *every* sign-in to admin. Without this,
 -- the second-and-onward Google sign-ins on a fresh DB would all see
 -- count(password_hash IS NOT NULL) == 0 and become admin.
-INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, display_name_claimed)
+INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, approved_at, display_name_claimed)
 VALUES (
     sqlc.arg('display_name'),
     sqlc.arg('email'),
@@ -200,6 +224,16 @@ VALUES (
         ) THEN 'admin'
         ELSE 'player'
     END,
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END,
+    -- A first OAuth registrant who lands as admin is stamped approved so the
+    -- admin-always-approved invariant holds on the OAuth bootstrap too (#1227).
     CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
@@ -260,6 +294,17 @@ SET email = sqlc.arg('email'),
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
+    END,
+    -- Stamp approved_at when this OAuth claim resolves to admin so the
+    -- admin-always-approved invariant holds (#1227); COALESCE keeps an existing
+    -- approval intact on the non-admin path.
+    approved_at = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE approved_at
     END
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
@@ -467,10 +512,38 @@ WHERE expires_at <= sqlc.arg('now');
 -- is stamped to CURRENT_TIMESTAMP on every change so the settings list can show
 -- a "promoted" timestamp. Returns the number of affected rows so the wrapper
 -- can map "no rows" to ErrPlayerNotFound.
+--
+-- Promoting to admin stamps approved_at when it is still NULL so the
+-- admin-always-approved invariant holds however a player reaches the tier
+-- (in-app promotion or the allowlist promotion at verify time), and never locks
+-- them out under LOGIN_APPROVAL_REQUIRED (#1227). A demotion leaves approved_at
+-- untouched.
 UPDATE players
 SET role = sqlc.arg('role'),
-    role_changed_at = CURRENT_TIMESTAMP
+    role_changed_at = CURRENT_TIMESTAMP,
+    approved_at = CASE
+        WHEN CAST(sqlc.arg('role') AS TEXT) = 'admin' AND approved_at IS NULL THEN CURRENT_TIMESTAMP
+        ELSE approved_at
+    END
 WHERE id = sqlc.arg('id');
+
+-- name: SetPlayerApprovedNow :execrows
+-- Stamps approved_at when currently NULL, clearing the account to sign in under
+-- LOGIN_APPROVAL_REQUIRED (#1227). Idempotent: a second approval matches no rows
+-- because the guard filters an already-approved row out.
+UPDATE players
+SET approved_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg('id')
+  AND approved_at IS NULL;
+
+-- name: ListAdminEmails :many
+-- Every current admin's email, skipping rows with no address on file. Backs the
+-- "a new account is awaiting approval" notice fanned out to admins (#1227).
+SELECT CAST(email AS TEXT) AS email
+FROM players
+WHERE role = 'admin'
+  AND email IS NOT NULL
+ORDER BY email;
 
 -- name: DemoteAdminGuarded :execrows
 -- Atomically demotes the admin row identified by id to a non-admin tier, but

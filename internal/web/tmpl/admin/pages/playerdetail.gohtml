@@ -39,6 +39,12 @@
                 <dt class="text-text-dim">Email verified</dt>
                 <dd class="text-text">{{.Player.EmailVerifiedText}}</dd>
             </div>
+            {{if .ApprovalRequired}}
+                <div class="flex justify-between gap-4 py-1">
+                    <dt class="text-text-dim">Approved</dt>
+                    <dd class="text-text">{{if .Player.Approved}}{{.Player.ApprovedText}}{{else}}pending{{end}}</dd>
+                </div>
+            {{end}}
             <div class="flex justify-between gap-4 py-1">
                 <dt class="text-text-dim">Role</dt><dd class="text-text">{{.Player.Role}}</dd>
             </div>
@@ -58,6 +64,13 @@
         <div class="rounded-lg border border-border-soft p-4 text-sm">
             <h2 class="mb-3 font-display text-sm uppercase tracking-[0.14em] text-text-dim">Actions</h2>
             <div class="flex flex-col gap-3">
+                {{if .CanApprove}}
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/approve"
+                          onsubmit="return confirm('Approve this account so it can sign in?');">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" class="btn-primary w-full">Approve account</button>
+                    </form>
+                {{end}}
                 {{if .CanVerify}}
                     <form method="POST" action="/admin/players/{{.Player.ID}}/verify"
                           onsubmit="return confirm('Mark this account verified? This bypasses the email loop.');">

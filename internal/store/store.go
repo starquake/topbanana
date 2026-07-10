@@ -31,9 +31,12 @@ type Stores struct {
 	PlayerLister auth.PlayerLister
 	AdminPlayers auth.AdminPlayerStore
 	AdminList    auth.AdminListStore
-	VerifyTokens auth.VerifyTokenStore
-	ResetTokens  auth.ResetTokenStore
-	Invites      auth.InviteStore
+	// AdminEmailLister is the narrow admin-email read the awaiting-approval
+	// fan-out uses (#1227); backed by the same PlayerStore instance.
+	AdminEmailLister auth.AdminEmailLister
+	VerifyTokens     auth.VerifyTokenStore
+	ResetTokens      auth.ResetTokenStore
+	Invites          auth.InviteStore
 	// InvitePlayers is the narrow create+verify+read slice the
 	// accept-invite flow uses; backed by the same PlayerStore instance.
 	InvitePlayers auth.InvitePlayerStore
@@ -54,21 +57,22 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 	games := NewGameStore(conn, logger)
 
 	return &Stores{
-		Quizzes:       NewQuizStore(conn, logger),
-		Games:         games,
-		GameMigrator:  games,
-		Players:       players,
-		OAuth:         players,
-		PlayerLister:  players,
-		AdminPlayers:  players,
-		AdminList:     players,
-		VerifyTokens:  players,
-		ResetTokens:   players,
-		Invites:       players,
-		InvitePlayers: players,
-		Home:          NewHomeStore(conn),
-		Retention:     NewRetentionStore(conn, logger),
-		LiveSessions:  NewLiveSessionStore(conn, logger),
-		Media:         NewMediaStore(conn, logger),
+		Quizzes:          NewQuizStore(conn, logger),
+		Games:            games,
+		GameMigrator:     games,
+		Players:          players,
+		OAuth:            players,
+		PlayerLister:     players,
+		AdminPlayers:     players,
+		AdminList:        players,
+		AdminEmailLister: players,
+		VerifyTokens:     players,
+		ResetTokens:      players,
+		Invites:          players,
+		InvitePlayers:    players,
+		Home:             NewHomeStore(conn),
+		Retention:        NewRetentionStore(conn, logger),
+		LiveSessions:     NewLiveSessionStore(conn, logger),
+		Media:            NewMediaStore(conn, logger),
 	}
 }

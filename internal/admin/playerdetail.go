@@ -48,16 +48,21 @@ const AdminResendVerificationCooldown = 60 * time.Second
 
 // playerDetailData backs the playerdetail.gohtml template.
 type playerDetailData struct {
-	Title          string
-	Player         playerDetailRow
-	RecentGames    []playerDetailGame
-	LivePlays      []playerDetailLivePlay
-	AuditEntries   []playerDetailAudit
-	CanVerify      bool
-	CanResend      bool
-	Notice         string
-	Error          string
-	EmailFormValue string
+	Title        string
+	Player       playerDetailRow
+	RecentGames  []playerDetailGame
+	LivePlays    []playerDetailLivePlay
+	AuditEntries []playerDetailAudit
+	CanVerify    bool
+	CanResend    bool
+	// ApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); the approval
+	// status row and the Approve action only render when it is on. CanApprove
+	// gates the Approve button to a confirmed-but-unapproved account.
+	ApprovalRequired bool
+	CanApprove       bool
+	Notice           string
+	Error            string
+	EmailFormValue   string
 }
 
 type playerDetailRow struct {
@@ -74,6 +79,8 @@ type playerDetailRow struct {
 	CreatedAt         time.Time
 	EmailVerifiedAt   *time.Time
 	EmailVerifiedText string
+	Approved          bool
+	ApprovedText      string
 }
 
 type playerDetailGame struct {
@@ -108,6 +115,7 @@ func HandlePlayerDetail(
 	csrfMgr *csrf.Manager,
 	store auth.AdminPlayerStore,
 	flash *auth.SignedFlash,
+	loginApprovalRequired bool,
 ) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playerdetail.gohtml")
 
@@ -117,7 +125,7 @@ func HandlePlayerDetail(
 			return
 		}
 
-		data, ok := loadPlayerDetail(w, r, logger, csrfMgr, store, playerID)
+		data, ok := loadPlayerDetail(w, r, logger, csrfMgr, store, playerID, loginApprovalRequired)
 		if !ok {
 			return
 		}
@@ -142,6 +150,7 @@ func loadPlayerDetail(
 	csrfMgr *csrf.Manager,
 	store auth.AdminPlayerStore,
 	playerID int64,
+	loginApprovalRequired bool,
 ) (playerDetailData, bool) {
 	ctx := r.Context()
 	detail, err := store.GetPlayerDetail(ctx, playerID)
@@ -181,7 +190,7 @@ func loadPlayerDetail(
 		return playerDetailData{}, false
 	}
 
-	return buildPlayerDetailData(detail, games, livePlays, audit), true
+	return buildPlayerDetailData(detail, games, livePlays, audit, loginApprovalRequired), true
 }
 
 // buildPlayerDetailData merges the row + games + audit into the
@@ -192,6 +201,7 @@ func buildPlayerDetailData(
 	games []*auth.RecentFinishedGame,
 	livePlays []*auth.FinishedSessionPlay,
 	audit []*auth.AdminAuditEntry,
+	loginApprovalRequired bool,
 ) playerDetailData {
 	row := playerDetailRow{
 		ID:              detail.ID,
@@ -211,6 +221,12 @@ func buildPlayerDetailData(
 		row.EmailVerifiedText = detail.EmailVerifiedAt.Format(time.RFC3339)
 	} else {
 		row.EmailVerifiedText = "not yet"
+	}
+	row.Approved = detail.ApprovedAt != nil
+	if row.Approved {
+		row.ApprovedText = detail.ApprovedAt.Format(time.RFC3339)
+	} else {
+		row.ApprovedText = "not yet"
 	}
 
 	gameRows := make([]playerDetailGame, 0, len(games))
@@ -240,15 +256,22 @@ func buildPlayerDetailData(
 		})
 	}
 
+	// The login gate only ever holds a password sign-in, so approval is offered
+	// only for a password account with a confirmed but unapproved email (#1227).
+	canApprove := loginApprovalRequired && detail.HasPassword &&
+		detail.EmailVerifiedAt != nil && detail.ApprovedAt == nil
+
 	return playerDetailData{
-		Title:          "Admin Dashboard - Player",
-		Player:         row,
-		RecentGames:    gameRows,
-		LivePlays:      livePlayRows,
-		AuditEntries:   auditRows,
-		CanVerify:      detail.OnboardingState == auth.OnboardingStateUnverified,
-		CanResend:      detail.OnboardingState == auth.OnboardingStateUnverified && detail.Email != "",
-		EmailFormValue: detail.Email,
+		Title:            "Admin Dashboard - Player",
+		Player:           row,
+		RecentGames:      gameRows,
+		LivePlays:        livePlayRows,
+		AuditEntries:     auditRows,
+		CanVerify:        detail.OnboardingState == auth.OnboardingStateUnverified,
+		CanResend:        detail.OnboardingState == auth.OnboardingStateUnverified && detail.Email != "",
+		ApprovalRequired: loginApprovalRequired,
+		CanApprove:       canApprove,
+		EmailFormValue:   detail.Email,
 	}
 }
 
@@ -271,6 +294,8 @@ func adminActionLabel(action string) string {
 		return "Verification email resent"
 	case auth.AdminActionRoleChanged:
 		return "Role changed"
+	case auth.AdminActionApproved:
+		return "Account approved"
 	case auth.AdminActionPromoteSuper:
 		return "Promoted to admin"
 	case auth.AdminActionDemoteSuper:

@@ -28,6 +28,13 @@ const (
 	KindEmailChangeNotice Kind = "email_change_notice"
 	KindRegisterExisting  Kind = "register_existing"
 	KindRoleChangeNotice  Kind = "role_change_notice"
+	// KindApprovalPending notifies a registrant that their confirmed account is
+	// awaiting admin approval; KindApprovalRequest notifies admins that an
+	// account is waiting; KindApprovalGranted notifies the registrant that an
+	// admin approved them (#1227).
+	KindApprovalPending Kind = "approval_pending"
+	KindApprovalRequest Kind = "approval_request"
+	KindApprovalGranted Kind = "approval_granted"
 )
 
 // ErrNotConfigured is the sentinel returned by the no-op mailer's Send

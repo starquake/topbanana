@@ -180,11 +180,17 @@ WHERE id = sqlc.arg('id');
 -- is nullable on the column but the handler enforces a non-empty hash so
 -- the row can log in immediately. role is passed explicitly so callers can
 -- create a verified account at any tier in one write.
-INSERT INTO players (display_name, email, password_hash, email_verified_at, role, display_name_claimed)
+--
+-- approved_at is stamped too (#1227): an admin creating the account is itself
+-- the approval act, so the row can sign in immediately even under
+-- LOGIN_APPROVAL_REQUIRED, mirroring how email_verified_at bypasses the email
+-- loop.
+INSERT INTO players (display_name, email, password_hash, email_verified_at, approved_at, role, display_name_claimed)
 VALUES (
     sqlc.arg('display_name'),
     sqlc.arg('email'),
     sqlc.arg('password_hash'),
+    CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP,
     sqlc.arg('role'),
     1

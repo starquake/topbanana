@@ -528,6 +528,10 @@ type LoginDeps struct {
 	// ForgotPasswordEnabled shows the "Forgot your password?" link on the
 	// login form's error re-renders; false when SMTP is unconfigured (#1170).
 	ForgotPasswordEnabled bool
+	// LoginApprovalRequired holds a confirmed-but-unapproved account back at
+	// sign-in until an admin approves it (#1227). Off by default; admins are
+	// always approved so this never blocks an operator.
+	LoginApprovalRequired bool
 	// Tasks tracks the detached verify-email resend so a graceful
 	// shutdown drains it before the DB closes (#740). Nil in unit tests,
 	// which then run the dispatch untracked.
@@ -558,6 +562,7 @@ func HandleLoginSubmit(
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 	formCfg := loginFormCfg{
 		render:                renderer,
+		approvalPending:       newTemplateRenderer(logger, csrfMgr, "auth/pages/login_pending_approval.gohtml"),
 		registrationEnabled:   deps.RegistrationEnabled,
 		googleEnabled:         deps.GoogleEnabled,
 		forgotPasswordEnabled: deps.ForgotPasswordEnabled,
@@ -663,6 +668,20 @@ func completeLogin(
 		return
 	}
 
+	// Hold a confirmed-but-unapproved account at the door until an admin
+	// approves it (#1227). Reachable only after correct credentials, so unlike
+	// the unverified gate this renders a clear informative page rather than the
+	// generic invalid-credentials response. Admins are always approved, so this
+	// never blocks an operator.
+	if deps.LoginApprovalRequired && !player.IsApproved() {
+		logger.InfoContext(r.Context(), "login blocked: account not approved",
+			slog.Int64(logPlayerKey, player.ID),
+			slog.String(logEmailKey, email))
+		renderLoginPendingApproval(formCfg, w, r)
+
+		return
+	}
+
 	var priorSessionPlayerID *int64
 	if id, ok := deps.Sessions.PlayerID(r); ok {
 		priorSessionPlayerID = &id
@@ -714,6 +733,7 @@ func recordAccountFailure(limiter *AccountLoginLimiter, account string) {
 // renderLoginRateLimited) stay under revive's argument-limit.
 type loginFormCfg struct {
 	render                *render.Renderer
+	approvalPending       *render.Renderer
 	registrationEnabled   bool
 	googleEnabled         bool
 	forgotPasswordEnabled bool
@@ -808,6 +828,23 @@ func renderUnverifiedLogin(
 ) {
 	dispatchVerifyResend(r, logger, deps, player)
 	renderInvalidCredentials(cfg, w, r, email)
+}
+
+// loginPendingApprovalData backs the login_pending_approval.gohtml page. Title
+// feeds the base layout; the body copy is static and pulled from the catalog by
+// the template, so no other fields are needed.
+type loginPendingApprovalData struct {
+	Title string
+}
+
+// renderLoginPendingApproval renders the "awaiting admin approval" page shown
+// when a confirmed account signs in with correct credentials while
+// LOGIN_APPROVAL_REQUIRED is on (#1227). Status 200: the visitor authenticated
+// successfully, they are simply not cleared to proceed yet.
+func renderLoginPendingApproval(cfg loginFormCfg, w http.ResponseWriter, r *http.Request) {
+	cfg.approvalPending.Render(w, r, http.StatusOK, loginPendingApprovalData{
+		Title: locale.Translate(locale.Resolve(r), "loginPendingApproval.heading"),
+	})
 }
 
 // dispatchVerifyResend mirrors dispatchVerifyEmail but routes through

@@ -28,7 +28,7 @@ func TestHandlePlayersList_RendersRows(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -57,7 +57,7 @@ func TestHandlePlayersList_RendersRoleBadges(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -132,7 +132,7 @@ func TestHandlePlayersList_EmptyList(t *testing.T) {
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodGet, "/admin/players?state=oauth", nil,
 	)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -150,7 +150,7 @@ func TestHandlePlayersList_StoreErrorRenders500(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusInternalServerError; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -172,7 +172,7 @@ func TestHandlePlayersList_RequestsCorrectOffset(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players?page=2", nil)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -203,7 +203,7 @@ func TestHandlePlayersList_FilterStatePassedToStore(t *testing.T) {
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodGet, "/admin/players?state=unverified", nil,
 	)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -230,7 +230,7 @@ func TestHandlePlayersList_UnknownStateFallsBackToAll(t *testing.T) {
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodGet, "/admin/players?state=bogus", nil,
 	)
-	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister, false).ServeHTTP(w, req)
 
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)

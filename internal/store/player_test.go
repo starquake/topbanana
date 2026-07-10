@@ -1657,3 +1657,65 @@ func TestPlayerStore_CreatePlayerFromOAuth_ClosedDBWraps(t *testing.T) {
 		t.Errorf("err.Error() = %q, should contain %q", got, want)
 	}
 }
+
+// TestPlayerStore_SetPlayerApprovedNow pins the #1227 approval write: an
+// unapproved account gains an approved_at stamp, the change round-trips through
+// GetPlayerByID, and a second approval is an idempotent no-op.
+func TestPlayerStore_SetPlayerApprovedNow(t *testing.T) {
+	t.Parallel()
+
+	ps := NewPlayerStore(dbtest.Open(t), slog.Default())
+	// The first credentialled registrant becomes an auto-approved admin, so a
+	// second player is the unapproved subject.
+	if _, err := ps.CreatePlayer(t.Context(), "boss", "boss@example.test", "hash", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer admin err = %v, want nil", err)
+	}
+	bob, err := ps.CreatePlayer(t.Context(), "bob", "bob@example.test", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
+	}
+	if bob.IsApproved() {
+		t.Fatal("fresh non-admin player IsApproved() = true, want false")
+	}
+
+	if err = ps.SetPlayerApprovedNow(t.Context(), bob.ID); err != nil {
+		t.Fatalf("SetPlayerApprovedNow err = %v, want nil", err)
+	}
+	got, err := ps.GetPlayerByID(t.Context(), bob.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if !got.IsApproved() {
+		t.Error("after SetPlayerApprovedNow IsApproved() = false, want true")
+	}
+
+	// Idempotent: approving again is a no-op that returns nil.
+	if err = ps.SetPlayerApprovedNow(t.Context(), bob.ID); err != nil {
+		t.Errorf("second SetPlayerApprovedNow err = %v, want nil", err)
+	}
+}
+
+// TestPlayerStore_ListAdminEmails pins the #1227 admin-email lookup: only admins
+// with an address on file are returned.
+func TestPlayerStore_ListAdminEmails(t *testing.T) {
+	t.Parallel()
+
+	ps := NewPlayerStore(dbtest.Open(t), slog.Default())
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "alice@example.test", "hash", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer alice err = %v, want nil", err)
+	}
+	if _, err := ps.CreatePlayer(t.Context(), "bob", "bob@example.test", "hash", auth.RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
+	}
+
+	emails, err := ps.ListAdminEmails(t.Context())
+	if err != nil {
+		t.Fatalf("ListAdminEmails err = %v, want nil", err)
+	}
+	if got, want := len(emails), 1; got != want {
+		t.Fatalf("ListAdminEmails len = %d, want %d (%v)", got, want, emails)
+	}
+	if got, want := emails[0], "alice@example.test"; got != want {
+		t.Errorf("ListAdminEmails[0] = %q, want %q", got, want)
+	}
+}

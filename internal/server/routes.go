@@ -58,9 +58,10 @@ func addRoutes(
 			[]byte(cfg.SessionKey), cfg.SecureCookies(),
 			admin.InviteFlashCookieName, admin.InviteFlashCookiePath,
 		),
-		baseURL:        cfg.BaseURL,
-		mailConfigured: mail.Status.Configured,
-		tasks:          mail.Tasks,
+		baseURL:               cfg.BaseURL,
+		mailConfigured:        mail.Status.Configured,
+		tasks:                 mail.Tasks,
+		loginApprovalRequired: cfg.LoginApprovalRequired,
 	}
 	gameDeps := adminGameDeps{
 		gameService:  gameService,
@@ -165,9 +166,18 @@ func addEmailFlowRoutes(
 ) {
 	csrfMW := csrfMgr.Middleware
 
-	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(
-		logger, csrfMgr, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, cfg.AdminEmails,
-	))
+	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(logger, csrfMgr, auth.VerifyEmailDeps{
+		Tokens:                stores.VerifyTokens,
+		Players:               stores.Players,
+		Roles:                 stores.AdminPlayers,
+		Sessions:              sessions,
+		AdminEmails:           cfg.AdminEmails,
+		LoginApprovalRequired: cfg.LoginApprovalRequired,
+		Sender:                mail.Tester,
+		AdminEmailLister:      stores.AdminEmailLister,
+		BaseURL:               cfg.BaseURL,
+		Tasks:                 mail.Tasks,
+	}))
 
 	verifyFlash := auth.NewSignedFlash(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),
@@ -392,6 +402,7 @@ func addLoginRoutes(
 				RegistrationEnabled:   cfg.RegistrationEnabled,
 				GoogleEnabled:         googleEnabled,
 				ForgotPasswordEnabled: forgotPasswordEnabled,
+				LoginApprovalRequired: cfg.LoginApprovalRequired,
 				Tasks:                 mail.Tasks,
 			},
 		)),
@@ -490,6 +501,10 @@ type adminPlayerDeps struct {
 	// tasks tracks the detached resend / role-change-notice dispatches so a
 	// graceful shutdown drains them before the DB closes (#740).
 	tasks *bgtasks.Tracker
+	// loginApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); the player
+	// list + detail surface the approval status and the approve action only
+	// when it is on.
+	loginApprovalRequired bool
 }
 
 // adminGameDeps bundles the game-facing deps the admin quiz routes need
@@ -533,7 +548,9 @@ func addAdminRoutes(
 	}
 
 	addAdminSettingsRoutes(mux, logger, csrfMgr, requireAdmin, stores, playerDeps)
-	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
+	mux.Handle("GET /admin/players", requireAdmin(
+		admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister, playerDeps.loginApprovalRequired),
+	))
 	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, playerDeps)
 	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
 	mux.Handle("GET /admin/quizzes", requireGameHost(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
@@ -818,12 +835,22 @@ func addAdminPlayerRoutes(
 	)
 	mux.Handle(
 		"GET /admin/players/{playerID}",
-		requireAdmin(admin.HandlePlayerDetail(logger, csrfMgr, stores.AdminPlayers, deps.flash)),
+		requireAdmin(admin.HandlePlayerDetail(
+			logger, csrfMgr, stores.AdminPlayers, deps.flash, deps.loginApprovalRequired,
+		)),
 	)
 	mux.Handle(
 		"POST /admin/players/{playerID}/verify",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerMarkVerified(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/approve",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandlePlayerApprove(
+				logger, stores.AdminPlayers, deps.sender, deps.mailConfigured, deps.baseURL, deps.flash, deps.tasks,
+			),
 		))),
 	)
 	mux.Handle(

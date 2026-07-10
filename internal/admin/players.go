@@ -30,6 +30,12 @@ type playerRow struct {
 	OnboardingState string
 	IsAdmin         bool
 	IsHost          bool
+	// PendingApproval marks a password account with a confirmed email still
+	// waiting for admin approval (#1227). Scoped to password holders because the
+	// login gate only ever holds a password sign-in; OAuth sign-in bypasses it.
+	// Surfaced only when LOGIN_APPROVAL_REQUIRED is on, gated by
+	// playersPageData.ApprovalRequired in the template.
+	PendingApproval bool
 	CreatedAt       time.Time
 	FinishedCount   int64
 	LastFinishedAt  *time.Time
@@ -64,6 +70,9 @@ type playersPageData struct {
 	NextURL    string
 	RangeStart int64
 	RangeEnd   int64
+	// ApprovalRequired mirrors LOGIN_APPROVAL_REQUIRED (#1227); gates the
+	// per-row "pending approval" marker so it never shows when approval is off.
+	ApprovalRequired bool
 }
 
 // HandlePlayersList renders /admin/players (#423/#450). One row per
@@ -71,7 +80,12 @@ type playersPageData struct {
 // link to the per-player detail view, and a tab strip filtering by
 // onboarding state. Pagination is a simple ?page=N query param; page
 // sizes above [playersPerPage] are not negotiable from the URL.
-func HandlePlayersList(logger *slog.Logger, csrfMgr *csrf.Manager, lister auth.PlayerLister) http.Handler {
+func HandlePlayersList(
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	lister auth.PlayerLister,
+	loginApprovalRequired bool,
+) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playerslist.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +93,7 @@ func HandlePlayersList(logger *slog.Logger, csrfMgr *csrf.Manager, lister auth.P
 		if !ok {
 			return
 		}
+		data.ApprovalRequired = loginApprovalRequired
 		render.Render(w, r, http.StatusOK, data)
 	})
 }
@@ -196,6 +211,7 @@ func buildPlayerRows(
 			OnboardingState: p.OnboardingState,
 			IsAdmin:         p.Role == auth.RoleAdmin,
 			IsHost:          p.Role == auth.RoleHost,
+			PendingApproval: p.HasPassword && p.EmailVerifiedAt != nil && p.ApprovedAt == nil,
 			CreatedAt:       p.CreatedAt,
 		}
 		if s, ok := statsByID[p.ID]; ok {
