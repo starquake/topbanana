@@ -17,6 +17,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
@@ -173,6 +174,7 @@ func HandleGoogleCallback(
 	games AnonymousGameMigrator,
 	adminEmails []string,
 	registrationEnabled, forgotPasswordEnabled bool,
+	approval GoogleApprovalDeps,
 ) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
@@ -207,7 +209,7 @@ func HandleGoogleCallback(
 		if id, ok := sessions.PlayerID(r); ok {
 			sessionPlayerID = &id
 		}
-		player, err := linkOrCreateGooglePlayer(
+		player, firstRegistration, err := linkOrCreateGooglePlayer(
 			r.Context(), identities, result.Subject, result.Email, sessionPlayerID, registrationEnabled,
 		)
 		if err != nil {
@@ -243,8 +245,21 @@ func HandleGoogleCallback(
 			sessions:    sessions,
 			games:       games,
 			adminEmails: adminEmails,
-		}, player, sessionPlayerID, next)
+			approval:    approval,
+		}, player, sessionPlayerID, next, firstRegistration)
 	})
+}
+
+// GoogleApprovalDeps carries the LOGIN_APPROVAL_REQUIRED gate and the mail slice
+// the OAuth callback needs to hold an unapproved account and notify on a fresh
+// registration (#1227). Bundled so HandleGoogleCallback's already-long signature
+// grows by one parameter.
+type GoogleApprovalDeps struct {
+	LoginApprovalRequired bool
+	Sender                VerifyEmailSender
+	AdminEmailLister      AdminEmailLister
+	BaseURL               string
+	Tasks                 *bgtasks.Tracker
 }
 
 // googleSignInDeps groups the collaborators finalizeGoogleSignIn needs.
@@ -258,6 +273,7 @@ type googleSignInDeps struct {
 	sessions    *session.Manager
 	games       AnonymousGameMigrator
 	adminEmails []string
+	approval    GoogleApprovalDeps
 }
 
 // finalizeGoogleSignIn runs the success tail of the callback once a
@@ -271,6 +287,8 @@ type googleSignInDeps struct {
 // helper skips when the row is already admin or the email is not on the
 // allowlist, and logs+swallows any failure, so a promotion error never
 // blocks the login.
+//
+//nolint:revive // firstRegistration reports whether this sign-in materialized a brand-new account (a fact about the sign-in), gating only the one-time awaiting-approval notice, not a behavioural mode.
 func finalizeGoogleSignIn(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -278,28 +296,50 @@ func finalizeGoogleSignIn(
 	player *Player,
 	sessionPlayerID *int64,
 	next string,
+	firstRegistration bool,
 ) {
-	promoteVerifiedAdminIfAllowlisted(
+	// promoteVerifiedAdminIfAllowlisted returns the post-promotion row when it
+	// looked one up, so the approval gate + landing below see the fresh role and
+	// approved_at without a second read. A nil result (no allowlist / lookup
+	// miss) falls back to the row linkOrCreateGooglePlayer already returned.
+	current := player
+	if promoted := promoteVerifiedAdminIfAllowlisted(
 		r.Context(), deps.logger, deps.players, deps.roles, deps.adminEmails, player.ID,
-	)
+	); promoted != nil {
+		current = promoted
+	}
 
-	deps.sessions.Set(w, player.ID, player.SessionVersion)
+	// Gate an unapproved, non-admin OAuth sign-in the same way the password path
+	// is gated (#1227). Admins are always approved, so this never blocks them.
+	if deps.approval.LoginApprovalRequired && !current.IsApproved() {
+		if firstRegistration {
+			// Notify only when this sign-in materialized the account (create or
+			// first claim) so a repeat sign-in does not re-spam admins. OAuth
+			// emails are provider-attested, so the account is "confirmed" here.
+			n := approvalNotifier{
+				sender:  deps.approval.Sender,
+				lister:  deps.approval.AdminEmailLister,
+				baseURL: deps.approval.BaseURL,
+				tasks:   deps.approval.Tasks,
+			}
+			dispatchApprovalPending(r.Context(), deps.logger, n, current, locale.Resolve(r))
+			dispatchApprovalAdminNotice(r.Context(), deps.logger, n, current)
+		}
+		deps.logger.InfoContext(r.Context(), "google sign-in blocked: account not approved",
+			slog.Int64(logPlayerKey, current.ID))
+		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
+
+		return
+	}
+
+	deps.sessions.Set(w, current.ID, current.SessionVersion)
 	deps.logger.InfoContext(r.Context(), "google sign-in succeeded",
-		slog.Int64(logPlayerKey, player.ID),
-		slog.String(logEmailKey, player.Email))
-	migrateGamesAfterSignIn(r.Context(), deps.logger, deps.players, deps.games, sessionPlayerID, player.ID)
+		slog.Int64(logPlayerKey, current.ID),
+		slog.String(logEmailKey, current.Email))
+	migrateGamesAfterSignIn(r.Context(), deps.logger, deps.players, deps.games, sessionPlayerID, current.ID)
 	target := next
 	if target == "" {
-		// Resolve the landing from the freshly persisted role: the promotion
-		// above may have just changed it, and `player` was read before that.
-		// Mirrors the verify-token path's postVerifyLanding so a just-promoted
-		// admin reaches /admin instead of the player home. A read failure
-		// falls back to the pre-promotion role.
-		role := player.Role
-		if fresh, err := deps.players.GetPlayerByID(r.Context(), player.ID); err == nil {
-			role = fresh.Role
-		}
-		target = landingPathFor(role)
+		target = landingPathFor(current.Role)
 	}
 	//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path returned by readGoogleNext.
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -437,6 +477,12 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 // create-fresh. The silent link-by-email branch is only safe because
 // the caller has already verified email_verified=true on the id-token.
 //
+// The bool result reports whether this sign-in materialized a brand-new account
+// for the first time - either the create-fresh branch or an anonymous guest
+// attaching its first Google identity (claim-session). The caller fires the
+// awaiting-approval notices only then, so a repeat sign-in (existing identity) or
+// a link onto an already-registered account does not re-spam admins (#1227).
+//
 //nolint:revive // registrationEnabled gates only the final create-fresh branch (#492-adjacent); threading the policy in is clearer than splitting the branch table across two functions.
 func linkOrCreateGooglePlayer(
 	ctx context.Context,
@@ -444,7 +490,7 @@ func linkOrCreateGooglePlayer(
 	subject, email string,
 	sessionPlayerID *int64,
 	registrationEnabled bool,
-) (*Player, error) {
+) (*Player, bool, error) {
 	existing, err := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 	if err == nil {
 		// Self-heal a partial commit from an earlier link path: if the
@@ -456,43 +502,52 @@ func linkOrCreateGooglePlayer(
 		// idempotent. See #471.
 		if email != "" && existing.EmailVerifiedAt == nil {
 			if markErr := identities.MarkPlayerEmailVerifiedIfNew(ctx, existing.ID); markErr != nil {
-				return nil, fmt.Errorf("mark email verified on existing identity: %w", markErr)
+				return nil, false, fmt.Errorf("mark email verified on existing identity: %w", markErr)
 			}
 			now := time.Now().UTC()
 			existing.EmailVerifiedAt = &now
 		}
 
-		return existing, nil
+		return existing, false, nil
 	}
 	if !errors.Is(err, ErrPlayerNotFound) {
-		return nil, fmt.Errorf("get player by google subject: %w", err)
+		return nil, false, fmt.Errorf("get player by google subject: %w", err)
 	}
 
 	if email != "" {
 		linked, linkErr := linkExistingPlayerByEmail(ctx, identities, subject, email)
 		if linkErr == nil {
-			return linked, nil
+			return linked, false, nil
 		}
 		if !errors.Is(linkErr, ErrPlayerNotFound) {
-			return nil, linkErr
+			return nil, false, linkErr
 		}
 	}
 
 	if sessionPlayerID != nil {
 		claimed, claimErr := claimAnonymousSessionPlayer(ctx, identities, *sessionPlayerID, subject, email)
 		if claimErr == nil {
-			return claimed, nil
+			// An anonymous guest attaching its first Google identity is a
+			// brand-new account materializing; it happens exactly once (later
+			// sign-ins resolve via the existing-identity branch above), so this
+			// fires the awaiting-approval notice once and never re-spams (#1227).
+			return claimed, true, nil
 		}
 		if !errors.Is(claimErr, ErrPlayerNotFound) {
-			return nil, claimErr
+			return nil, false, claimErr
 		}
 	}
 
 	if !registrationEnabled {
-		return nil, ErrRegistrationDisabled
+		return nil, false, ErrRegistrationDisabled
 	}
 
-	return createGooglePlayer(ctx, identities, subject, email)
+	created, createErr := createGooglePlayer(ctx, identities, subject, email)
+	if createErr != nil {
+		return nil, false, createErr
+	}
+
+	return created, true, nil
 }
 
 // claimAnonymousSessionPlayer upgrades the row identified by

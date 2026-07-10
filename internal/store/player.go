@@ -875,15 +875,18 @@ func (s *PlayerStore) SetPlayerEmailVerifiedNow(ctx context.Context, playerID in
 	return nil
 }
 
-// SetPlayerApprovedNow stamps approved_at when it is currently NULL (#1227).
-// Idempotent: a no-match (already approved) is success, not ErrPlayerNotFound;
-// the caller pre-checks existence via GetPlayerDetail.
-func (s *PlayerStore) SetPlayerApprovedNow(ctx context.Context, playerID int64) error {
-	if _, err := s.q.SetPlayerApprovedNow(ctx, playerID); err != nil {
-		return fmt.Errorf("failed to set approved now: %w", err)
+// SetPlayerApprovedNow stamps approved_at when it is currently NULL (#1227),
+// reporting whether a row was actually stamped. A false with a nil error means
+// the row was already approved (a concurrent approve won), which the caller uses
+// to skip a duplicate audit + email; a missing id also reports false (the caller
+// pre-checks existence via GetPlayerDetail).
+func (s *PlayerStore) SetPlayerApprovedNow(ctx context.Context, playerID int64) (bool, error) {
+	rows, err := s.q.SetPlayerApprovedNow(ctx, playerID)
+	if err != nil {
+		return false, fmt.Errorf("failed to set approved now: %w", err)
 	}
 
-	return nil
+	return rows > 0, nil
 }
 
 // ListAdminEmails returns the email of every admin with an address on file,

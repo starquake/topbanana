@@ -47,6 +47,9 @@ const MaxDisplayNameLength = 50
 const (
 	adminLandingPath  = "/admin/quizzes"
 	playerLandingPath = "/"
+	// loginPendingApprovalPath is the GET page every sign-in path redirects an
+	// unapproved account to under LOGIN_APPROVAL_REQUIRED (#1227).
+	loginPendingApprovalPath = "/login/pending-approval"
 )
 
 // Structured-log attribute keys for the authentication-outcome lines
@@ -562,7 +565,6 @@ func HandleLoginSubmit(
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 	formCfg := loginFormCfg{
 		render:                renderer,
-		approvalPending:       newTemplateRenderer(logger, csrfMgr, "auth/pages/login_pending_approval.gohtml"),
 		registrationEnabled:   deps.RegistrationEnabled,
 		googleEnabled:         deps.GoogleEnabled,
 		forgotPasswordEnabled: deps.ForgotPasswordEnabled,
@@ -670,12 +672,13 @@ func completeLogin(
 
 	// Hold a confirmed-but-unapproved account until an admin approves it (#1227).
 	// Reachable only after correct credentials, so unlike the unverified gate this
-	// renders a clear informative page, not the generic invalid-credentials one.
+	// sends the visitor to a clear informative page, not the generic
+	// invalid-credentials one. No session is set.
 	if deps.LoginApprovalRequired && !player.IsApproved() {
 		logger.InfoContext(r.Context(), "login blocked: account not approved",
 			slog.Int64(logPlayerKey, player.ID),
 			slog.String(logEmailKey, email))
-		renderLoginPendingApproval(formCfg, w, r)
+		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
 
 		return
 	}
@@ -731,7 +734,6 @@ func recordAccountFailure(limiter *AccountLoginLimiter, account string) {
 // renderLoginRateLimited) stay under revive's argument-limit.
 type loginFormCfg struct {
 	render                *render.Renderer
-	approvalPending       *render.Renderer
 	registrationEnabled   bool
 	googleEnabled         bool
 	forgotPasswordEnabled bool
@@ -833,11 +835,18 @@ type loginPendingApprovalData struct {
 	Title string
 }
 
-// renderLoginPendingApproval renders the "awaiting admin approval" page (#1227).
-// Status 200: the visitor authenticated but is not cleared to proceed yet.
-func renderLoginPendingApproval(cfg loginFormCfg, w http.ResponseWriter, r *http.Request) {
-	cfg.approvalPending.Render(w, r, http.StatusOK, loginPendingApprovalData{
-		Title: locale.Translate(locale.Resolve(r), "loginPendingApproval.heading"),
+// HandleLoginPendingApproval renders GET /login/pending-approval: the shared
+// "awaiting admin approval" page every sign-in path redirects an unapproved
+// account to under LOGIN_APPROVAL_REQUIRED (#1227). A distinct informative page
+// (not the generic invalid-credentials response) reachable only after a
+// successful auth on some path.
+func HandleLoginPendingApproval(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login_pending_approval.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		renderer.Render(w, r, http.StatusOK, loginPendingApprovalData{
+			Title: locale.Translate(locale.Resolve(r), "loginPendingApproval.heading"),
+		})
 	})
 }
 

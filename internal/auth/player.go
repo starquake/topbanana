@@ -359,8 +359,9 @@ type AdminPlayerStore interface {
 	// the id matches no row.
 	SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error
 	// SetPlayerApprovedNow stamps approved_at when it is still NULL (#1227).
-	// Idempotent: approving an already-approved row is a no-op that returns nil.
-	SetPlayerApprovedNow(ctx context.Context, playerID int64) error
+	// Reports whether it actually stamped a row (false when the row was already
+	// approved), so a concurrent approve does not double-audit or double-notify.
+	SetPlayerApprovedNow(ctx context.Context, playerID int64) (bool, error)
 	// SetPlayerEmail rewrites players.email and clears email_verified_at
 	// so the changed address must be re-proven. Returns ErrEmailTaken on
 	// a UNIQUE collision, ErrPlayerNotFound when the id matches no row.

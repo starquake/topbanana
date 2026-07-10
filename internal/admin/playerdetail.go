@@ -256,10 +256,9 @@ func buildPlayerDetailData(
 		})
 	}
 
-	// The login gate only ever holds a password sign-in, so approval is offered
-	// only for a password account with a confirmed but unapproved email (#1227).
-	canApprove := loginApprovalRequired && detail.HasPassword &&
-		detail.EmailVerifiedAt != nil && detail.ApprovedAt == nil
+	// Every sign-in path is gated now (OAuth included), so approval is offered for
+	// any confirmed-but-unapproved account (admins are already approved) (#1227).
+	canApprove := loginApprovalRequired && detail.EmailVerifiedAt != nil && detail.ApprovedAt == nil
 
 	return playerDetailData{
 		Title:            "Admin Dashboard - Player",

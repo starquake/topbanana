@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
@@ -52,9 +51,18 @@ func HandlePlayerApprove(
 			return
 		}
 
-		if err := store.SetPlayerApprovedNow(r.Context(), playerID); err != nil {
+		stamped, err := store.SetPlayerApprovedNow(r.Context(), playerID)
+		if err != nil {
 			logger.ErrorContext(r.Context(), "error approving player", slog.Any("err", err))
 			flash.SetError(w, "Could not approve the account. Try again.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+		if !stamped {
+			// A concurrent admin approved between the pre-check and this write;
+			// skip the duplicate audit row and notification email.
+			flash.SetError(w, "This account is already approved.", 0)
 			redirectToPlayerDetail(w, r, playerID)
 
 			return
@@ -111,7 +119,7 @@ func dispatchApprovedNotice(
 			map[string]string{"link": baseURL + "/login"}),
 		Kind: mailer.KindApprovalGranted,
 	}
-	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+auth.ApprovalNoticeMargin)
 	tasks.Go(func() {
 		defer cancel()
 		if err := sender.Send(bg, msg); err != nil {

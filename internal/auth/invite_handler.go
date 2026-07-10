@@ -12,6 +12,10 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
+// msgInternalError is the generic 500 body the accept-invite flow writes on an
+// unrecoverable store failure.
+const msgInternalError = "internal error"
+
 // invitePageData backs the accept_invite.gohtml template. DisplayName is
 // preserved across a failed submit so the recipient does not retype it;
 // Token rides a hidden field so the POST does not need it on the URL bar.
@@ -85,6 +89,11 @@ type InvitePlayerStore interface {
 	// NULL. Idempotent. Clicking the invite link proves control of the
 	// invited address, so the new account lands verified.
 	MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error
+	// SetPlayerApprovedNow stamps approved_at when currently NULL (#1227). An
+	// admin invite is itself the approval act, so the invited account lands
+	// approved and can sign in even under LOGIN_APPROVAL_REQUIRED. The stamped
+	// flag is unused here (a fresh row always stamps).
+	SetPlayerApprovedNow(ctx context.Context, playerID int64) (bool, error)
 	// GetPlayerByID re-reads the row after create so the session is minted
 	// with the persisted id + session_version. Returns ErrPlayerNotFound
 	// when no row matches.
@@ -183,7 +192,7 @@ func acceptInvite(
 	hashed, err := HashPassword(form.password)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "accept-invite hash failed", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
 		return
 	}
@@ -200,15 +209,26 @@ func acceptInvite(
 			return
 		}
 		logger.ErrorContext(r.Context(), "accept-invite create player failed", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
 		return
 	}
 
 	if markErr := deps.Players.MarkPlayerEmailVerifiedIfNew(r.Context(), player.ID); markErr != nil {
 		logger.ErrorContext(r.Context(), "accept-invite mark verified failed",
-			slog.Int64("player_id", player.ID), slog.Any("err", markErr))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+			slog.Int64(logPlayerIDKey, player.ID), slog.Any("err", markErr))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return
+	}
+
+	// An admin invite is the approval act (#1227): stamp approved_at so the
+	// invited account signs in normally even under LOGIN_APPROVAL_REQUIRED and is
+	// never stuck at "pending" with no admin notified.
+	if _, apprErr := deps.Players.SetPlayerApprovedNow(r.Context(), player.ID); apprErr != nil {
+		logger.ErrorContext(r.Context(), "accept-invite approve failed",
+			slog.Int64(logPlayerIDKey, player.ID), slog.Any("err", apprErr))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
 		return
 	}
@@ -218,13 +238,13 @@ func acceptInvite(
 		// the right outcome even though the invite consume lost a race. Log
 		// it so a double-accept is visible, then fall through to login.
 		logger.WarnContext(r.Context(), "accept-invite consume failed after create",
-			slog.Int64("player_id", player.ID), slog.Any("err", consumeErr))
+			slog.Int64(logPlayerIDKey, player.ID), slog.Any("err", consumeErr))
 	}
 
 	refreshed, err := deps.Players.GetPlayerByID(r.Context(), player.ID)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "accept-invite post-create lookup failed",
-			slog.Int64("player_id", player.ID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, player.ID), slog.Any("err", err))
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 
 		return

@@ -30,8 +30,9 @@ type playerRow struct {
 	OnboardingState string
 	IsAdmin         bool
 	IsHost          bool
-	// PendingApproval marks a confirmed password account still waiting for admin
-	// approval (#1227). Password-only: the login gate never holds an OAuth sign-in.
+	// PendingApproval marks a confirmed-email account still waiting for admin
+	// approval (#1227). Every sign-in path is now gated, OAuth included, so any
+	// verified-but-unapproved non-admin account qualifies.
 	PendingApproval bool
 	CreatedAt       time.Time
 	FinishedCount   int64
@@ -207,7 +208,7 @@ func buildPlayerRows(
 			OnboardingState: p.OnboardingState,
 			IsAdmin:         p.Role == auth.RoleAdmin,
 			IsHost:          p.Role == auth.RoleHost,
-			PendingApproval: p.HasPassword && p.EmailVerifiedAt != nil && p.ApprovedAt == nil,
+			PendingApproval: p.EmailVerifiedAt != nil && p.ApprovedAt == nil,
 			CreatedAt:       p.CreatedAt,
 		}
 		if s, ok := statsByID[p.ID]; ok {

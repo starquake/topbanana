@@ -59,7 +59,7 @@
                                 <a href="/admin/players/{{.ID}}" class="text-text hover:text-accent">{{.DisplayName}}</a>
                                 {{if .IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-1.5 py-0.5 text-xs text-text">admin</span>{{end}}
                                 {{if .IsHost}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-1.5 py-0.5 text-xs text-text">host</span>{{end}}
-                                {{if and $.ApprovalRequired .PendingApproval}}<span class="ml-2 inline-flex items-center rounded-sm border border-yellow-500/50 bg-yellow-500/10 px-1.5 py-0.5 text-xs text-text">pending approval</span>{{end}}
+                                {{if and $.ApprovalRequired .PendingApproval}}<span class="ml-2 inline-flex items-center rounded-sm border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-xs text-text">pending approval</span>{{end}}
                             </td>
                             <td class="px-4 py-3 text-text-dim">{{.OnboardingState}}</td>
                             <td class="px-4 py-3 text-text-dim">{{.AccountType}}</td>

@@ -32,7 +32,33 @@ func ExportFinalizeGoogleSignIn(
 		players:  players,
 		roles:    players,
 		sessions: sessions,
-	}, player, nil, "")
+	}, player, nil, "", false)
+}
+
+// ExportFinalizeGoogleSignInApproval exposes finalizeGoogleSignIn with the
+// LOGIN_APPROVAL_REQUIRED gate + fresh-registration flag wired, so the OAuth
+// approval gate (#1227) can be unit-tested with a real store + mailer without
+// staging the OIDC dance. players doubles as the RoleSetter.
+func ExportFinalizeGoogleSignInApproval(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	players interface {
+		PlayerStore
+		RoleSetter
+	},
+	sessions *session.Manager,
+	player *Player,
+	firstRegistration bool,
+	approval GoogleApprovalDeps,
+) {
+	finalizeGoogleSignIn(w, r, googleSignInDeps{
+		logger:   logger,
+		players:  players,
+		roles:    players,
+		sessions: sessions,
+		approval: approval,
+	}, player, nil, "", firstRegistration)
 }
 
 // ExportLinkOrCreateGooglePlayer is the test-only alias for the
@@ -46,6 +72,22 @@ func ExportLinkOrCreateGooglePlayer(
 	sessionPlayerID *int64,
 	registrationEnabled bool,
 ) (*Player, error) {
+	p, _, err := linkOrCreateGooglePlayer(ctx, store, subject, email, sessionPlayerID, registrationEnabled)
+
+	return p, err
+}
+
+// ExportLinkOrCreateGooglePlayerFirstReg is ExportLinkOrCreateGooglePlayer but
+// surfaces the first-registration bool so the #1227 tests can assert that a
+// claim-session (anonymous guest's first Google identity) counts as a fresh
+// registration for the awaiting-approval notice.
+func ExportLinkOrCreateGooglePlayerFirstReg(
+	ctx context.Context,
+	store OAuthIdentityStore,
+	subject, email string,
+	sessionPlayerID *int64,
+	registrationEnabled bool,
+) (*Player, bool, error) {
 	return linkOrCreateGooglePlayer(ctx, store, subject, email, sessionPlayerID, registrationEnabled)
 }
 

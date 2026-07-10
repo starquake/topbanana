@@ -1678,8 +1678,12 @@ func TestPlayerStore_SetPlayerApprovedNow(t *testing.T) {
 		t.Fatal("fresh non-admin player IsApproved() = true, want false")
 	}
 
-	if err = ps.SetPlayerApprovedNow(t.Context(), bob.ID); err != nil {
+	stamped, err := ps.SetPlayerApprovedNow(t.Context(), bob.ID)
+	if err != nil {
 		t.Fatalf("SetPlayerApprovedNow err = %v, want nil", err)
+	}
+	if !stamped {
+		t.Error("SetPlayerApprovedNow stamped = false, want true on first approve")
 	}
 	got, err := ps.GetPlayerByID(t.Context(), bob.ID)
 	if err != nil {
@@ -1689,9 +1693,13 @@ func TestPlayerStore_SetPlayerApprovedNow(t *testing.T) {
 		t.Error("after SetPlayerApprovedNow IsApproved() = false, want true")
 	}
 
-	// Idempotent: approving again is a no-op that returns nil.
-	if err = ps.SetPlayerApprovedNow(t.Context(), bob.ID); err != nil {
+	// Idempotent: approving again stamps nothing and reports false.
+	stampedAgain, err := ps.SetPlayerApprovedNow(t.Context(), bob.ID)
+	if err != nil {
 		t.Errorf("second SetPlayerApprovedNow err = %v, want nil", err)
+	}
+	if stampedAgain {
+		t.Error("second SetPlayerApprovedNow stamped = true, want false (already approved)")
 	}
 }
 

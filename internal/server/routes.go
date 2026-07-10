@@ -269,7 +269,9 @@ func addPasswordResetRoutes(
 
 	mux.Handle("GET /reset-password", auth.HandleResetForm(logger, csrfMgr, stores.ResetTokens))
 	mux.Handle("POST /reset-password", admin.MaxFormSizeMiddleware(csrfMW(
-		auth.HandleResetSubmit(logger, csrfMgr, stores.ResetTokens, sessions, stores.Players),
+		auth.HandleResetSubmit(
+			logger, csrfMgr, stores.ResetTokens, sessions, stores.Players, cfg.LoginApprovalRequired,
+		),
 	)))
 }
 
@@ -345,6 +347,13 @@ func addAuthRoutes(
 			auth.HandleGoogleCallback(
 				logger, googleAuth, csrfMgr, stores.OAuth, stores.Players, stores.AdminPlayers, sessions,
 				stores.GameMigrator, cfg.AdminEmails, cfg.RegistrationEnabled, cfg.SMTPConfigured(),
+				auth.GoogleApprovalDeps{
+					LoginApprovalRequired: cfg.LoginApprovalRequired,
+					Sender:                mail.Tester,
+					AdminEmailLister:      stores.AdminEmailLister,
+					BaseURL:               cfg.BaseURL,
+					Tasks:                 mail.Tasks,
+				},
 			),
 		)
 	} else {
@@ -408,6 +417,10 @@ func addLoginRoutes(
 		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+	// Shared awaiting-approval page every sign-in path redirects an unapproved
+	// account to under LOGIN_APPROVAL_REQUIRED (#1227). Public GET; the redirect
+	// is what gates, not this page.
+	mux.Handle("GET /login/pending-approval", auth.HandleLoginPendingApproval(logger, csrfMgr))
 }
 
 // addProfileRoutes registers the per-player profile page (#410) and

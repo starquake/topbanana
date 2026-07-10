@@ -918,7 +918,7 @@ func markApproved(t *testing.T, players *store.PlayerStore, displayName string) 
 	if err != nil {
 		t.Fatalf("markApproved: GetPlayerByDisplayName(%q) err = %v, want nil", displayName, err)
 	}
-	if err := players.SetPlayerApprovedNow(t.Context(), p.ID); err != nil {
+	if _, err := players.SetPlayerApprovedNow(t.Context(), p.ID); err != nil {
 		t.Fatalf("markApproved: SetPlayerApprovedNow err = %v, want nil", err)
 	}
 }
@@ -981,11 +981,11 @@ func TestHandleLoginSubmit_ApprovalRequired_UnapprovedBlocked(t *testing.T) {
 		"password": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusOK; got != want {
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
-	if got, want := rec.Body.String(), "Waiting for approval"; !strings.Contains(got, want) {
-		t.Errorf("body should render the awaiting-approval page %q, got %q", want, got)
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q (distinct awaiting-approval page)", got, want)
 	}
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == "topbanana_session" && c.MaxAge >= 0 && c.Value != "" {

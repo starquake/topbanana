@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,18 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/mailer"
 )
+
+// raceApproveStore forces SetPlayerApprovedNow to report "nothing stamped",
+// simulating a concurrent admin who approved between this request's pre-check and
+// its write. A real store cannot express this race deterministically, so the
+// double injects it; every other method delegates to the embedded real store.
+type raceApproveStore struct {
+	auth.AdminPlayerStore
+}
+
+func (raceApproveStore) SetPlayerApprovedNow(context.Context, int64) (bool, error) {
+	return false, nil
+}
 
 // postApprove drives HandlePlayerApprove against the target with the supplied
 // sender + mailConfigured flag, returning the recorder and the stashed flash.
@@ -99,7 +112,7 @@ func TestHandlePlayerApprove_AlreadyApprovedRejected(t *testing.T) {
 
 	env := newAdminEnv(t)
 	target := env.seedVerifiedNonAdminPlayer(t, "already-target", "already@example.test")
-	if err := env.admin.SetPlayerApprovedNow(t.Context(), target); err != nil {
+	if _, err := env.admin.SetPlayerApprovedNow(t.Context(), target); err != nil {
 		t.Fatalf("SetPlayerApprovedNow err = %v, want nil", err)
 	}
 	spy := newRoleMailSpy()
@@ -144,5 +157,46 @@ func TestHandlePlayerApprove_MailNotConfiguredSkipsSend(t *testing.T) {
 	}
 	if got, want := flash.Notice, "Email is not configured"; !strings.Contains(got, want) {
 		t.Errorf("flash.Notice = %q, should contain %q", got, want)
+	}
+}
+
+// TestHandlePlayerApprove_ConcurrentApproveNoOp pins the race guard: when the
+// approve write stamps nothing (a concurrent admin already approved), the handler
+// writes no audit row and sends no email, flashing "already approved" instead.
+func TestHandlePlayerApprove_ConcurrentApproveNoOp(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	target := env.seedVerifiedNonAdminPlayer(t, "race-target", "race@example.test")
+	spy := newRoleMailSpy()
+	flash := auth.NewSignedFlash([]byte("test-key-test-key-test-key-32byt"), false, "flash", "/admin")
+	handler := HandlePlayerApprove(
+		slog.New(slog.DiscardHandler), raceApproveStore{env.admin}, spy, true, "https://tb.example", flash, nil,
+	)
+
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/admin/players/"+strconv.FormatInt(target, 10)+"/approve",
+		strings.NewReader(url.Values{}.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("playerID", strconv.FormatInt(target, 10))
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	fr := readRoleFlash(t, flash, rec)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := len(env.auditEntries(t, target)), 0; got != want {
+		t.Errorf("audit entries = %d, want %d on a lost approve race", got, want)
+	}
+	select {
+	case msg := <-spy.sent:
+		t.Errorf("unexpected send to %q; a lost approve race must not notify", msg.To)
+	default:
+	}
+	if got, want := fr.Err, "already approved"; !strings.Contains(got, want) {
+		t.Errorf("flash.Err = %q, should contain %q", got, want)
 	}
 }
