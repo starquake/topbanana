@@ -59,6 +59,10 @@ type Player struct {
 	// cookie (which carries the version it was issued at) becomes
 	// invalid the moment the reset commits (#112).
 	SessionVersion int64
+	// ApprovedAt is nil until an admin clears the account to sign in (#1227).
+	// Admins are stamped automatically and every pre-existing row was backfilled,
+	// so nil only ever marks a registrant still waiting for approval.
+	ApprovedAt *time.Time
 }
 
 // IsAdmin reports whether the player holds the top (Admin) tier: full access
@@ -78,6 +82,11 @@ func (p *Player) CanHost() bool {
 // IsEmailVerified reports whether the player's email has been verified.
 func (p *Player) IsEmailVerified() bool {
 	return p.EmailVerifiedAt != nil
+}
+
+// IsApproved reports whether an admin has cleared this account to sign in (#1227).
+func (p *Player) IsApproved() bool {
+	return p.ApprovedAt != nil
 }
 
 // IsAnonymous reports whether the player has no credentials set yet (no
@@ -146,6 +155,8 @@ type PlayerListRow struct {
 	OAuthProvider   string
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
+	// ApprovedAt is nil until an admin approves the account (#1227).
+	ApprovedAt *time.Time
 	// OnboardingState is the SQL-derived bucket label (#450). One of
 	// [OnboardingStateAnonymous], [OnboardingStateUnverified],
 	// [OnboardingStateOAuth], [OnboardingStateVerified]. The branch
@@ -246,6 +257,8 @@ type PlayerDetail struct {
 	OAuthProvider   string
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
+	// ApprovedAt is nil until an admin approves the account (#1227).
+	ApprovedAt      *time.Time
 	OnboardingState string
 }
 
@@ -311,6 +324,7 @@ const (
 	AdminActionCreated            = "created"
 	AdminActionResendVerification = "resend_verification"
 	AdminActionRoleChanged        = "role_changed"
+	AdminActionApproved           = "approved"
 	AdminActionPromoteSuper       = "promote_super"
 	AdminActionDemoteSuper        = "demote_super"
 	AdminActionPromoteAdmin       = "promote_admin"
@@ -344,6 +358,10 @@ type AdminPlayerStore interface {
 	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when
 	// the id matches no row.
 	SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error
+	// SetPlayerApprovedNow stamps approved_at when it is still NULL (#1227).
+	// Reports whether it actually stamped a row (false when the row was already
+	// approved), so a concurrent approve does not double-audit or double-notify.
+	SetPlayerApprovedNow(ctx context.Context, playerID int64) (bool, error)
 	// SetPlayerEmail rewrites players.email and clears email_verified_at
 	// so the changed address must be re-proven. Returns ErrEmailTaken on
 	// a UNIQUE collision, ErrPlayerNotFound when the id matches no row.

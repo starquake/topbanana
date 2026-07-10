@@ -16,7 +16,7 @@ const adminRenamePlayer = `-- name: AdminRenamePlayer :one
 UPDATE players
 SET display_name = ?1
 WHERE id = ?2
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type AdminRenamePlayerParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) AdminRenamePlayer(ctx context.Context, arg AdminRenamePlayerPa
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -76,11 +77,23 @@ SET display_name = ?1,
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
+    -- Stamp approved_at whenever the claim resolves to admin so the bootstrap
+    -- admin is never held back by LOGIN_APPROVAL_REQUIRED (#1227). COALESCE keeps
+    -- an already-approved timestamp intact on the non-admin path.
+    approved_at = CASE
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE approved_at
+    END,
     display_name_claimed = 1
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type ClaimPlayerParams struct {
@@ -135,6 +148,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -158,11 +172,22 @@ SET email = ?1,
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
+    END,
+    -- Stamp approved_at when this OAuth claim resolves to admin so the
+    -- admin-always-approved invariant holds (#1227); COALESCE keeps an existing
+    -- approval intact on the non-admin path.
+    approved_at = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE approved_at
     END
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -204,6 +229,7 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -280,7 +306,7 @@ func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePass
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (display_name, role)
 VALUES (?1, 'player')
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -306,6 +332,7 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, displayName string)
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -362,7 +389,7 @@ func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswo
 }
 
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
-INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, display_name_claimed)
+INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, approved_at, display_name_claimed)
 VALUES (
     ?1,
     ?2,
@@ -383,9 +410,19 @@ VALUES (
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
+    -- A first OAuth registrant who lands as admin is stamped approved so the
+    -- admin-always-approved invariant holds on the OAuth bootstrap too (#1227).
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END,
     1
 )
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type CreatePlayerFromOAuthParams struct {
@@ -422,12 +459,13 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (display_name, password_hash, email, role, role_changed_at, display_name_claimed)
+INSERT INTO players (display_name, password_hash, email, role, role_changed_at, approved_at, display_name_claimed)
 VALUES (
     ?1,
     ?2,
@@ -450,9 +488,18 @@ VALUES (
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
+    CASE
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END,
     1
 )
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type CreatePlayerWithCredentialsParams struct {
@@ -488,6 +535,9 @@ type CreatePlayerWithCredentialsParams struct {
 // their display_name at the register form. The column tracks "did the player
 // pick this name themselves" (vs auto-generated petname), so a fresh
 // registrant must be marked as claimed from the moment the row is written.
+// approved_at is stamped in lockstep with the admin role: an account that lands
+// as admin is always approved so LOGIN_APPROVAL_REQUIRED can never lock out the
+// bootstrap admin (#1227). A non-admin registrant starts unapproved (NULL).
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials,
 		arg.DisplayName,
@@ -507,6 +557,7 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -613,7 +664,7 @@ func (q *Queries) GetPasswordResetToken(ctx context.Context, tokenHash string) (
 }
 
 const getPlayerByDisplayName = `-- name: GetPlayerByDisplayName :one
-SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 FROM players
 WHERE display_name = ?
 LIMIT 1
@@ -633,12 +684,13 @@ func (q *Queries) GetPlayerByDisplayName(ctx context.Context, displayName string
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
 
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -662,12 +714,13 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at
+SELECT p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at, p.approved_at
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -697,6 +750,7 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -734,6 +788,39 @@ type LinkProviderIdentityParams struct {
 func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIdentityParams) error {
 	_, err := q.db.ExecContext(ctx, linkProviderIdentity, arg.PlayerID, arg.Provider, arg.Subject)
 	return err
+}
+
+const listAdminEmails = `-- name: ListAdminEmails :many
+SELECT CAST(email AS TEXT) AS email
+FROM players
+WHERE role = 'admin'
+  AND email IS NOT NULL
+ORDER BY email
+`
+
+// Every current admin's email, skipping rows with no address on file. Backs the
+// "a new account is awaiting approval" notice fanned out to admins (#1227).
+func (q *Queries) ListAdminEmails(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminEmails)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAdmins = `-- name: ListAdmins :many
@@ -870,7 +957,7 @@ UPDATE players
 SET display_name = ?1,
     display_name_claimed = 1
 WHERE id = ?2
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type RenamePlayerParams struct {
@@ -904,6 +991,7 @@ func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Pla
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
@@ -928,6 +1016,24 @@ type ResetPlayerPasswordParams struct {
 // distinguish a successful reset from a player_id pointing nowhere.
 func (q *Queries) ResetPlayerPassword(ctx context.Context, arg ResetPlayerPasswordParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, resetPlayerPassword, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setPlayerApprovedNow = `-- name: SetPlayerApprovedNow :execrows
+UPDATE players
+SET approved_at = CURRENT_TIMESTAMP
+WHERE id = ?1
+  AND approved_at IS NULL
+`
+
+// Stamps approved_at when currently NULL, clearing the account to sign in under
+// LOGIN_APPROVAL_REQUIRED (#1227). Idempotent: a second approval matches no rows
+// because the guard filters an already-approved row out.
+func (q *Queries) SetPlayerApprovedNow(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPlayerApprovedNow, id)
 	if err != nil {
 		return 0, err
 	}
@@ -976,7 +1082,11 @@ func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswo
 const setPlayerRole = `-- name: SetPlayerRole :execrows
 UPDATE players
 SET role = ?1,
-    role_changed_at = CURRENT_TIMESTAMP
+    role_changed_at = CURRENT_TIMESTAMP,
+    approved_at = CASE
+        WHEN CAST(?1 AS TEXT) = 'admin' AND approved_at IS NULL THEN CURRENT_TIMESTAMP
+        ELSE approved_at
+    END
 WHERE id = ?2
 `
 
@@ -990,6 +1100,12 @@ type SetPlayerRoleParams struct {
 // is stamped to CURRENT_TIMESTAMP on every change so the settings list can show
 // a "promoted" timestamp. Returns the number of affected rows so the wrapper
 // can map "no rows" to ErrPlayerNotFound.
+//
+// Promoting to admin stamps approved_at when it is still NULL so the
+// admin-always-approved invariant holds however a player reaches the tier
+// (in-app promotion or the allowlist promotion at verify time), and never locks
+// them out under LOGIN_APPROVAL_REQUIRED (#1227). A demotion leaves approved_at
+// untouched.
 func (q *Queries) SetPlayerRole(ctx context.Context, arg SetPlayerRoleParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setPlayerRole, arg.Role, arg.ID)
 	if err != nil {
@@ -1035,7 +1151,7 @@ UPDATE players
 SET display_name = ?1,
     display_name_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type UpdatePlayerDisplayNameParams struct {
@@ -1069,6 +1185,7 @@ func (q *Queries) UpdatePlayerDisplayName(ctx context.Context, arg UpdatePlayerD
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }

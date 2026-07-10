@@ -436,6 +436,62 @@ func TestParse(t *testing.T) {
 	})
 }
 
+func TestParse_LoginApprovalRequired(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  bool
+		}{
+			{"unset defaults to false", "", false},
+			{"true string", "true", true},
+			{"false string", "false", false},
+			{"numeric 1 parses as true", "1", true},
+			{"numeric 0 parses as false", "0", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					switch key {
+					case "LOGIN_APPROVAL_REQUIRED":
+						return tt.value
+					case "APP_ENV":
+						return "development"
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.LoginApprovalRequired, tt.want; got != want {
+					t.Errorf("LoginApprovalRequired = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("LOGIN_APPROVAL_REQUIRED", "maybe"))
+		if err == nil {
+			t.Fatal("Parse() with invalid LOGIN_APPROVAL_REQUIRED: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid LOGIN_APPROVAL_REQUIRED"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
 func TestParse_RegistrationEnabled(t *testing.T) {
 	t.Parallel()
 

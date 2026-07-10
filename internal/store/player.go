@@ -699,6 +699,10 @@ func (s *PlayerStore) ListPlayersByOnboardingState(
 			verified := r.EmailVerifiedAt.Time
 			row.EmailVerifiedAt = &verified
 		}
+		if r.ApprovedAt.Valid {
+			approved := r.ApprovedAt.Time
+			row.ApprovedAt = &approved
+		}
 		out = append(out, row)
 	}
 
@@ -790,6 +794,10 @@ func (s *PlayerStore) GetPlayerDetail(ctx context.Context, id int64) (*auth.Play
 		verified := row.EmailVerifiedAt.Time
 		detail.EmailVerifiedAt = &verified
 	}
+	if row.ApprovedAt.Valid {
+		approved := row.ApprovedAt.Time
+		detail.ApprovedAt = &approved
+	}
 
 	return detail, nil
 }
@@ -865,6 +873,31 @@ func (s *PlayerStore) SetPlayerEmailVerifiedNow(ctx context.Context, playerID in
 	}
 
 	return nil
+}
+
+// SetPlayerApprovedNow stamps approved_at when it is currently NULL (#1227),
+// reporting whether a row was actually stamped. A false with a nil error means
+// the row was already approved (a concurrent approve won), which the caller uses
+// to skip a duplicate audit + email; a missing id also reports false (the caller
+// pre-checks existence via GetPlayerDetail).
+func (s *PlayerStore) SetPlayerApprovedNow(ctx context.Context, playerID int64) (bool, error) {
+	rows, err := s.q.SetPlayerApprovedNow(ctx, playerID)
+	if err != nil {
+		return false, fmt.Errorf("failed to set approved now: %w", err)
+	}
+
+	return rows > 0, nil
+}
+
+// ListAdminEmails returns the email of every admin with an address on file,
+// alphabetically. Backs the awaiting-approval fan-out to admins (#1227).
+func (s *PlayerStore) ListAdminEmails(ctx context.Context) ([]string, error) {
+	emails, err := s.q.ListAdminEmails(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list admin emails: %w", err)
+	}
+
+	return emails, nil
 }
 
 // SetPlayerEmail rewrites players.email on the row identified by id and
@@ -1185,6 +1218,10 @@ func playerFromRow(row db.Player) *auth.Player {
 	if row.EmailVerifiedAt.Valid {
 		verified := row.EmailVerifiedAt.Time
 		p.EmailVerifiedAt = &verified
+	}
+	if row.ApprovedAt.Valid {
+		approved := row.ApprovedAt.Time
+		p.ApprovedAt = &approved
 	}
 
 	return p

@@ -910,6 +910,137 @@ func markVerified(t *testing.T, players *store.PlayerStore, displayName string) 
 	}
 }
 
+// markApproved stamps approved_at on the named player so the
+// LOGIN_APPROVAL_REQUIRED gate (#1227) lets them through.
+func markApproved(t *testing.T, players *store.PlayerStore, displayName string) {
+	t.Helper()
+	p, err := players.GetPlayerByDisplayName(t.Context(), displayName)
+	if err != nil {
+		t.Fatalf("markApproved: GetPlayerByDisplayName(%q) err = %v, want nil", displayName, err)
+	}
+	if _, err := players.SetPlayerApprovedNow(t.Context(), p.ID); err != nil {
+		t.Fatalf("markApproved: SetPlayerApprovedNow err = %v, want nil", err)
+	}
+}
+
+// seedTwoCredentialledPlayers creates a bootstrap admin (auto-approved) and a
+// second, non-admin, non-approved player "bob" for the approval-gate tests. The
+// admin must exist first so the "first credentialled registrant becomes admin"
+// rule does not promote (and auto-approve) bob.
+func seedTwoCredentialledPlayers(t *testing.T, players *store.PlayerStore) {
+	t.Helper()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer admin err = %v, want nil", err)
+	}
+	if _, err := players.CreatePlayer(t.Context(), "bob", "bob@example.test", hash, RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
+	}
+	markVerified(t, players, "bob")
+}
+
+// TestHandleLoginSubmit_ApprovalRequired_ApprovedSignsIn: with the gate on, a
+// verified and approved account signs in normally.
+func TestHandleLoginSubmit_ApprovalRequired_ApprovedSignsIn(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	seedTwoCredentialledPlayers(t, players)
+	markApproved(t, players, "bob")
+
+	deps := loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil))
+	deps.LoginApprovalRequired = true
+	handler := HandleLoginSubmit(discardLogger(), nil, deps)
+	rec := postForm(t, handler, "/login", url.Values{
+		"email":    {"bob@example.test"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+}
+
+// TestHandleLoginSubmit_ApprovalRequired_UnapprovedBlocked: with the gate on, a
+// verified but unapproved account is held at a distinct awaiting-approval page
+// (not the generic invalid-credentials response) and gets no session.
+func TestHandleLoginSubmit_ApprovalRequired_UnapprovedBlocked(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	seedTwoCredentialledPlayers(t, players)
+
+	deps := loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil))
+	deps.LoginApprovalRequired = true
+	handler := HandleLoginSubmit(discardLogger(), nil, deps)
+	rec := postForm(t, handler, "/login", url.Values{
+		"email":    {"bob@example.test"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q (distinct awaiting-approval page)", got, want)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "topbanana_session" && c.MaxAge >= 0 && c.Value != "" {
+			t.Errorf("unapproved login set a session cookie: %v", c)
+		}
+	}
+}
+
+// TestHandleLoginSubmit_ApprovalOff_UnapprovedSignsIn: with the gate off, an
+// unapproved (but verified) account signs in normally - existing installs are
+// unaffected.
+func TestHandleLoginSubmit_ApprovalOff_UnapprovedSignsIn(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	seedTwoCredentialledPlayers(t, players)
+
+	deps := loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil))
+	deps.LoginApprovalRequired = false
+	handler := HandleLoginSubmit(discardLogger(), nil, deps)
+	rec := postForm(t, handler, "/login", url.Values{
+		"email":    {"bob@example.test"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+}
+
+// TestHandleLoginSubmit_ApprovalRequired_AdminNeverBlocked: an admin is always
+// approved (bootstrap stamps approved_at), so the gate never holds one back.
+func TestHandleLoginSubmit_ApprovalRequired_AdminNeverBlocked(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	seedTwoCredentialledPlayers(t, players)
+	markVerified(t, players, "alice")
+
+	deps := loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil))
+	deps.LoginApprovalRequired = true
+	handler := HandleLoginSubmit(discardLogger(), nil, deps)
+	rec := postForm(t, handler, "/login", url.Values{
+		"email":    {"alice@example.test"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("admin status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/admin/quizzes"; got != want {
+		t.Errorf("admin Location = %q, want %q", got, want)
+	}
+}
+
 func TestHandleLoginSubmit_Success(t *testing.T) {
 	t.Parallel()
 

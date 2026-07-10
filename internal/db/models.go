@@ -124,6 +124,7 @@ type Player struct {
 	EmailVerifiedAt    sql.NullTime
 	SessionVersion     int64
 	RoleChangedAt      sql.NullTime
+	ApprovedAt         sql.NullTime
 }
 
 type PlayerIdentity struct {

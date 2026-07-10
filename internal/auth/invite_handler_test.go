@@ -3,12 +3,77 @@ package auth_test
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/locale"
+	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/store"
 )
+
+// TestHandleAcceptInviteSubmit_PreApprovesInvitedAccount pins the #1227 rule that
+// an admin invite is the approval act: the invited account lands approved and
+// signs in normally (not stuck at the awaiting-approval page).
+func TestHandleAcceptInviteSubmit_PreApprovesInvitedAccount(t *testing.T) {
+	t.Parallel()
+
+	stores := store.New(dbtest.Open(t), discardLogger())
+	inviter, err := stores.Players.CreatePlayer(
+		t.Context(), "inviter-admin", "inviter@example.test", "h", RoleAdmin,
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer inviter err = %v, want nil", err)
+	}
+	raw, hash, err := GenerateInviteToken()
+	if err != nil {
+		t.Fatalf("GenerateInviteToken err = %v, want nil", err)
+	}
+	if err = stores.Invites.CreateInvite(
+		t.Context(), "invitee@example.test", hash, "", inviter.ID, time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("CreateInvite err = %v, want nil", err)
+	}
+
+	sessions := session.New([]byte("test-session-key"), false)
+	deps := AcceptInviteDeps{
+		Invites:  stores.Invites,
+		Players:  stores.InvitePlayers,
+		Sessions: sessions,
+		Games:    stores.GameMigrator,
+	}
+	handler := HandleAcceptInviteSubmit(discardLogger(), nil, deps)
+	form := url.Values{}
+	form.Set("token", raw)
+	form.Set("display_name", "invitee")
+	form.Set("password", "new-pass-12345")
+	form.Set("confirm", "new-pass-12345")
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/accept-invite", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got == "/login/pending-approval" {
+		t.Errorf("Location = %q, want the role landing (invited account must sign in)", got)
+	}
+	invited, err := stores.Players.GetPlayerByEmail(t.Context(), "invitee@example.test")
+	if err != nil {
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
+	}
+	if !invited.IsApproved() {
+		t.Error("invited account IsApproved() = false, want true (invite is the approval act)")
+	}
+}
 
 func TestValidateAcceptInviteInput(t *testing.T) {
 	t.Parallel()

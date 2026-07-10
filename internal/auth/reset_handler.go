@@ -90,6 +90,7 @@ func HandleResetSubmit(
 	tokens ResetTokenStore,
 	sessions *session.Manager,
 	players PlayerStore,
+	loginApprovalRequired bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password.gohtml")
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password_invalid.gohtml")
@@ -126,7 +127,7 @@ func HandleResetSubmit(
 		playerID, err := tokens.ConsumeResetToken(r.Context(), HashResetToken(raw), hashed)
 		switch {
 		case err == nil:
-			autoLoginAfterReset(w, r, logger, sessions, players, playerID)
+			autoLoginAfterReset(w, r, logger, sessions, players, playerID, loginApprovalRequired)
 		case errors.Is(err, ErrResetTokenInvalid):
 			invalid.Render(
 				w,
@@ -150,6 +151,8 @@ func HandleResetSubmit(
 // (lookup or otherwise) must not surface as an error that hides the
 // successful reset: we log it and fall back to clearing the session
 // and redirecting to /login, where the just-set password works.
+//
+//nolint:revive // loginApprovalRequired carries the LOGIN_APPROVAL_REQUIRED instance policy (#1227), not a per-call behavioural toggle; the gate below reads it like the login path does.
 func autoLoginAfterReset(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -157,6 +160,7 @@ func autoLoginAfterReset(
 	sessions *session.Manager,
 	players PlayerStore,
 	playerID int64,
+	loginApprovalRequired bool,
 ) {
 	player, err := players.GetPlayerByID(r.Context(), playerID)
 	if err != nil {
@@ -164,6 +168,15 @@ func autoLoginAfterReset(
 			slog.Int64("player_id", playerID), slog.Any("err", err))
 		sessions.Clear(w)
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+		return
+	}
+	// An unapproved account must not gain a session by resetting its password
+	// (#1227); admins are always approved so this never blocks an operator.
+	if loginApprovalRequired && !player.IsApproved() {
+		logger.InfoContext(r.Context(), "reset-password auto-login blocked: account not approved",
+			slog.Int64("player_id", player.ID))
+		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
 
 		return
 	}

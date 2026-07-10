@@ -227,6 +227,51 @@ func TestHandleResetSubmit_InvalidTokenRendersGone(t *testing.T) {
 // player with the supplied expiry through the real store, and returns
 // the raw token so the caller can drive the handler with it. A past
 // expiry yields the dead row the preflight and consume paths reject.
+// TestHandleResetSubmit_ApprovalRequired_UnapprovedBlocked pins the #1227 reset
+// gate: an unapproved account cannot gain a session by resetting its password; it
+// lands on the awaiting-approval page with no session cookie.
+func TestHandleResetSubmit_ApprovalRequired_UnapprovedBlocked(t *testing.T) {
+	t.Parallel()
+
+	stores := store.New(dbtest.Open(t), discardLogger())
+	// Seed an admin first so the next row stays a plain (unapproved) player.
+	if _, err := stores.Players.CreatePlayer(
+		t.Context(), "reset-seed-admin", "reset-seed-admin@example.test", "h", RoleAdmin,
+	); err != nil {
+		t.Fatalf("seed admin err = %v, want nil", err)
+	}
+	p, err := stores.Players.CreatePlayer(
+		t.Context(), "reset-pending", "reset-pending@example.test", "old-hash", RolePlayer,
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	raw := seedResetToken(t, stores.ResetTokens, p.ID, time.Now().Add(time.Hour))
+
+	sessions := session.New([]byte("test-session-key"), false)
+	handler := HandleResetSubmit(discardLogger(), nil, stores.ResetTokens, sessions, stores.Players, true)
+	form := url.Values{}
+	form.Set("token", raw)
+	form.Set("password", "new-pass-12345")
+	form.Set("confirm", "new-pass-12345")
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/reset-password", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if _, _, ok := decodeSessionCookie(t, sessions, rec); ok {
+		t.Error("blocked reset auto-login set a session cookie, want none")
+	}
+}
+
 func seedResetToken(t *testing.T, tokens ResetTokenStore, playerID int64, expiresAt time.Time) string {
 	t.Helper()
 
@@ -265,7 +310,7 @@ func runResetSubmit(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 
-	handler := HandleResetSubmit(discardLogger(), nil, tokens, sessions, players)
+	handler := HandleResetSubmit(discardLogger(), nil, tokens, sessions, players, false)
 	form := url.Values{}
 	form.Set("token", raw)
 	form.Set("password", "new-pass-12345")

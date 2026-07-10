@@ -81,16 +81,17 @@ func (q *Queries) CountPlayersInOnboardingState(ctx context.Context, state strin
 }
 
 const createPlayerByAdmin = `-- name: CreatePlayerByAdmin :one
-INSERT INTO players (display_name, email, password_hash, email_verified_at, role, display_name_claimed)
+INSERT INTO players (display_name, email, password_hash, email_verified_at, approved_at, role, display_name_claimed)
 VALUES (
     ?1,
     ?2,
     ?3,
     CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP,
     ?4,
     1
 )
-RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
 type CreatePlayerByAdminParams struct {
@@ -106,6 +107,11 @@ type CreatePlayerByAdminParams struct {
 // is nullable on the column but the handler enforces a non-empty hash so
 // the row can log in immediately. role is passed explicitly so callers can
 // create a verified account at any tier in one write.
+//
+// approved_at is stamped too (#1227): an admin creating the account is itself
+// the approval act, so the row can sign in immediately even under
+// LOGIN_APPROVAL_REQUIRED, mirroring how email_verified_at bypasses the email
+// loop.
 func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdminParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerByAdmin,
 		arg.DisplayName,
@@ -125,13 +131,14 @@ func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdm
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 	)
 	return i, err
 }
 
 const getPlayerWithOnboardingState = `-- name: GetPlayerWithOnboardingState :one
 SELECT
-    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
+    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at, p.approved_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -161,6 +168,7 @@ type GetPlayerWithOnboardingStateRow struct {
 	EmailVerifiedAt    sql.NullTime
 	SessionVersion     int64
 	RoleChangedAt      sql.NullTime
+	ApprovedAt         sql.NullTime
 	HasOauth           bool
 	OauthProvider      string
 	OnboardingState    string
@@ -184,6 +192,7 @@ func (q *Queries) GetPlayerWithOnboardingState(ctx context.Context, id int64) (G
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
+		&i.ApprovedAt,
 		&i.HasOauth,
 		&i.OauthProvider,
 		&i.OnboardingState,
@@ -292,7 +301,7 @@ func (q *Queries) ListAdminAuditForTarget(ctx context.Context, arg ListAdminAudi
 
 const listPlayersByOnboardingState = `-- name: ListPlayersByOnboardingState :many
 SELECT
-    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
+    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at, p.approved_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -338,6 +347,7 @@ type ListPlayersByOnboardingStateRow struct {
 	EmailVerifiedAt    sql.NullTime
 	SessionVersion     int64
 	RoleChangedAt      sql.NullTime
+	ApprovedAt         sql.NullTime
 	HasOauth           bool
 	OauthProvider      string
 	OnboardingState    string
@@ -370,6 +380,7 @@ func (q *Queries) ListPlayersByOnboardingState(ctx context.Context, arg ListPlay
 			&i.EmailVerifiedAt,
 			&i.SessionVersion,
 			&i.RoleChangedAt,
+			&i.ApprovedAt,
 			&i.HasOauth,
 			&i.OauthProvider,
 			&i.OnboardingState,

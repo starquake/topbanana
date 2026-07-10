@@ -97,6 +97,11 @@
 
   "registerPending.alreadyVerified": "Al geverifieerd? Inloggen",
 
+  "loginPendingApproval.eyebrow": "Bijna klaar",
+  "loginPendingApproval.heading": "Wachten op goedkeuring",
+  "loginPendingApproval.body": "Je e-mailadres is bevestigd. Een beheerder moet je account goedkeuren voordat je kunt inloggen. Je krijgt een e-mail zodra dat gebeurt.",
+  "loginPendingApproval.backToLogin": "Terug naar inloggen",
+
   "verifyEmailRequest.heading": "Verificatie-e-mail opnieuw versturen",
   "verifyEmailRequest.subtitle": "Vul je e-mailadres in en we sturen je een nieuwe verificatielink.",
   "verifyEmailRequest.submit": "Verificatielink versturen",
@@ -334,5 +339,12 @@
   "email.roleChange.body": "Een beheerder heeft de rol op je Top Banana!-account gewijzigd naar {role}.\n\nHeb je vragen over deze wijziging, neem dan contact op met de sitebeheerder.\n",
   "email.roleChange.rolePlayer": "speler",
   "email.roleChange.roleHost": "host",
-  "email.roleChange.roleAdmin": "beheerder"
+  "email.roleChange.roleAdmin": "beheerder",
+
+  "email.approvalPending.subject": "Je Top Banana!-account wacht op goedkeuring",
+  "email.approvalPending.body": "Je e-mailadres is bevestigd.\n\nEen beheerder beoordeelt je account voordat je kunt inloggen. Je krijgt nog een e-mail zodra het is goedgekeurd.\n",
+  "email.approvalRequest.subject": "Een Top Banana!-account wacht op goedkeuring",
+  "email.approvalRequest.body": "Een nieuw account wacht op goedkeuring.\n\nNaam: {name}\nE-mail: {email}\n\nBekijk en keur het hier goed:\n\n{link}\n",
+  "email.approved.subject": "Je Top Banana!-account is goedgekeurd",
+  "email.approved.body": "Je Top Banana!-account is goedgekeurd. Je kunt nu inloggen:\n\n{link}\n"
 }

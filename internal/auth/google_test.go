@@ -10,9 +10,257 @@ import (
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+// seedOAuthApprovalPlayers creates a bootstrap OAuth admin (auto-approved, with
+// an email so the admin notice has a recipient) and a second unapproved,
+// verified, non-admin OAuth player, returning the store and the target. Backs
+// the #1227 OAuth approval-gate tests.
+func seedOAuthApprovalPlayers(t *testing.T) (*store.PlayerStore, *Player) {
+	t.Helper()
+	ps := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	admin, err := ps.CreatePlayerFromOAuth(t.Context(), "adminuser", "admin@example.test")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth admin err = %v, want nil", err)
+	}
+	// Link the admin's identity as the real callback does, so the store counts a
+	// credentialled player and the next registrant is a plain, unapproved player.
+	if err = ps.LinkProviderIdentity(t.Context(), admin.ID, ProviderGoogle, "subj-admin"); err != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+	}
+	target, err := ps.CreatePlayerFromOAuth(t.Context(), "newbie", "newbie@example.test")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth target err = %v, want nil", err)
+	}
+	if target.IsApproved() {
+		t.Fatal("non-first OAuth player IsApproved() = true, want false")
+	}
+
+	return ps, target
+}
+
+// hasSessionCookie reports whether rec set a live topbanana_session cookie.
+func hasSessionCookie(rec *httptest.ResponseRecorder) bool {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "topbanana_session" && c.MaxAge >= 0 && c.Value != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestFinalizeGoogleSignIn_ApprovalRequired_NewUnapprovedBlockedAndNotified pins
+// the #1227 OAuth gate: a brand-new unapproved registration is held at the
+// awaiting-approval page and both the registrant and the admin are notified.
+func TestFinalizeGoogleSignIn_ApprovalRequired_NewUnapprovedBlockedAndNotified(t *testing.T) {
+	t.Parallel()
+
+	ps, target := seedOAuthApprovalPlayers(t)
+	tester := mailer.NewTester(mailer.NewNoop())
+	tracker := bgtasks.New()
+	approval := GoogleApprovalDeps{
+		LoginApprovalRequired: true,
+		Sender:                tester,
+		AdminEmailLister:      ps,
+		BaseURL:               "https://tb.example",
+		Tasks:                 tracker,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, true, approval)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if hasSessionCookie(rec) {
+		t.Error("blocked OAuth sign-in set a session cookie, want none")
+	}
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+	var toUser, toAdmin bool
+	for _, e := range tester.Recent(10) {
+		if e.Kind == mailer.KindApprovalPending && e.To == "newbie@example.test" {
+			toUser = true
+		}
+		if e.Kind == mailer.KindApprovalRequest && e.To == "admin@example.test" {
+			toAdmin = true
+		}
+	}
+	if !toUser {
+		t.Error("no approval-pending notice sent to the OAuth registrant")
+	}
+	if !toAdmin {
+		t.Error("no approval-request notice sent to the admin")
+	}
+}
+
+// TestFinalizeGoogleSignIn_ApprovalRequired_RepeatUnapprovedBlockedNoMail pins
+// that a repeat sign-in (created=false) of an unapproved account is still
+// blocked but sends no notices, so admins are not spammed on every retry.
+func TestFinalizeGoogleSignIn_ApprovalRequired_RepeatUnapprovedBlockedNoMail(t *testing.T) {
+	t.Parallel()
+
+	ps, target := seedOAuthApprovalPlayers(t)
+	tester := mailer.NewTester(mailer.NewNoop())
+	tracker := bgtasks.New()
+	approval := GoogleApprovalDeps{
+		LoginApprovalRequired: true,
+		Sender:                tester,
+		AdminEmailLister:      ps,
+		BaseURL:               "https://tb.example",
+		Tasks:                 tracker,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, false, approval)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+	if got := tester.Count(); got != 0 {
+		t.Errorf("mailer send count = %d, want 0 on a repeat unapproved sign-in", got)
+	}
+}
+
+// TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified pins the
+// app's default path (#1227): an anonymous guest attaching its first Google
+// identity counts as a fresh registration, so the guest is blocked at the
+// awaiting-approval page (no session) and both the guest and the admin are
+// notified - the notice must fire on this claim path, not only create-fresh.
+func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testing.T) {
+	t.Parallel()
+
+	ps := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	admin, err := ps.CreatePlayerFromOAuth(t.Context(), "adminuser", "admin@example.test")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth admin err = %v, want nil", err)
+	}
+	// Link the admin's identity so the store counts a credentialled player and
+	// the guest's claim does not auto-promote to admin.
+	if err = ps.LinkProviderIdentity(t.Context(), admin.ID, ProviderGoogle, "subj-admin"); err != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+	}
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "guest-player")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	// The guest signs in with Google for the first time (claim-session branch).
+	player, firstReg, err := ExportLinkOrCreateGooglePlayerFirstReg(
+		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, true)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayerFirstReg err = %v, want nil", err)
+	}
+	if !firstReg {
+		t.Error("first Google sign-in of an anonymous guest firstRegistration = false, want true")
+	}
+	if got, want := player.ID, anon.ID; got != want {
+		t.Errorf("claimed player id = %d, want %d (guest claimed in place)", got, want)
+	}
+	if player.IsApproved() {
+		t.Fatal("claimed guest IsApproved() = true, want false")
+	}
+
+	tester := mailer.NewTester(mailer.NewNoop())
+	tracker := bgtasks.New()
+	approval := GoogleApprovalDeps{
+		LoginApprovalRequired: true,
+		Sender:                tester,
+		AdminEmailLister:      ps,
+		BaseURL:               "https://tb.example",
+		Tasks:                 tracker,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), player, firstReg, approval)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if hasSessionCookie(rec) {
+		t.Error("blocked guest claim set a session cookie, want none")
+	}
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+	var toUser, toAdmin bool
+	for _, e := range tester.Recent(10) {
+		if e.Kind == mailer.KindApprovalPending && e.To == "guest@example.test" {
+			toUser = true
+		}
+		if e.Kind == mailer.KindApprovalRequest && e.To == "admin@example.test" {
+			toAdmin = true
+		}
+	}
+	if !toUser {
+		t.Error("no approval-pending notice sent to the claimed guest")
+	}
+	if !toAdmin {
+		t.Error("no approval-request notice sent to the admin")
+	}
+}
+
+// TestFinalizeGoogleSignIn_ApprovalRequired_ApprovedSignsIn pins that an
+// approved OAuth account signs in normally under the gate.
+func TestFinalizeGoogleSignIn_ApprovalRequired_ApprovedSignsIn(t *testing.T) {
+	t.Parallel()
+
+	ps, target := seedOAuthApprovalPlayers(t)
+	if _, err := ps.SetPlayerApprovedNow(t.Context(), target.ID); err != nil {
+		t.Fatalf("SetPlayerApprovedNow err = %v, want nil", err)
+	}
+	approved, err := ps.GetPlayerByID(t.Context(), target.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	approval := GoogleApprovalDeps{
+		LoginApprovalRequired: true,
+		Sender:                mailer.NewTester(mailer.NewNoop()),
+		AdminEmailLister:      ps,
+		BaseURL:               "https://tb.example",
+		Tasks:                 bgtasks.New(),
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), approved, false, approval)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got := rec.Header().Get("Location"); got == "/login/pending-approval" {
+		t.Errorf("Location = %q, want the role landing (approved account must sign in)", got)
+	}
+	if !hasSessionCookie(rec) {
+		t.Error("approved OAuth sign-in set no session cookie, want one")
+	}
+}
 
 // collidingIdentityStore is a fault-injection OAuthIdentityStore that
 // forces CreatePlayerFromOAuth to report a display-name collision a

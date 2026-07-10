@@ -9,7 +9,9 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -104,9 +106,12 @@ func TestHandleVerifyEmail_MismatchedSessionClears(t *testing.T) {
 	sessions.Set(rec, sessionPlayer.ID, sessionPlayer.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(
-		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, nil,
-	)
+	handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+		Tokens:   stores.VerifyTokens,
+		Players:  stores.Players,
+		Roles:    stores.AdminPlayers,
+		Sessions: sessions,
+	})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
@@ -148,9 +153,12 @@ func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 	sessions.Set(rec, player.ID, player.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(
-		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, nil,
-	)
+	handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+		Tokens:   stores.VerifyTokens,
+		Players:  stores.Players,
+		Roles:    stores.AdminPlayers,
+		Sessions: sessions,
+	})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
@@ -243,9 +251,13 @@ func runVerifyEmailWithAdminEmails(
 
 	stores := store.New(db, discardLogger())
 	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), true)
-	handler := HandleVerifyEmail(
-		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, adminEmails,
-	)
+	handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+		Tokens:      stores.VerifyTokens,
+		Players:     stores.Players,
+		Roles:       stores.AdminPlayers,
+		Sessions:    sessions,
+		AdminEmails: adminEmails,
+	})
 
 	target := "/verify-email"
 	if raw != "" {
@@ -290,4 +302,90 @@ func seedVerifyToken(t *testing.T, tokens VerifyTokenStore, playerID int64, expi
 	}
 
 	return raw
+}
+
+// TestHandleVerifyEmail_ApprovalRequired_NotifiesUserAndAdmins pins the #1227
+// awaiting-approval fan-out: a first-time verify under LOGIN_APPROVAL_REQUIRED
+// notifies the registrant and every admin.
+func TestHandleVerifyEmail_ApprovalRequired_NotifiesUserAndAdmins(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	// The first credentialled registrant becomes the admin (with an email).
+	createVerifyPlayer(t, stores.Players, "site-admin", "admin@example.test", RoleAdmin)
+	target := createVerifyPlayer(t, stores.Players, "newbie", "newbie@example.test", RolePlayer)
+	raw := seedVerifyToken(t, stores.VerifyTokens, target.ID, time.Now().Add(time.Hour))
+
+	tester := mailer.NewTester(mailer.NewNoop())
+	tracker := bgtasks.New()
+	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), true)
+	handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+		Tokens:                stores.VerifyTokens,
+		Players:               stores.Players,
+		Roles:                 stores.AdminPlayers,
+		Sessions:              sessions,
+		LoginApprovalRequired: true,
+		Sender:                tester,
+		AdminEmailLister:      stores.AdminEmailLister,
+		BaseURL:               "https://tb.example",
+		Tasks:                 tracker,
+	})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+
+	var toUser, toAdmin bool
+	for _, e := range tester.Recent(10) {
+		if e.Kind == mailer.KindApprovalPending && e.To == "newbie@example.test" {
+			toUser = true
+		}
+		if e.Kind == mailer.KindApprovalRequest && e.To == "admin@example.test" {
+			toAdmin = true
+		}
+	}
+	if !toUser {
+		t.Error("no approval-pending notice sent to the registrant")
+	}
+	if !toAdmin {
+		t.Error("no approval-request notice sent to the admin")
+	}
+}
+
+// TestHandleVerifyEmail_ApprovalOff_SendsNoApprovalMail pins that with the gate
+// off, a verify sends none of the awaiting-approval notices.
+func TestHandleVerifyEmail_ApprovalOff_SendsNoApprovalMail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	createVerifyPlayer(t, stores.Players, "site-admin", "admin@example.test", RoleAdmin)
+	target := createVerifyPlayer(t, stores.Players, "newbie", "newbie@example.test", RolePlayer)
+	raw := seedVerifyToken(t, stores.VerifyTokens, target.ID, time.Now().Add(time.Hour))
+
+	tester := mailer.NewTester(mailer.NewNoop())
+	tracker := bgtasks.New()
+	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), true)
+	handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+		Tokens:                stores.VerifyTokens,
+		Players:               stores.Players,
+		Roles:                 stores.AdminPlayers,
+		Sessions:              sessions,
+		LoginApprovalRequired: false,
+		Sender:                tester,
+		AdminEmailLister:      stores.AdminEmailLister,
+		BaseURL:               "https://tb.example",
+		Tasks:                 tracker,
+	})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
+
+	if got := tester.Count(); got != 0 {
+		t.Errorf("mailer send count = %d, want 0 when approval is off", got)
+	}
 }

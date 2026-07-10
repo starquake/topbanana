@@ -6,12 +6,56 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"time"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/locale"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
+
+// Awaiting-approval notice catalog keys (#1227): the registrant notice and the
+// admin fan-out. The approval-granted notice lives with the admin approve action.
+const (
+	emailApprovalPendingSubjectKey locale.MessageID = "email.approvalPending.subject"
+	emailApprovalPendingBodyKey    locale.MessageID = "email.approvalPending.body"
+	emailApprovalRequestSubjectKey locale.MessageID = "email.approvalRequest.subject"
+	emailApprovalRequestBodyKey    locale.MessageID = "email.approvalRequest.body"
+)
+
+// logPlayerIDKey is the structured-log attribute key for a player id in this
+// file's best-effort verify/approval warnings.
+const logPlayerIDKey = "player_id"
+
+// AdminEmailLister returns the address of every admin, backing the
+// awaiting-approval fan-out (#1227). Narrow so the verify handler need not import
+// internal/store.
+type AdminEmailLister interface {
+	// ListAdminEmails returns the email of every admin with an address on file.
+	ListAdminEmails(ctx context.Context) ([]string, error)
+}
+
+// VerifyEmailDeps bundles the dependencies HandleVerifyEmail needs. Bundling
+// keeps the constructor under revive's argument limit.
+type VerifyEmailDeps struct {
+	Tokens   VerifyTokenStore
+	Players  PlayerStore
+	Roles    RoleSetter
+	Sessions *session.Manager
+	// AdminEmails is the ADMIN_EMAILS allowlist consulted at verify time.
+	AdminEmails []string
+	// LoginApprovalRequired gates the awaiting-approval notices below; when off,
+	// verify behaves exactly as before and the mail deps go unused (#1227).
+	LoginApprovalRequired bool
+	Sender                VerifyEmailSender
+	AdminEmailLister      AdminEmailLister
+	BaseURL               string
+	// Tasks drains the detached approval notices on graceful shutdown (#740).
+	// Nil in unit tests, which run untracked.
+	Tasks *bgtasks.Tracker
+}
 
 // RoleSetter promotes a player to a role at email-verify time. The
 // concrete store.PlayerStore satisfies it via SetPlayerRole; the narrow
@@ -43,10 +87,12 @@ type verifyEmailPageData struct {
 // clients prefetching the link cannot keep the user from completing
 // verification in a fresh browser window.
 //
-// adminEmails is the ADMIN_EMAILS allowlist; on a fresh verify the
+// deps.AdminEmails is the ADMIN_EMAILS allowlist; on a fresh verify the
 // handler stamps the admin role when the now-proven address matches an
 // entry (#785). Registration deliberately leaves the role at player so
-// admin is never granted on an unverified address.
+// admin is never granted on an unverified address. When
+// deps.LoginApprovalRequired is on, a fresh verify also notifies the
+// registrant and every admin that the account is awaiting approval (#1227).
 //
 // The success branch covers both the register-time verify (the
 // historical case) and the in-session email-change consume (#497).
@@ -60,11 +106,7 @@ type verifyEmailPageData struct {
 func HandleVerifyEmail(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	tokens VerifyTokenStore,
-	players PlayerStore,
-	roles RoleSetter,
-	sessions *session.Manager,
-	adminEmails []string,
+	deps VerifyEmailDeps,
 ) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
 
@@ -81,19 +123,148 @@ func HandleVerifyEmail(
 			return
 		}
 
-		ownerID, err := tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
+		ownerID, err := deps.Tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
 		if err == nil {
-			promoteVerifiedAdminIfAllowlisted(r.Context(), logger, players, roles, adminEmails, ownerID)
+			promoted := promoteVerifiedAdminIfAllowlisted(
+				r.Context(), logger, deps.Players, deps.Roles, deps.AdminEmails, ownerID)
+			maybeNotifyAwaitingApproval(r.Context(), logger, deps, ownerID, promoted, locale.Resolve(r))
 		}
-		landing := postVerifyLanding(w, r, players, sessions, ownerID)
+		landing := postVerifyLanding(w, r, deps.Players, deps.Sessions, ownerID)
 		renderVerifyOutcome(w, r, logger, renderer, verifyOutcome{
 			logger:   logger,
-			players:  players,
-			sessions: sessions,
+			players:  deps.Players,
+			sessions: deps.Sessions,
 			landing:  landing,
 			ownerID:  ownerID,
 			err:      err,
 		})
+	})
+}
+
+// approvalNotifier is the mail slice the awaiting-approval fan-out needs (#1227),
+// shared by the verify path and the OAuth path so both dispatch the same notices
+// the same way.
+type approvalNotifier struct {
+	sender  VerifyEmailSender
+	lister  AdminEmailLister
+	baseURL string
+	tasks   *bgtasks.Tracker
+}
+
+// approvalNotifier builds the mail slice from the verify deps.
+func (d VerifyEmailDeps) approvalNotifier() approvalNotifier {
+	return approvalNotifier{
+		sender:  d.Sender,
+		lister:  d.AdminEmailLister,
+		baseURL: d.BaseURL,
+		tasks:   d.Tasks,
+	}
+}
+
+// maybeNotifyAwaitingApproval fires the awaiting-approval notices after a
+// first-time verify (#1227), only when approval is required and the account is
+// neither admin nor already approved. Reuses the promotion read when the caller
+// passes it (player non-nil), else reads the row. Best-effort: a lookup failure
+// is logged.
+func maybeNotifyAwaitingApproval(
+	ctx context.Context,
+	logger *slog.Logger,
+	deps VerifyEmailDeps,
+	ownerID int64,
+	player *Player,
+	loc string,
+) {
+	if !deps.LoginApprovalRequired || ownerID == 0 {
+		return
+	}
+	p := player
+	if p == nil {
+		var err error
+		p, err = deps.Players.GetPlayerByID(ctx, ownerID)
+		if err != nil {
+			logger.WarnContext(ctx, "awaiting-approval notice: player lookup failed",
+				slog.Int64(logPlayerIDKey, ownerID), slog.Any("err", err))
+
+			return
+		}
+	}
+	if p.IsAdmin() || p.IsApproved() {
+		return
+	}
+	n := deps.approvalNotifier()
+	dispatchApprovalPending(ctx, logger, n, p, loc)
+	dispatchApprovalAdminNotice(ctx, logger, n, p)
+}
+
+// ApprovalNoticeMargin bounds each detached awaiting-approval send (on top of
+// mailer.SendTimeout) so SMTP latency is never observable from the response
+// that triggered it (#1227). Exported so the admin approve action shares it.
+const ApprovalNoticeMargin = 15 * time.Second
+
+// dispatchApprovalPending tells the registrant their address is confirmed and an
+// admin will review the account. Detached + bounded so a closed tab does not
+// cancel it; a nil sender (unit tests) skips the send.
+func dispatchApprovalPending(
+	ctx context.Context,
+	logger *slog.Logger,
+	n approvalNotifier,
+	player *Player,
+	loc string,
+) {
+	if n.sender == nil || player.Email == "" {
+		return
+	}
+	msg := mailer.Message{
+		To:      player.Email,
+		Subject: locale.Translate(loc, emailApprovalPendingSubjectKey),
+		Body:    locale.Translate(loc, emailApprovalPendingBodyKey),
+		Kind:    mailer.KindApprovalPending,
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+ApprovalNoticeMargin)
+	n.tasks.Go(func() {
+		defer cancel()
+		if err := n.sender.Send(bg, msg); err != nil {
+			logger.WarnContext(bg, "approval-pending notice dispatch failed",
+				slog.Int64(logPlayerIDKey, player.ID), slog.Any("err", err))
+		}
+	})
+}
+
+// dispatchApprovalAdminNotice tells every admin an account is waiting, naming the
+// registrant and linking to the players list. English (admins are operators).
+// The admin lookup runs inside the detached goroutine so the response is never
+// held open on it; a nil sender or lister (unit tests) skips it.
+func dispatchApprovalAdminNotice(
+	ctx context.Context,
+	logger *slog.Logger,
+	n approvalNotifier,
+	player *Player,
+) {
+	if n.sender == nil || n.lister == nil {
+		return
+	}
+	link := n.baseURL + "/admin/players"
+	name := player.DisplayName
+	email := player.Email
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+ApprovalNoticeMargin)
+	n.tasks.Go(func() {
+		defer cancel()
+		admins, err := n.lister.ListAdminEmails(bg)
+		if err != nil {
+			logger.WarnContext(bg, "approval-request notice: admin lookup failed", slog.Any("err", err))
+
+			return
+		}
+		body := locale.TranslateWith(locale.LocaleEN, emailApprovalRequestBodyKey,
+			map[string]string{"name": name, "email": email, "link": link})
+		subject := locale.Translate(locale.LocaleEN, emailApprovalRequestSubjectKey)
+		for _, to := range admins {
+			msg := mailer.Message{To: to, Subject: subject, Body: body, Kind: mailer.KindApprovalRequest}
+			if err := n.sender.Send(bg, msg); err != nil {
+				logger.WarnContext(bg, "approval-request notice dispatch failed",
+					slog.String("to", to), slog.Any("err", err))
+			}
+		}
 	})
 }
 
@@ -108,6 +279,11 @@ func HandleVerifyEmail(
 // role and an operator can promote them by hand or the next verify hits
 // the same path. A row already at admin is left untouched so the write
 // is skipped on the common already-promoted re-verify.
+//
+// Returns the player it read, reflecting the promotion in memory (role +
+// approved_at) when one happened, so a caller can reuse it instead of reading
+// the row again (#1227). Nil when there is nothing to check (no allowlist / zero
+// id) or the lookup failed.
 func promoteVerifiedAdminIfAllowlisted(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -115,24 +291,35 @@ func promoteVerifiedAdminIfAllowlisted(
 	roles RoleSetter,
 	adminEmails []string,
 	ownerID int64,
-) {
+) *Player {
 	if ownerID == 0 || len(adminEmails) == 0 {
-		return
+		return nil
 	}
 	p, err := players.GetPlayerByID(ctx, ownerID)
 	if err != nil {
 		logger.WarnContext(ctx, "verify admin promotion: player lookup failed",
-			slog.Int64("player_id", ownerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, ownerID), slog.Any("err", err))
 
-		return
+		return nil
 	}
 	if p.Role == RoleAdmin || !slices.Contains(adminEmails, p.Email) {
-		return
+		return p
 	}
 	if err := roles.SetPlayerRole(ctx, ownerID, RoleAdmin); err != nil {
 		logger.WarnContext(ctx, "verify admin promotion: set role failed",
-			slog.Int64("player_id", ownerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, ownerID), slog.Any("err", err))
+
+		return p
 	}
+	// SetPlayerRole stamps approved_at when the role becomes admin (#1227), so
+	// mirror both in the returned row to spare the caller a second read.
+	p.Role = RoleAdmin
+	if p.ApprovedAt == nil {
+		now := time.Now().UTC()
+		p.ApprovedAt = &now
+	}
+
+	return p
 }
 
 // verifyOutcome groups the consume-result plumbing renderVerifyOutcome
@@ -246,7 +433,7 @@ func refreshSessionAfterVerify(
 	p, err := players.GetPlayerByID(r.Context(), ownerID)
 	if err != nil {
 		logger.WarnContext(r.Context(), "post-verify session refresh: player lookup failed",
-			slog.Int64("player_id", ownerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, ownerID), slog.Any("err", err))
 
 		return
 	}

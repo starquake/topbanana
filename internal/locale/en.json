@@ -97,6 +97,11 @@
 
   "registerPending.alreadyVerified": "Already verified? Sign in",
 
+  "loginPendingApproval.eyebrow": "Almost there",
+  "loginPendingApproval.heading": "Waiting for approval",
+  "loginPendingApproval.body": "Your email is confirmed. An admin needs to approve your account before you can sign in. You will get an email once that happens.",
+  "loginPendingApproval.backToLogin": "Back to sign in",
+
   "verifyEmailRequest.heading": "Resend verification email",
   "verifyEmailRequest.subtitle": "Enter your email address and we'll send a fresh verification link.",
   "verifyEmailRequest.submit": "Send verification link",
@@ -334,5 +339,12 @@
   "email.roleChange.body": "An administrator changed the role on your Top Banana! account to {role}.\n\nIf you have questions about this change, contact the site administrator.\n",
   "email.roleChange.rolePlayer": "player",
   "email.roleChange.roleHost": "host",
-  "email.roleChange.roleAdmin": "admin"
+  "email.roleChange.roleAdmin": "admin",
+
+  "email.approvalPending.subject": "Your Top Banana! account is awaiting approval",
+  "email.approvalPending.body": "Your email address is confirmed.\n\nAn admin will review your account before you can sign in. You will get another email once it is approved.\n",
+  "email.approvalRequest.subject": "A Top Banana! account is awaiting approval",
+  "email.approvalRequest.body": "A new account is waiting for approval.\n\nName: {name}\nEmail: {email}\n\nReview and approve it here:\n\n{link}\n",
+  "email.approved.subject": "Your Top Banana! account is approved",
+  "email.approved.body": "Your Top Banana! account has been approved. You can now sign in:\n\n{link}\n"
 }

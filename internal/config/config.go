@@ -275,6 +275,11 @@ type Config struct {
 	// opt-in per deployment. Parsed from the REGISTRATION_ENABLED env var via strconv.ParseBool.
 	RegistrationEnabled bool
 
+	// LoginApprovalRequired holds a confirmed-email account back from signing in
+	// until an admin approves it. Defaults to false (LOGIN_APPROVAL_REQUIRED);
+	// admins are always approved so an operator cannot lock themselves out.
+	LoginApprovalRequired bool
+
 	// DemoMode turns the deployment into the public shared demo (#1147).
 	// Parsed from DEMO_MODE_ENABLED via strconv.ParseBool. When on, it gates
 	// the one-click /demo/enter affordance on and, through applyDemoMode,
@@ -724,6 +729,14 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 			return fmt.Errorf("invalid REGISTRATION_ENABLED: %q, err: %w", val, err)
 		}
 		c.RegistrationEnabled = b
+	}
+
+	if val := getenv("LOGIN_APPROVAL_REQUIRED"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid LOGIN_APPROVAL_REQUIRED: %q, err: %w", val, err)
+		}
+		c.LoginApprovalRequired = b
 	}
 
 	if val := getenv("DEMO_MODE_ENABLED"); val != "" {

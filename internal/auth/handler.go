@@ -47,6 +47,9 @@ const MaxDisplayNameLength = 50
 const (
 	adminLandingPath  = "/admin/quizzes"
 	playerLandingPath = "/"
+	// loginPendingApprovalPath is the GET page every sign-in path redirects an
+	// unapproved account to under LOGIN_APPROVAL_REQUIRED (#1227).
+	loginPendingApprovalPath = "/login/pending-approval"
 )
 
 // Structured-log attribute keys for the authentication-outcome lines
@@ -528,6 +531,10 @@ type LoginDeps struct {
 	// ForgotPasswordEnabled shows the "Forgot your password?" link on the
 	// login form's error re-renders; false when SMTP is unconfigured (#1170).
 	ForgotPasswordEnabled bool
+	// LoginApprovalRequired holds a confirmed-but-unapproved account back at
+	// sign-in until an admin approves it (#1227). Off by default; admins are
+	// always approved so this never blocks an operator.
+	LoginApprovalRequired bool
 	// Tasks tracks the detached verify-email resend so a graceful
 	// shutdown drains it before the DB closes (#740). Nil in unit tests,
 	// which then run the dispatch untracked.
@@ -659,6 +666,19 @@ func completeLogin(
 			slog.Int64(logPlayerKey, player.ID),
 			slog.String(logEmailKey, email))
 		renderUnverifiedLogin(logger, formCfg, deps, w, r, player, email)
+
+		return
+	}
+
+	// Hold a confirmed-but-unapproved account until an admin approves it (#1227).
+	// Reachable only after correct credentials, so unlike the unverified gate this
+	// sends the visitor to a clear informative page, not the generic
+	// invalid-credentials one. No session is set.
+	if deps.LoginApprovalRequired && !player.IsApproved() {
+		logger.InfoContext(r.Context(), "login blocked: account not approved",
+			slog.Int64(logPlayerKey, player.ID),
+			slog.String(logEmailKey, email))
+		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
 
 		return
 	}
@@ -808,6 +828,26 @@ func renderUnverifiedLogin(
 ) {
 	dispatchVerifyResend(r, logger, deps, player)
 	renderInvalidCredentials(cfg, w, r, email)
+}
+
+// loginPendingApprovalData backs the login_pending_approval.gohtml page.
+type loginPendingApprovalData struct {
+	Title string
+}
+
+// HandleLoginPendingApproval renders GET /login/pending-approval: the shared
+// "awaiting admin approval" page every sign-in path redirects an unapproved
+// account to under LOGIN_APPROVAL_REQUIRED (#1227). A distinct informative page
+// (not the generic invalid-credentials response) reachable only after a
+// successful auth on some path.
+func HandleLoginPendingApproval(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login_pending_approval.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		renderer.Render(w, r, http.StatusOK, loginPendingApprovalData{
+			Title: locale.Translate(locale.Resolve(r), "loginPendingApproval.heading"),
+		})
+	})
 }
 
 // dispatchVerifyResend mirrors dispatchVerifyEmail but routes through

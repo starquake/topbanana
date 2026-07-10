@@ -30,6 +30,10 @@ type playerRow struct {
 	OnboardingState string
 	IsAdmin         bool
 	IsHost          bool
+	// PendingApproval marks a confirmed-email account still waiting for admin
+	// approval (#1227). Every sign-in path is now gated, OAuth included, so any
+	// verified-but-unapproved non-admin account qualifies.
+	PendingApproval bool
 	CreatedAt       time.Time
 	FinishedCount   int64
 	LastFinishedAt  *time.Time
@@ -64,6 +68,8 @@ type playersPageData struct {
 	NextURL    string
 	RangeStart int64
 	RangeEnd   int64
+	// ApprovalRequired gates the per-row "pending approval" marker (#1227).
+	ApprovalRequired bool
 }
 
 // HandlePlayersList renders /admin/players (#423/#450). One row per
@@ -71,7 +77,12 @@ type playersPageData struct {
 // link to the per-player detail view, and a tab strip filtering by
 // onboarding state. Pagination is a simple ?page=N query param; page
 // sizes above [playersPerPage] are not negotiable from the URL.
-func HandlePlayersList(logger *slog.Logger, csrfMgr *csrf.Manager, lister auth.PlayerLister) http.Handler {
+func HandlePlayersList(
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	lister auth.PlayerLister,
+	loginApprovalRequired bool,
+) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playerslist.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +90,7 @@ func HandlePlayersList(logger *slog.Logger, csrfMgr *csrf.Manager, lister auth.P
 		if !ok {
 			return
 		}
+		data.ApprovalRequired = loginApprovalRequired
 		render.Render(w, r, http.StatusOK, data)
 	})
 }
@@ -196,6 +208,7 @@ func buildPlayerRows(
 			OnboardingState: p.OnboardingState,
 			IsAdmin:         p.Role == auth.RoleAdmin,
 			IsHost:          p.Role == auth.RoleHost,
+			PendingApproval: p.EmailVerifiedAt != nil && p.ApprovedAt == nil,
 			CreatedAt:       p.CreatedAt,
 		}
 		if s, ok := statsByID[p.ID]; ok {
