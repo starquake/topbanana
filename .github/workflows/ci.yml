@@ -75,7 +75,7 @@ jobs:
     # lts/* tracks the current Active LTS (24 as of June 2026) and rolls
     # forward on its own, mirroring go-version "stable" above.
     - name: Set up Node
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version: "lts/*"
         cache: npm
@@ -186,7 +186,7 @@ jobs:
           go-version: "stable"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "lts/*"
           cache: npm
