@@ -1,9 +1,16 @@
 version: 2
+
+# Minor/patch bumps ride together in one PR per ecosystem so a weekly batch
+# drains in one CI run; majors stay solo and cannot block the rest.
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      gomod:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Tracking-only module for tools we install via release binaries (see
   # GOLANGCI_VERSION in the Makefile). The main module does not import
@@ -14,6 +21,10 @@ updates:
     directory: "/tools"
     schedule:
       interval: "weekly"
+    groups:
+      gomod-tools:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Action versions pinned in .github/workflows/*.yml. Without this entry the
   # pins drift silently — actions/checkout, actions/setup-go, etc. age out
@@ -22,6 +33,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # esbuild under the root package.json - the dev-only build tooling for the
   # player client + admin JS bundles (#721). Without this entry only security
@@ -31,6 +46,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Playwright + @types/node under test/e2e/. Keeps the browser deps moving
   # forward in step with upstream releases (relevant for security advisories
@@ -39,3 +58,7 @@ updates:
     directory: "/test/e2e"
     schedule:
       interval: "weekly"
+    groups:
+      npm-e2e:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
