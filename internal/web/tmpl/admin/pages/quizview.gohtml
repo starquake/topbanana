@@ -1,77 +1,47 @@
+{{/* Full-bleed app shell (#1245). The quiz view is a working screen rather
+     than a document, so it overrides the layout's centred container. */}}
+{{define "shell"}}
+<section class="w-full grow flex flex-col min-w-0">
+    {{template "content" .}}
+</section>
+{{end}}
+
 {{define "content"}}
-    {{/* Breadcrumb */}}
-    <nav aria-label="breadcrumbs" class="crumb">
-        <a href="/admin">Admin</a>
-        <span class="crumb-sep" aria-hidden="true">/</span>
-        <a href="/admin/quizzes">Quizzes</a>
-        <span class="crumb-sep" aria-hidden="true">/</span>
-        <span class="text-text" aria-current="page">{{if .Quiz}}{{.Quiz.Title}}{{else}}Not found{{end}}</span>
-    </nav>
-
     {{if .Quiz}}
-        {{/* Quiz hero: visibility pill + eyebrow meta, big title with inline
-             edit affordance, description, share URL chip, action buttons. */}}
-        <header class="mb-10 pb-6 border-b border-border-soft">
-            <div class="mb-3 flex flex-wrap items-center gap-3">
-                {{/* Visibility pill (#103, #1215), keyed on the quiz's real value. */}}
-                {{if eq .Quiz.Visibility "private"}}
-                    <span class="pill pill-private" data-testid="quiz-visibility">Private</span>
-                {{else if eq .Quiz.Visibility "unlisted"}}
-                    <span class="pill pill-unlisted" data-testid="quiz-visibility">Unlisted</span>
-                {{else}}
-                    <span class="pill pill-public" data-testid="quiz-visibility">Public</span>
-                {{end}}
-                {{/* Draft / Published status pill (#1192). */}}
-                {{if .Quiz.Published}}
-                    <span class="pill pill-published" data-testid="quiz-status">Published</span>
-                {{else}}
-                    <span class="pill pill-draft" data-testid="quiz-status">Draft</span>
-                {{end}}
-                <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
-                {{if .Quiz.CreatedByDisplayName}}
-                    <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Created by {{.Quiz.CreatedByDisplayName}}</span>
-                {{end}}
-            </div>
+        {{/* CanEdit is true when the requesting player owns the quiz (or is an
+             admin); content edits additionally lock once published (#1192). */}}
+        {{$canEdit := .Quiz.CanEdit}}
+        {{$canEditContent := and $canEdit (not .Quiz.Published)}}
 
-            {{/* Pull CanEdit into a local alias so the partial below
-                 and a handful of inline conditionals all key on the
-                 same name. CanEdit is true when the requesting player
-                 owns the quiz (or is an admin); the rest of this
-                 template treats it as opaque. */}}
-            {{$canEdit := .Quiz.CanEdit}}
-            {{/* Content edits (rounds/questions/media) lock once published; Export/Unpublish/Delete stay under $canEdit (#1192). */}}
-            {{$canEditContent := and $canEdit (not .Quiz.Published)}}
-            <h1 class="mb-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
-                <span>{{.Quiz.Title}}</span>
-            </h1>
+        {{/* Context bar (#1245): identity and the actions that matter most.
+             Everything else lives in the overflow menu, which is a <details>
+             so it needs no JavaScript. */}}
+        <div class="app-bar">
+            <span class="app-bar-crumb"><a href="/admin/quizzes" class="hover:text-text">Quizzes</a> /</span>
+            <h1 class="app-bar-title">{{.Quiz.Title}}</h1>
 
-            {{if .Quiz.Description}}
-                <p class="mb-5 max-w-[58ch] text-text-dim">{{.Quiz.Description}}</p>
+            {{/* Visibility pill (#103, #1215), keyed on the quiz's real value. */}}
+            {{if eq .Quiz.Visibility "private"}}
+                <span class="pill pill-private" data-testid="quiz-visibility">Private</span>
+            {{else if eq .Quiz.Visibility "unlisted"}}
+                <span class="pill pill-unlisted" data-testid="quiz-visibility">Unlisted</span>
+            {{else}}
+                <span class="pill pill-public" data-testid="quiz-visibility">Public</span>
+            {{end}}
+            {{/* Draft / Published status pill (#1192). */}}
+            {{if .Quiz.Published}}
+                <span class="pill pill-published" data-testid="quiz-status">Published</span>
+            {{else}}
+                <span class="pill pill-draft" data-testid="quiz-status">Draft</span>
             {{end}}
 
-            <div class="mb-4 flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm font-mono text-[0.78rem] text-text-dim">
-                <span>/play/{{.Quiz.Slug}}-{{.Quiz.ID}}</span>
-                <button type="button"
-                        data-copy-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
-                        class="ml-2 bg-transparent border-0 cursor-pointer text-cyan font-sans text-[0.72rem] font-semibold uppercase tracking-[0.12em] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus rounded-sm">
-                    Copy link
-                </button>
-            </div>
+            <span class="grow"></span>
 
-            <div class="flex flex-wrap gap-2">
-                {{/* Host live opens a hosted session and drops the host on the
-                     TV lobby. Only live quizzes are hostable (MP-0 / #677), so
-                     the entry shows for mode='live' only. It is one-room-per-host
-                     aware (#851): if the host already has an empty staging room
-                     or is between games, the quiz is armed in that room rather
-                     than spawning a second one. When the host already has a game
-                     in flight (#853), the control opens a confirm-and-restart
-                     modal instead of submitting straight away. */}}
-                {{if eq .Quiz.Mode "live"}}
+            {{/* Host live is one-room-per-host aware (#851); with a game already
+                 in flight it opens the confirm-and-restart modal (#853). */}}
+            {{if eq .Quiz.Mode "live"}}
                 {{if .HostHasRunningGame}}
-                <button type="button"
-                        onclick="openModal('modal-restart-host-{{.Quiz.ID}}')"
-                        class="btn-primary gap-2">
+                <button type="button" onclick="openModal('modal-restart-host-{{.Quiz.ID}}')" class="btn-primary btn-compact gap-2">
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
                     <span>Host live</span>
                 </button>
@@ -79,93 +49,95 @@
                 <form method="post" action="/host" class="inline-flex">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                     <input type="hidden" name="quiz_id" value="{{.Quiz.ID}}">
-                    <button type="submit" class="btn-primary gap-2">
+                    <button type="submit" class="btn-primary btn-compact gap-2">
                         <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
                         <span>Host live</span>
                     </button>
                 </form>
                 {{end}}
-                {{end}}
-                <button type="button"
-                        onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')"
-                        class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                    <span>Share</span>
-                </button>
-                {{if $canEdit}}
-                {{/* Export bundles the quiz tree + media into a .zip (#1113); read-only, so available in both states. */}}
-                <a href="/admin/quizzes/{{.Quiz.ID}}/export"
-                   data-testid="export-quiz"
-                   class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
-                    <span>Export</span>
-                </a>
-                {{if .Quiz.Published}}
-                {{/* Published: offer Unpublish only while unplayed, else a disabled control (#1192). */}}
-                {{if .Quiz.CanUnpublish}}
-                <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/unpublish" class="inline-flex">
-                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                    <button type="submit" data-testid="unpublish-quiz" class="btn-ghost gap-2">
-                        <span>Unpublish</span>
-                    </button>
-                </form>
-                {{else}}
-                <button type="button" disabled data-testid="unpublish-quiz"
-                        title="This quiz has been played and can no longer be unpublished."
-                        class="btn-ghost gap-2 opacity-50 cursor-not-allowed">
-                    <span>Unpublish</span>
-                </button>
-                {{end}}
-                {{else}}
-                {{/* Draft-only controls: publish, preview, and content edits. */}}
-                <a href="/admin/quizzes/{{.Quiz.ID}}/publish" data-testid="publish-quiz" class="btn-primary gap-2">
-                    <span>Publish</span>
-                </a>
-                {{if eq .Quiz.Mode "solo"}}
-                <a href="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}?preview=1" data-testid="preview-quiz" class="btn-ghost gap-2">
-                    <span>Preview &amp; play</span>
-                </a>
-                {{end}}
-                {{/* Solo<->live toggle (#830): flip the play mode without
-                     opening the edit form. The action targets the opposite of
-                     the current mode; the server validates the {mode} segment. */}}
-                <form method="post"
-                      action="/admin/quizzes/{{.Quiz.ID}}/mode/{{if eq .Quiz.Mode "live"}}solo{{else}}live{{end}}"
-                      class="inline-flex">
-                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                    <button type="submit" class="btn-ghost gap-2">
-                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41m-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9"/><path d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5 5 0 0 0 8 3M3.1 9a5 5 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6 6 0 0 1 2.083 9z"/></svg>
-                        <span>{{if eq .Quiz.Mode "live"}}Switch to solo{{else}}Switch to live{{end}}</span>
-                    </button>
-                </form>
-                <a href="/admin/quizzes/{{.Quiz.ID}}/edit"
-                   class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
-                    <span>Edit quiz</span>
-                </a>
-                {{end}}
-                {{/* Delete stays available in both states; publishing locks content edits, not deletion (#1192). */}}
-                <button type="button"
-                        data-testid="delete-quiz"
-                        onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
-                        class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-sm bg-transparent text-danger border border-danger/40 font-semibold text-xs uppercase tracking-[0.12em] transition-colors hover:bg-danger/10 hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
-                    <span>Delete</span>
-                </button>
-                {{end}}
-            </div>
-
-            {{/* Lock notice shown once published (#1192). */}}
-            {{if and $canEdit .Quiz.Published}}
-            <p class="mt-4 inline-flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.8rem] text-text-dim" data-testid="publish-lock-notice">
-                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 shrink-0 text-text-mute" aria-hidden="true"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
-                <span>
-                    Published quizzes are locked from edits, but can still be deleted.
-                    {{if .Quiz.CanUnpublish}}Unpublish to make changes.{{else}}This quiz has been played, so it can no longer be unpublished.{{end}}
-                </span>
-            </p>
             {{end}}
-        </header>
+
+            {{if $canEdit}}
+                {{if .Quiz.Published}}
+                    {{/* Published: Unpublish only while unplayed, else disabled (#1192). */}}
+                    {{if .Quiz.CanUnpublish}}
+                    <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/unpublish" class="inline-flex">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" data-testid="unpublish-quiz" class="btn-ghost btn-compact">Unpublish</button>
+                    </form>
+                    {{else}}
+                    <button type="button" disabled data-testid="unpublish-quiz"
+                            title="This quiz has been played and can no longer be unpublished."
+                            class="btn-ghost btn-compact opacity-50 cursor-not-allowed">Unpublish</button>
+                    {{end}}
+                {{else}}
+                    {{if eq .Quiz.Mode "solo"}}
+                    <a href="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}?preview=1" data-testid="preview-quiz" class="btn-ghost btn-compact">Preview &amp; play</a>
+                    {{end}}
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/publish" data-testid="publish-quiz" class="btn-primary btn-compact">Publish</a>
+                {{end}}
+            {{end}}
+
+            {{/* Overflow: the actions that do not earn a permanent slot. */}}
+            <details class="relative" data-testid="quiz-overflow">
+                <summary class="btn-ghost btn-compact gap-1.5 list-none marker:hidden cursor-pointer">
+                    <span>More</span>
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true"><path d="M3.2 5.7a.5.5 0 0 1 .7 0L8 9.8l4.1-4.1a.5.5 0 0 1 .7.7l-4.4 4.5a.5.5 0 0 1-.7 0L3.2 6.4a.5.5 0 0 1 0-.7z"/></svg>
+                </summary>
+                <div class="absolute right-0 mt-1 z-20 min-w-[190px] p-1 bg-surface-2 border border-border rounded-sm shadow-2xl flex flex-col">
+                    <button type="button" onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Share</button>
+                    {{if $canEdit}}
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/export" data-testid="export-quiz" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Export</a>
+                    {{if not .Quiz.Published}}
+                    {{/* Solo<->live toggle (#830): the action targets the opposite
+                         of the current mode; the server validates the segment. */}}
+                    <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/mode/{{if eq .Quiz.Mode "live"}}solo{{else}}live{{end}}">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">{{if eq .Quiz.Mode "live"}}Switch to solo{{else}}Switch to live{{end}}</button>
+                    </form>
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/edit" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Edit quiz</a>
+                    {{end}}
+                    <button type="button" data-testid="delete-quiz" onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
+                            class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0 text-danger hover:bg-danger/10">Delete</button>
+                    {{end}}
+                </div>
+            </details>
+        </div>
+
+        {{/* Meta strip: the identity detail that no longer fits on one line. */}}
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-border-soft text-[0.85rem] text-text-dim">
+            <span class="font-semibold uppercase tracking-[0.14em] text-[0.7rem]">Quiz #{{.Quiz.ID}}</span>
+            {{if .Quiz.CreatedByDisplayName}}
+                <span class="font-semibold uppercase tracking-[0.14em] text-[0.7rem]">Created by {{.Quiz.CreatedByDisplayName}}</span>
+            {{end}}
+            {{if .Quiz.Description}}
+                <span class="max-w-[58ch]">{{.Quiz.Description}}</span>
+            {{end}}
+            <span class="inline-flex items-center gap-2 px-2 py-1 bg-surface border border-border-soft rounded-sm font-mono text-[0.78rem]">
+                <span>/play/{{.Quiz.Slug}}-{{.Quiz.ID}}</span>
+                <button type="button"
+                        data-copy-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
+                        class="bg-transparent border-0 cursor-pointer text-cyan font-sans text-[0.72rem] font-semibold uppercase tracking-[0.12em] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus rounded-sm">
+                    Copy link
+                </button>
+            </span>
+        </div>
+
+        {{/* Lock notice shown once published (#1192). */}}
+        {{if and $canEdit .Quiz.Published}}
+        <p class="flex items-center gap-2 px-4 py-2 border-b border-border-soft text-[0.8rem] text-text-dim" data-testid="publish-lock-notice">
+            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 shrink-0 text-text-mute" aria-hidden="true"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+            <span>
+                Published quizzes are locked from edits, but can still be deleted.
+                {{if .Quiz.CanUnpublish}}Unpublish to make changes.{{else}}This quiz has been played, so it can no longer be unpublished.{{end}}
+            </span>
+        </p>
+        {{end}}
+
+
+        {{/* The shell is full-bleed, so the page body supplies its own
+             padding and section rhythm. */}}
+        <div class="flex flex-col gap-8 px-4 py-6 grow">
 
         {{/* Share modal */}}
         <div id="modal-share-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-share-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
@@ -732,8 +704,15 @@
                 </div>
             {{end}}
         </section>
+        </div>
     {{else}}
-        <div class="border border-dashed border-border rounded-xl p-12 text-center">
+        {{/* The bar carries the only way back, so the not-found branch needs
+             its own: the one above renders inside the {{if .Quiz}}. */}}
+        <div class="app-bar">
+            <span class="app-bar-crumb"><a href="/admin/quizzes" class="hover:text-text">Quizzes</a> /</span>
+            <h1 class="app-bar-title">Not found</h1>
+        </div>
+        <div class="border border-dashed border-border rounded-xl p-12 m-4 text-center">
             <h2 class="mb-2 font-display text-2xl font-bold">Quiz not found!</h2>
             <p class="mb-6 text-text-dim text-[0.95rem]">The quiz you tried to open doesn't exist or has been deleted.</p>
             <a href="/admin/quizzes" class="btn-primary">Back to quiz list</a>

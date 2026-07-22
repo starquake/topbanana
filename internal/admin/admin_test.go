@@ -79,12 +79,15 @@ func TestHandleQuizList(t *testing.T) {
 		if got, want := body, "just now"; !strings.Contains(got, want) {
 			t.Errorf("body should contain relative time %q, got: %q", want, got)
 		}
-		// Pin a Tailwind utility that's structurally tied to the navbar
-		// shell. max-w-shell is a custom theme token from tailwind-src.css
-		// (only generated when a class uses it) so its presence proves the
-		// reskinned navbar rendered.
-		if got, want := body, `class="max-w-shell`; !strings.Contains(got, want) {
-			t.Errorf("body got %q, should contain Tailwind shell class %q", got, want)
+		// The quiz list renders the app shell (#1245): a context bar instead
+		// of the document container. Keyed on .app-bar rather than
+		// max-w-shell, which the topbar and site footer also carry - so the
+		// old assertion passed whatever the page itself rendered.
+		if got, want := body, `class="app-bar"`; !strings.Contains(got, want) {
+			t.Errorf("body got %q, should contain the context bar %q", got, want)
+		}
+		if got, notWant := body, `class="max-w-shell w-full mx-auto px-5 py-10 grow"`; strings.Contains(got, notWant) {
+			t.Errorf("body got %q, should not contain the document container %q", got, notWant)
 		}
 		// And pin the dark-theme body class flipped on in base.gohtml.
 		if got, want := body, `class="bg-bg`; !strings.Contains(got, want) {

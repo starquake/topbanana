@@ -165,13 +165,14 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
-	// Pin Tailwind classes on the quiz list. max-w-shell is a custom
-	// theme token from tailwind-src.css used by the navbar shell;
-	// hover:border-accent-line is on every quiz-card article. Together
-	// they prove both the navbar and the per-card reskin rendered. See
-	// #213 (#934 removed the play-URL chip the old assertion keyed on).
-	if got, want := string(body), `class="max-w-shell`; !strings.Contains(got, want) {
-		t.Errorf("string(body) should contain Tailwind shell class %q, got %q", want, got)
+	// Pin Tailwind classes on the quiz list. .app-bar is the app shell's
+	// context bar (#1245); hover:border-accent-line is on every quiz-card
+	// article. Together they prove both the chrome and the per-card reskin
+	// rendered. See #213 (#934 removed the play-URL chip the old assertion
+	// keyed on; #1245 replaced max-w-shell, which the topbar and site footer
+	// also carry, so it passed whatever the page itself rendered).
+	if got, want := string(body), `class="app-bar"`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain the context bar %q, got %q", want, got)
 	}
 	if got, want := string(body), `hover:border-accent-line`; !strings.Contains(got, want) {
 		t.Errorf("string(body) should contain per-card Tailwind class %q, got %q", want, got)
