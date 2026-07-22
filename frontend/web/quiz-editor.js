@@ -163,6 +163,15 @@ function init() {
     });
 
     document.addEventListener('keydown', onKeydown);
+
+    // The Save-and-next button takes the same path as Ctrl+Enter. Delegated on
+    // the pane because htmx replaces the form on every selection and save.
+    editorPane.addEventListener('click', (event) => {
+        if (event.target.closest('[data-editor-save-next]')) {
+            event.preventDefault();
+            advanceAfterSave = submitPane();
+        }
+    });
 }
 
 onDomReady(init);

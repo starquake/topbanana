@@ -60,6 +60,10 @@
                 <span>{{$correct}} correct</span>
             </span>
         </div>
+        {{/* Answers live in the editor pane, so there is nothing to hide
+             behind a spoiler there (#1244). The quiz view keeps it: that
+             screen is the one a host presents from. */}}
+        {{if not $inEditor}}
         <details class="q-spoiler">
             <summary class="q-spoiler-summary"
                      aria-label="Toggle answer options for question {{$q.Position}}">
@@ -77,8 +81,9 @@
                 {{end}}
             </ul>
         </details>
+        {{end}}
     </div>
-    {{if $canEdit}}
+    {{if and $canEdit (not $inEditor)}}
     <div class="q-actions">
         <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit"
            aria-label="Edit question" title="Edit question" class="icon-btn">

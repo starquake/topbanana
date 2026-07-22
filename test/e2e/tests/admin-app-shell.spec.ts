@@ -178,3 +178,41 @@ test('the editor supports keyboard selection, dirty state, and save', async ({ p
   // The saved text reached the rail via the out-of-band row swap.
   await expect(page.locator('article.q-row .q-text', { hasText: edited })).toHaveCount(1);
 });
+
+// Editor density (#1244 slice 7). The rail reuses the quiz view's rows and the
+// pane reuses the full-page form, so both need editor-only trimming: the
+// spoiler and per-row icons belong to the quiz view, and Cancel-as-a-link
+// would throw away the whole editing session.
+test('the editor rail and pane drop their full-page furniture', async ({ page, browserName }) => {
+  const title = `E2E Editor Density ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+
+  // The quiz view keeps both: it is the screen a host presents from.
+  await expect(page.locator('.q-spoiler').first()).toBeAttached();
+  await expect(page.locator('.q-actions').first()).toBeAttached();
+
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/questions$/);
+
+  // The rail drops them - answers are in the pane, and a row is a selector.
+  await expect(page.locator('[data-testid="editor-rail"] .q-spoiler')).toHaveCount(0);
+  await expect(page.locator('[data-testid="editor-rail"] .q-actions')).toHaveCount(0);
+
+  await page.locator('article.q-row').first().click();
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+
+  // Save-and-next and Discard replace the form's Save + Cancel-link.
+  await expect(page.locator('[data-editor-save-next]')).toBeVisible();
+  await expect(page.getByTestId('editor-discard')).toBeVisible();
+  await expect(page.locator('#question-editor a', { hasText: 'Cancel' })).toHaveCount(0);
+
+  // Discard reloads the question rather than navigating away.
+  const textarea = page.locator('#question-editor textarea[name="text"]');
+  const original = await textarea.inputValue();
+  await textarea.fill('Scratch edit that should not survive');
+  await page.getByTestId('editor-discard').click();
+  await expect(page).toHaveURL(/\/questions/);
+  await expect.poll(async () => textarea.inputValue()).toBe(original);
+});
