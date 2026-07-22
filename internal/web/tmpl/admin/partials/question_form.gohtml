@@ -51,12 +51,30 @@
                 <p id="media-error" class="form-help-error" role="alert">{{$mediaErr}}</p>
             {{end}}
             {{if .Library}}
-                <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5"
+                {{/* Collapsed to a single row in the editor pane (#1244): the
+                     full grid does not fit beside the rail. The radios stay in
+                     the DOM while closed, so the form still submits the current
+                     selection; a validation error forces it open. */}}
+                <details class="media-picker" data-testid="image-picker" {{if $mediaErr}}open{{end}}>
+                    <summary class="media-row">
+                        {{if .Question.ImageMediaID}}
+                            <img src="/media/{{.Question.ImageMediaID}}/thumb" alt=""
+                                 class="h-11 w-11 shrink-0 rounded border border-border object-cover">
+                            <span class="min-w-0 grow truncate text-[0.85rem]">Image attached</span>
+                        {{else}}
+                            <span class="grid h-11 w-11 shrink-0 place-items-center rounded border border-border bg-surface-2 text-text-mute" aria-hidden="true">
+                                <svg viewBox="0 0 16 16" fill="currentColor" class="h-4 w-4"><path d="M6 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.8-1.9a.5.5 0 0 0-.6.1l-3.7 3.7-2.7-1.8a.5.5 0 0 0-.6.1L1 12V3a1 1 0 0 1 1-1z"/></svg>
+                            </span>
+                            <span class="min-w-0 grow truncate text-[0.85rem] italic text-text-mute">No image</span>
+                        {{end}}
+                        <span class="btn-ghost btn-compact shrink-0">{{if .Question.ImageMediaID}}Change{{else}}Attach{{end}}</span>
+                    </summary>
+                <div class="picker-body grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5"
                      role="radiogroup" aria-label="Attach an image"
                      data-testid="question-image-picker"
                      {{if $mediaErr}}aria-describedby="media-error"{{end}}>
                     <label class="group relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-surface text-center text-xs text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
-                        <input type="radio" name="image_media_id" value="" class="sr-only"
+                        <input type="radio" name="image_media_id" value="" id="image_media_none" class="sr-only"
                                {{if eq .Question.ImageMediaID 0}}checked{{end}}>
                         None
                     </label>
@@ -79,6 +97,12 @@
                         </label>
                     {{end}}
                 </div>
+                </details>
+                {{/* Points at the None radio inside the picker, so clearing the
+                     image needs no JavaScript and no open-then-click. */}}
+                {{if .Question.ImageMediaID}}
+                    <label for="image_media_none" class="mt-2 inline-block cursor-pointer text-[0.78rem] text-danger hover:underline" data-testid="image-remove">Remove image</label>
+                {{end}}
             {{else}}
                 <input type="hidden" name="image_media_id" value="">
                 <p class="text-text-dim text-[0.95rem]">
@@ -101,12 +125,29 @@
                 <p id="audio-error" class="form-help-error" role="alert">{{$audioErr}}</p>
             {{end}}
             {{if .AudioLibrary}}
-                <div class="flex flex-col gap-2"
+                {{/* Same collapsed treatment as the image picker above: the
+                     clip list with its <audio> players is far too tall for the
+                     editor pane when every question shows it expanded. */}}
+                <details class="media-picker" data-testid="audio-picker" {{if $audioErr}}open{{end}}>
+                    <summary class="media-row">
+                        <span class="grid h-11 w-11 shrink-0 place-items-center rounded border border-border bg-surface-2 {{if .Question.AudioMediaID}}text-text{{else}}text-text-mute{{end}}" aria-hidden="true">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="h-4 w-4"><path d="M11.5 14A8.5 8.5 0 0 0 14 8a8.5 8.5 0 0 0-2.5-6l-.7.7A7.5 7.5 0 0 1 13 8c0 2.1-.8 4-2.2 5.3zM8.7 11.2A4.5 4.5 0 0 0 10 8a4.5 4.5 0 0 0-1.3-3.2L8 5.5A3.5 3.5 0 0 1 9 8a3.5 3.5 0 0 1-1 2.5zM6.7 3.6A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.8.4L3.8 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.3l2.4-1.9a.5.5 0 0 1 .5-.1z"/></svg>
+                        </span>
+                        {{if .Question.AudioMediaID}}
+                            <span class="min-w-0 grow truncate text-[0.85rem]" data-testid="audio-current">
+                                {{range .AudioLibrary}}{{if eq $.Question.AudioMediaID .ID}}{{if .Description}}{{.Description}}{{else}}Audio {{.ID}}{{end}}{{end}}{{end}}
+                            </span>
+                        {{else}}
+                            <span class="min-w-0 grow truncate text-[0.85rem] italic text-text-mute">No audio</span>
+                        {{end}}
+                        <span class="btn-ghost btn-compact shrink-0">{{if .Question.AudioMediaID}}Change{{else}}Attach{{end}}</span>
+                    </summary>
+                <div class="picker-body flex flex-col gap-2"
                      role="radiogroup" aria-label="Attach audio"
                      data-testid="question-audio-picker"
                      {{if $audioErr}}aria-describedby="audio-error"{{end}}>
                     <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 text-sm text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
-                        <input type="radio" name="audio_media_id" value="" class="sr-only"
+                        <input type="radio" name="audio_media_id" value="" id="audio_media_none" class="sr-only"
                                {{if eq .Question.AudioMediaID 0}}checked{{end}}>
                         None
                     </label>
@@ -125,9 +166,16 @@
                         </label>
                     {{end}}
                 </div>
+                </details>
+                {{/* Points at the None radio inside the picker, so clearing the
+                     clip needs no JavaScript. */}}
+                {{if .Question.AudioMediaID}}
+                    <label for="audio_media_none" class="mt-2 inline-block cursor-pointer text-[0.78rem] text-danger hover:underline" data-testid="audio-remove">Remove audio</label>
+                {{end}}
                 {{/* Repeat toggle (#1073): when an audio clip is attached, replay
                      it 3 times on the play surfaces. Only meaningful with a clip
-                     selected; harmless (ignored) when None is chosen. */}}
+                     selected; harmless (ignored) when None is chosen. Stays
+                     outside the collapsed picker so it is visible at a glance. */}}
                 <label class="mt-3 flex cursor-pointer items-center gap-3 text-sm text-text-dim"
                        data-testid="audio-repeat-toggle">
                     <input type="checkbox" name="audio_repeat" value="on"

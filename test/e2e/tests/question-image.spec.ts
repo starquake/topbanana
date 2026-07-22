@@ -1,7 +1,17 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, publishQuiz, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
+import {
+  createQuizWithQuestions,
+  endHostedSession,
+  installPlaythroughClock,
+  openMediaPicker,
+  playerRow,
+  publishQuiz,
+  setQuizMode,
+  type QuestionSpec,
+  waitForHostRoom,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -39,6 +49,8 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  // The picker is collapsed in the form now (#1244); open it before clicking.
+  await openMediaPicker(page, 'image');
   const pickerThumb = page
     .getByTestId('question-image-picker')
     .getByTestId('library-thumb')

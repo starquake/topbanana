@@ -697,3 +697,23 @@ export async function openQuizOverflow(page: Page): Promise<void> {
   await overflow.locator('summary').click();
   await expect(overflow).toHaveJSProperty('open', true);
 }
+
+/**
+ * Opens a collapsed media picker on the question form. The image and audio
+ * pickers are `<details>` that start closed (#1244), so their radios and
+ * thumbnails are not clickable until the summary is toggled. No-ops when the
+ * picker is already open, and when the quiz has no library at all (the form
+ * renders an upload-first hint instead of a picker).
+ */
+export async function openMediaPicker(page: Page, kind: 'image' | 'audio'): Promise<void> {
+  const picker = page.getByTestId(`${kind}-picker`);
+  if ((await picker.count()) === 0) {
+    return;
+  }
+  if (await picker.evaluate((el) => (el as HTMLDetailsElement).open)) {
+    return;
+  }
+
+  await picker.locator('summary').click();
+  await expect(picker).toHaveJSProperty('open', true);
+}

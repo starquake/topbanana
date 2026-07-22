@@ -308,6 +308,19 @@
         @apply text-warning;
     }
 
+    /* Collapsed media pickers in the question form (#1244). The summary is
+     * the current-selection row; the body is the library grid or clip list. */
+    .media-picker {
+        @apply rounded-sm border border-border bg-surface;
+    }
+    .media-row {
+        @apply flex cursor-pointer list-none items-center gap-3 px-3 py-2 marker:hidden
+               hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus;
+    }
+    .picker-body {
+        @apply border-t border-border-soft p-3;
+    }
+
     /* Row in the context bar's overflow menu (#1245). */
     .menu-item {
         @apply block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text
