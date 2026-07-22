@@ -257,3 +257,31 @@ test('a round can be edited in the pane and its header updates in place', async 
     await expect.poll(async () => (await texts())[0]).toBe(before[before.length - 1]);
   }
 });
+
+// Slice 6 retires the standalone question page: the old URL is a permanent
+// redirect into the editor, and "Add question" opens the blank form in the
+// pane rather than navigating away mid-session.
+test('the old question edit URL redirects into the editor', async ({ page, browserName }) => {
+  const title = `E2E Editor Retire ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  const quizUrl = page.url();
+  const quizId = quizUrl.match(/\/admin\/quizzes\/(\d+)/)?.[1];
+  expect(quizId, 'quiz id from the URL').toBeTruthy();
+
+  await page.getByTestId('open-question-editor').click();
+  const firstRow = page.locator('article.q-row').first();
+  const questionId = await firstRow.getAttribute('data-question-id');
+
+  // Visiting the retired URL directly lands in the editor with that question
+  // already open.
+  await page.goto(`/admin/quizzes/${quizId}/questions/${questionId}/edit`);
+  await expect(page).toHaveURL(new RegExp(`/admin/quizzes/${quizId}/questions\\?q=${questionId}$`));
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+
+  // Add question fills the pane instead of navigating.
+  await page.locator('[data-editor-add-question]').first().click();
+  await expect(page).toHaveURL(/\/questions(\?|$)/);
+  await expect(page.locator('#question-editor textarea[name="text"]')).toHaveValue('');
+});

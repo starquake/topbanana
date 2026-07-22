@@ -114,7 +114,10 @@ test('an edited sound description shows in the question editor audio picker', as
   await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Theme tune');
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  // The standalone question page is retired (#1244 slice 6): editing now
+  // happens in the two-pane editor.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  await expect(page.locator('#question-editor form')).toBeVisible();
 
   await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
@@ -138,7 +141,10 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
 
   // Open the question editor for the one seeded question.
   await page.getByRole('link', { name: 'Edit question' }).first().click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  // The standalone question page is retired (#1244 slice 6): editing now
+  // happens in the two-pane editor.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  await expect(page.locator('#question-editor form')).toBeVisible();
 
   await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
@@ -153,12 +159,16 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
     .first()
     .locator('input[name="audio_media_id"]')
     .check({ force: true });
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  // Saving from the pane stays on the page now (#1244 slice 2) rather than
+  // redirecting to the quiz view; the rail row picks up the audio flag.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions/);
+  await expect(page.getByTestId('q-badge-audio').first()).toBeVisible();
 
-  // Re-open the editor; the audio's radio is now checked.
-  await page.getByRole('link', { name: 'Edit question' }).first().click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  // Reload from the deep link; the audio's radio is still checked.
+  await page.reload();
+  await expect(page.locator('#question-editor form')).toBeVisible();
+  await openMediaPicker(page, 'audio');
   const chosen = page
     .getByTestId('question-audio-picker')
     .getByTestId('audio-library-item')

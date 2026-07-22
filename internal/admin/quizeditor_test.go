@@ -246,17 +246,23 @@ func TestHandleQuestionEditPartial(t *testing.T) {
 		}
 	})
 
-	t.Run("a direct visit still returns the full page", func(t *testing.T) {
+	// Slice 6 retired the standalone page: a direct visit redirects into the
+	// editor. 303 not 301: see the handler - a cacheable redirect poisons the
+	// pane fetch that shares this URL.
+	t.Run("a direct visit redirects into the editor", func(t *testing.T) {
 		t.Parallel()
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, newRequest(t, qz.ID, questionID, false))
 
-		if got, want := rr.Code, http.StatusOK; got != want {
-			t.Fatalf("page status = %d, want %d", got, want)
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("direct visit status = %d, want %d", got, want)
 		}
-		if want := "<html"; !strings.Contains(rr.Body.String(), want) {
-			t.Errorf("direct visit should return the full page containing %q", want)
+
+		wantLocation := "/admin/quizzes/" + strconv.FormatInt(qz.ID, 10) +
+			"/questions?q=" + strconv.FormatInt(questionID, 10)
+		if got := rr.Header().Get("Location"); got != wantLocation {
+			t.Errorf("redirect Location = %q, want %q", got, wantLocation)
 		}
 	})
 }
@@ -344,6 +350,8 @@ func TestQuestionFormMediaPickersCollapse(t *testing.T) {
 	)
 	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 	req.SetPathValue("questionID", strconv.FormatInt(questionID, 10))
+	// The form only renders for the editor pane now; a plain visit redirects.
+	req.Header.Set("Hx-Request", "true")
 
 	rr := httptest.NewRecorder()
 	HandleQuestionEdit(logger, nil, env.quizzes, env.media).ServeHTTP(rr, withTestAdmin(req))
