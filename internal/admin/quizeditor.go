@@ -54,6 +54,16 @@ func HandleQuizEditor(
 			return
 		}
 
+		// Content edits lock on publish (#1192), and the editor is an editing
+		// surface: the quiz view hides its entry point for a published quiz, so
+		// a hand-typed URL would otherwise open a form whose every save 409s.
+		// Send it to the quiz view instead, where the lock notice says why.
+		if qz.Published {
+			http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+
+			return
+		}
+
 		rounds, ok := loadRounds(w, r, logger, csrfMgr, quizStore, id)
 		if !ok {
 			return
