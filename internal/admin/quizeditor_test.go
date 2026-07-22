@@ -376,3 +376,35 @@ func TestQuestionFormMediaPickersCollapse(t *testing.T) {
 		t.Errorf("image picker should start collapsed, found %q", notWant)
 	}
 }
+
+// The quiz view hides the editor's entry point once a quiz is published
+// (content edits lock, #1192). The route has to agree: otherwise a hand-typed
+// URL opens a form whose every save 409s.
+func TestHandleQuizEditorPublishedRedirects(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	env := newAdminEnv(t)
+	qz := env.seedQuiz(t, twoQuestionQuiz("Locked Quiz", "locked-quiz"))
+	if err := env.quizzes.SetQuizPublished(t.Context(), qz.ID, true); err != nil {
+		t.Fatalf("SetQuizPublished err = %v, want nil", err)
+	}
+
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet,
+		"/admin/quizzes/"+strconv.FormatInt(qz.ID, 10)+"/questions", nil,
+	)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+
+	rr := httptest.NewRecorder()
+	HandleQuizEditor(logger, nil, env.quizzes).ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("published editor status = %d, want %d", got, want)
+	}
+	if got, want := rr.Header().Get("Location"),
+		"/admin/quizzes/"+strconv.FormatInt(qz.ID, 10); got != want {
+		t.Errorf("redirect Location = %q, want %q", got, want)
+	}
+}
