@@ -1,0 +1,43 @@
+{{/* Full-bleed app shell (#1245): the editor is a working screen and needs
+     the full viewport, so it overrides the layout's centred container. */}}
+{{define "shell"}}
+<section class="w-full grow flex flex-col min-w-0">
+    {{template "content" .}}
+</section>
+{{end}}
+
+{{define "content"}}
+    <div class="app-bar">
+        <span class="app-bar-crumb">
+            <a href="/admin/quizzes" class="hover:text-text">Quizzes</a> /
+            <a href="/admin/quizzes/{{.Quiz.ID}}" class="hover:text-text">{{.Quiz.Title}}</a> /
+        </span>
+        <h1 class="app-bar-title">Questions</h1>
+        {{if .Quiz.Published}}
+            <span class="pill pill-published" data-testid="quiz-status">Published</span>
+        {{else}}
+            <span class="pill pill-draft" data-testid="quiz-status">Draft</span>
+        {{end}}
+        <span class="grow"></span>
+        <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost btn-compact">Back to quiz</a>
+    </div>
+
+    {{/* Two panes. The rail scrolls independently of the editor so a long
+         quiz does not push the form off screen. min-h-0 on both is what lets
+         the children scroll inside a flex parent rather than growing it. */}}
+    <div class="grid grow min-h-0 grid-cols-1 lg:grid-cols-[340px_1fr]">
+        <nav class="min-h-0 overflow-y-auto border-r border-border bg-surface p-3"
+             aria-label="Play sequence"
+             data-testid="editor-rail">
+            {{template "questions_list" .}}
+        </nav>
+
+        {{/* htmx swaps the selected question's form in here. The empty state
+             doubles as the after-delete state. */}}
+        <main id="question-editor"
+              class="min-h-0 overflow-y-auto p-6"
+              data-testid="question-editor">
+            <p class="text-text-dim text-[0.95rem]">Pick a question on the left to edit it.</p>
+        </main>
+    </div>
+{{end}}

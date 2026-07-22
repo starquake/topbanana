@@ -1217,6 +1217,10 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
+	// InEditor is always false on this page: the quiz view's rows stay plain
+	// links. The field exists because questions_list is shared with the
+	// two-pane editor and references it. See QuizEditorData.
+	InEditor bool
 	// Images is the quiz's image library, newest first, for the thumbnail
 	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
 	// in the template; the data loads regardless so an owner sees their
@@ -1417,6 +1421,9 @@ func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*qu
 type roundsPartialData struct {
 	Quiz   *QuizData
 	Rounds []RoundViewData
+	// Always false here: a move swap re-renders the rail in whichever page it
+	// came from, and the editor re-renders its own rows. See QuizEditorData.
+	InEditor bool
 }
 
 // renderRoundsPartial refetches the quiz tree and emits the
