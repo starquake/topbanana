@@ -8,13 +8,21 @@
      Required data: .Quiz, .Question, .Library, .AudioLibrary, .FieldErrors,
      plus the csrfToken template func. */}}
 {{define "question_form"}}
+    {{/* In the editor the form posts through htmx so the save swaps back into
+         the pane; the action/method stay put so the standalone page (and a
+         no-JS submit) still work unchanged. Without the hx-post the browser
+         submits normally, the handler never sees HX-Request, and the save
+         silently falls back to its redirect. */}}
+    {{$action := printf "/admin/quizzes/%d/questions" .Quiz.ID}}
+    {{if .Question.ID}}{{$action = printf "/admin/quizzes/%d/questions/%d" .Question.QuizID .Question.ID}}{{end}}
     <form class="form-shell"
-            {{if .Question.ID}}
-                action="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}"
-            {{else}}
-                action="/admin/quizzes/{{.Quiz.ID}}/questions"
-            {{end}}
-            method="POST">
+            action="{{$action}}"
+            method="POST"
+            {{if .InEditor}}
+            hx-post="{{$action}}"
+            hx-target="#question-editor"
+            hx-swap="innerHTML"
+            {{end}}>
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <input type="hidden" name="id" value="{{.Question.ID}}">
         {{if .Round}}

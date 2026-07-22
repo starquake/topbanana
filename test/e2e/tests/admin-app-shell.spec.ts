@@ -137,3 +137,44 @@ test('editing and saving in the pane leaves drag reorder working', async ({ page
   await rows.last().locator('[data-question-handle]').dragTo(rows.first(), { force: true });
   await expect.poll(async () => (await texts())[0]).toBe(before[before.length - 1]);
 });
+
+// Keyboard, selection, and dirty state in the editor (#1244 slice 3). These
+// only exist in a browser: the module is delegated off htmx swaps, so nothing
+// server-side can tell you whether ArrowDown actually moved the selection.
+test('the editor supports keyboard selection, dirty state, and save', async ({ page, browserName }) => {
+  const title = `E2E Editor Keys ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/questions$/);
+
+  const rows = page.locator('article.q-row');
+  const selected = page.locator('article.q-row[aria-current="true"]');
+  const saveState = page.getByTestId('editor-savestate');
+
+  await expect(saveState).toHaveText('All changes saved');
+
+  // Clicking selects, and the rail marks it.
+  await rows.first().click();
+  await expect(selected).toHaveCount(1);
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+
+  // ArrowDown moves the selection to the next question.
+  const firstText = await selected.locator('.q-text').textContent();
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => selected.locator('.q-text').textContent()).not.toBe(firstText);
+
+  // Editing marks the pane dirty; saving with Ctrl+S clears it.
+  const textarea = page.locator('#question-editor textarea[name="text"]');
+  await expect(textarea).toBeVisible();
+  const edited = `Keyboard edit ${Date.now()}`;
+  await textarea.fill(edited);
+  await expect(saveState).toHaveText('Unsaved changes');
+
+  await page.keyboard.press('Control+s');
+  await expect(saveState).toHaveText('All changes saved');
+  // The saved text reached the rail via the out-of-band row swap.
+  await expect(page.locator('article.q-row .q-text', { hasText: edited })).toHaveCount(1);
+});
