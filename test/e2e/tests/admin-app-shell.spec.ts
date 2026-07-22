@@ -99,3 +99,41 @@ test('the quiz view overflow menu holds the owner-only actions', async ({ page, 
   await expect(page.getByRole('link', { name: 'Edit quiz' })).toBeVisible();
   await expect(page.getByTestId('delete-quiz')).toBeVisible();
 });
+
+// The editor's save is an out-of-band row swap (#1244 slice 2): the form comes
+// back for the pane and the rail row follows, deliberately WITHOUT re-rendering
+// #questions-list. quiz-reorder.js destroys and rebuilds its SortableJS
+// instances on every list swap, so this sequence - select, edit, save, then
+// drag - is the only thing that catches a stale binding left behind.
+test('editing and saving in the pane leaves drag reorder working', async ({ page, browserName }) => {
+  test.skip(browserName === 'chromium', 'native DnD is not scriptable in Chromium under Playwright; covered on Firefox');
+
+  const title = `E2E Editor Save ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions$/);
+
+  const rows = page.locator('article.q-row');
+  const texts = async () => rows.locator('.q-text').allTextContents();
+  const before = await texts();
+  expect(before.length).toBeGreaterThan(1);
+
+  // Select the first question; the pane fills with its form.
+  await rows.first().click();
+  const questionText = page.locator('#question-editor textarea[name="text"]');
+  await expect(questionText).toBeVisible();
+
+  const edited = `Edited in the pane ${Date.now()}`;
+  await questionText.fill(edited);
+  await page.locator('#question-editor button[type="submit"]').first().click();
+
+  // The rail row picks up the new text via the out-of-band swap, with no reload.
+  await expect.poll(async () => (await texts())[0]).toContain(edited);
+
+  // Now drag: if the OOB swap left Sortable bound to a detached row, this
+  // silently does nothing.
+  await rows.last().locator('[data-question-handle]').dragTo(rows.first(), { force: true });
+  await expect.poll(async () => (await texts())[0]).toBe(before[before.length - 1]);
+});
