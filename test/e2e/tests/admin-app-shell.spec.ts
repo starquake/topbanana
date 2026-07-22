@@ -216,3 +216,44 @@ test('the editor rail and pane drop their full-page furniture', async ({ page, b
   await expect(page).toHaveURL(/\/questions/);
   await expect.poll(async () => textarea.inputValue()).toBe(original);
 });
+
+// Rounds share the pane with questions (#1244 slice 5). Saving a round swaps
+// its header back out of band - only the header, not the whole round section,
+// which would replace the question list and rebuild its Sortable instance.
+test('a round can be edited in the pane and its header updates in place', async ({ page, browserName }) => {
+  const title = `E2E Editor Rounds ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/questions$/);
+
+  const roundHead = page.locator('[data-editor-round-row]').first();
+  await expect(roundHead).toBeVisible();
+  const originalTitle = (await roundHead.locator('h3').textContent())?.trim();
+
+  // Selecting the round header opens the round form, not a question form.
+  await roundHead.click();
+  const titleInput = page.locator('#question-editor input[name="title"]');
+  await expect(titleInput).toBeVisible();
+
+  const renamed = `Renamed round ${Date.now()}`;
+  await titleInput.fill(renamed);
+  await page.locator('#question-editor button[type="submit"]').first().click();
+
+  // The rail header picks up the new name without a reload.
+  await expect.poll(async () => roundHead.locator('h3').textContent()).toContain(renamed);
+  expect(renamed).not.toBe(originalTitle);
+
+  // The question rows are still there - the swap replaced only the header.
+  await expect(page.locator('article.q-row').first()).toBeVisible();
+
+  // And reordering still works, so the swap left Sortable intact.
+  const texts = async () => page.locator('article.q-row .q-text').allTextContents();
+  const before = await texts();
+  if (browserName !== 'chromium' && before.length > 1) {
+    await page.locator('article.q-row').last().locator('[data-question-handle]')
+      .dragTo(page.locator('article.q-row').first(), { force: true });
+    await expect.poll(async () => (await texts())[0]).toBe(before[before.length - 1]);
+  }
+});

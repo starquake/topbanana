@@ -26,6 +26,9 @@ type roundFormData struct {
 	Round       *RoundData
 	FieldErrors map[string]string
 	FormError   string
+	// InEditor makes the form post through htmx into the editor pane instead
+	// of navigating, and swaps Cancel for a Discard that stays put (#1244).
+	InEditor bool
 }
 
 // HandleRoundCreate renders the new-round form. Owner-gated so a
@@ -77,11 +80,22 @@ func HandleRoundEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			return
 		}
 
-		renderer.Render(w, r, http.StatusOK, roundFormData{
+		data := roundFormData{
 			Title: "Admin Dashboard - Round Edit",
 			Quiz:  quizDataFromQuiz(qz),
 			Round: roundDataFromRound(g),
-		})
+		}
+
+		// The editor pane asks for the form alone; a direct visit still gets
+		// the full page, which is also the no-JS path.
+		if htmx.IsRequest(r) {
+			data.InEditor = true
+			renderer.RenderPartial(w, r, "round_form", data)
+
+			return
+		}
+
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -119,6 +133,30 @@ func HandleRoundSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			}
 			logger.ErrorContext(r.Context(), "error saving round", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		// In the editor the save stays on the page: the form re-renders in the
+		// pane and the round's header follows out of band. Only the header, not
+		// the whole round section - that would replace the question list and
+		// rebuild its SortableJS instance mid-session.
+		if htmx.IsRequest(r) {
+			formRenderer.RenderPartials(w, r,
+				render.Fragment{Name: "round_form", Data: roundFormData{
+					Title:    "Admin Dashboard - Round Edit",
+					Quiz:     quizDataFromQuiz(gctx.Quiz),
+					Round:    roundDataFromRound(gctx.Round),
+					InEditor: true,
+				}},
+				render.Fragment{Name: "round_head", Data: RoundHeadData{
+					Round:    roundDataFromRound(gctx.Round),
+					QuizID:   gctx.Quiz.ID,
+					CanEdit:  true,
+					InEditor: true,
+					OOB:      true,
+				}},
+			)
 
 			return
 		}

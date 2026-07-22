@@ -49,8 +49,12 @@
               hx-get="/admin/quizzes/{{.Quiz.ID}}/questions/{{.SelectedID}}/edit"
               hx-trigger="load"
               hx-swap="innerHTML"
+              {{else if .SelectedRoundID}}
+              hx-get="/admin/quizzes/{{.Quiz.ID}}/rounds/{{.SelectedRoundID}}/edit"
+              hx-trigger="load"
+              hx-swap="innerHTML"
               {{end}}>
-            <p class="text-text-dim text-[0.95rem]">Pick a question on the left to edit it.</p>
+            <p class="text-text-dim text-[0.95rem]">Pick a question or round on the left to edit it.</p>
         </main>
     </div>
 
