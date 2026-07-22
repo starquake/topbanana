@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
+import {
+  createQuizWithQuestions,
+  QUIZ_QUESTIONS,
+  registerAdmin,
+} from './helpers';
 
 // #246 — admin spoiler toggle. Options sit inside a <details> closed by
 // default so the admin can present the quiz on screen without exposing
