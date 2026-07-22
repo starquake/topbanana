@@ -262,10 +262,11 @@
     }
     /* Admin app chrome (#1245). The context bar carries a page's identity and
      * its actions on one line, replacing the per-page breadcrumb + display
-     * heading. It sits under the global top bar, so it is sticky at the page
-     * scroll origin rather than the viewport's. */
+     * heading. It sticks below the global top bar, which is itself sticky at
+     * top-0 with a higher z-index - hence the offset matching that bar's
+     * min-h-[3.5rem], or this one would slide underneath it. */
     .app-bar {
-        @apply sticky top-0 z-10 flex flex-wrap items-center gap-x-4 gap-y-2
+        @apply sticky top-[3.5rem] z-10 flex flex-wrap items-center gap-x-4 gap-y-2
                px-4 py-2.5 bg-surface border-b border-border;
     }
     .app-bar-title {
@@ -281,17 +282,14 @@
     .btn-compact {
         @apply min-h-[36px] px-3 text-[0.7rem];
     }
-    /* Section heading inside an app-shell page: a small uppercase label with
-     * its count and actions on the same line, replacing an <h2>. */
-    .section-label {
-        @apply flex items-center gap-3 m-0
-               text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-text-mute;
+    /* Row in the context bar's overflow menu (#1245). */
+    .menu-item {
+        @apply block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text
+               bg-transparent border-0 cursor-pointer
+               hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus;
     }
-    /* List row at the app rhythm. Lighter than .q-row, which keeps its own
-     * drag-rail geometry. */
-    .dense-row {
-        @apply flex items-center gap-2 px-2 py-1.5 rounded-sm
-               transition-colors hover:bg-surface-2;
+    .menu-item-danger {
+        @apply text-danger hover:bg-danger/10;
     }
     /* Solo / Live / All filter tabs on the manage-quizzes list (#851). A row of
      * pill links; the active one is recoloured to accent so the current filter

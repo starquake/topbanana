@@ -85,20 +85,20 @@
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true"><path d="M3.2 5.7a.5.5 0 0 1 .7 0L8 9.8l4.1-4.1a.5.5 0 0 1 .7.7l-4.4 4.5a.5.5 0 0 1-.7 0L3.2 6.4a.5.5 0 0 1 0-.7z"/></svg>
                 </summary>
                 <div class="absolute right-0 mt-1 z-20 min-w-[190px] p-1 bg-surface-2 border border-border rounded-sm shadow-2xl flex flex-col">
-                    <button type="button" onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Share</button>
+                    <button type="button" onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')" class="menu-item">Share</button>
                     {{if $canEdit}}
-                    <a href="/admin/quizzes/{{.Quiz.ID}}/export" data-testid="export-quiz" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Export</a>
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/export" data-testid="export-quiz" class="menu-item">Export</a>
                     {{if not .Quiz.Published}}
                     {{/* Solo<->live toggle (#830): the action targets the opposite
                          of the current mode; the server validates the segment. */}}
                     <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/mode/{{if eq .Quiz.Mode "live"}}solo{{else}}live{{end}}">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <button type="submit" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">{{if eq .Quiz.Mode "live"}}Switch to solo{{else}}Switch to live{{end}}</button>
+                        <button type="submit" class="menu-item">{{if eq .Quiz.Mode "live"}}Switch to solo{{else}}Switch to live{{end}}</button>
                     </form>
-                    <a href="/admin/quizzes/{{.Quiz.ID}}/edit" class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0">Edit quiz</a>
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/edit" class="menu-item">Edit quiz</a>
                     {{end}}
                     <button type="button" data-testid="delete-quiz" onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
-                            class="block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text hover:bg-surface-3 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer bg-transparent border-0 text-danger hover:bg-danger/10">Delete</button>
+                            class="menu-item menu-item-danger">Delete</button>
                     {{end}}
                 </div>
             </details>
