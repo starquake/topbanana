@@ -48,7 +48,10 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  // The standalone question page is retired (#1244 slice 6): editing now
+  // happens in the two-pane editor.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  await expect(page.locator('#question-editor form')).toBeVisible();
   // The picker is collapsed in the form now (#1244); open it before clicking.
   await openMediaPicker(page, 'image');
   const pickerThumb = page
@@ -57,7 +60,7 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
     .first();
   await expect(pickerThumb).toBeVisible();
   await pickerThumb.click();
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.q-text', { hasText: SINGLE_QUESTION[0].text })).toBeVisible({ timeout: 15_000 });
 }
 

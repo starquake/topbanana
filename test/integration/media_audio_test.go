@@ -254,7 +254,7 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 	t.Run("question editor shows the audio picker and attaches the audio", func(t *testing.T) {
 		t.Parallel()
 		editURL := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/edit", baseURL, quizID, questionID)
-		page := getPageBody(ctx, t, owner, editURL)
+		page := getPartialBody(ctx, t, owner, editURL)
 		for _, want := range []string{`data-testid="question-audio-picker"`, `name="audio_media_id"`} {
 			if !strings.Contains(page, want) {
 				t.Errorf("question editor missing %q", want)
@@ -344,7 +344,7 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 		}
 
 		editURL := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/edit", baseURL, quizID, questionID)
-		picker := getPageBody(ctx, t, owner, editURL)
+		picker := getPartialBody(ctx, t, owner, editURL)
 		if !strings.Contains(picker, "Round one intro") {
 			t.Errorf("question picker missing the edited description %q", "Round one intro")
 		}
@@ -451,14 +451,29 @@ func addQuestionToQuiz(ctx context.Context, t *testing.T, stores *store.Stores, 
 }
 
 // getPageBody fetches a page and returns its body, asserting a 200. Used to
-// probe the question editor's rendered HTML for the audio picker.
-func getPageBody(ctx context.Context, t *testing.T, client *http.Client, target string) string {
+
+// getPartialBody fetches a URL the way the two-pane editor does, with the
+// HX-Request header, and returns the fragment. The question edit route serves
+// the bare form to htmx and redirects a plain visit into the editor (#1244).
+func getPartialBody(ctx context.Context, t *testing.T, client *http.Client, target string) string {
 	t.Helper()
-	resp := httpGet(ctx, t, client, target)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("new request err = %v, want nil", err)
+	}
+	req.Header.Set("Hx-Request", "true")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s err = %v, want nil", target, err)
+	}
 	defer closeBody(t, resp.Body)
+
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("GET %s status = %d, want %d", target, got, want)
 	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body err = %v, want nil", err)
@@ -568,9 +583,14 @@ func saveQuestionWithAudio(
 ) {
 	t.Helper()
 	saveURL := baseURL + fmt.Sprintf("/admin/quizzes/%d/questions/%d", quizID, questionID)
-	token := fetchCSRFToken(ctx, t, client, saveURL+"/edit")
+	// The edit route only serves its form to htmx now: a plain visit redirects
+	// into the two-pane editor (#1244), so the token comes from the fragment.
+	token := csrfTokenPattern.FindStringSubmatch(getPartialBody(ctx, t, client, saveURL+"/edit"))
+	if token == nil {
+		t.Fatalf("no csrf_token in the question form fragment for %s", saveURL)
+	}
 	form := url.Values{
-		"csrf_token":        {token},
+		"csrf_token":        {token[1]},
 		"id":                {strconv.FormatInt(questionID, 10)},
 		"text":              {"Name that tune"},
 		"audio_media_id":    {strconv.FormatInt(audioID, 10)},

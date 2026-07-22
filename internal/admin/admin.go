@@ -1811,14 +1811,27 @@ func HandleQuestionCreate(
 			return
 		}
 
-		renderer.Render(w, r, http.StatusOK, questionFormData{
+		createData := questionFormData{
 			Title:        "Admin Dashboard - Question Create",
 			Quiz:         quizDataFromQuiz(qz),
 			Question:     &QuestionData{},
 			Round:        roundDataFromRound(rnd),
 			Library:      library,
 			AudioLibrary: audioLibrary,
-		})
+		}
+
+		// "Add question" in the editor rail opens the blank form in the pane;
+		// the quiz view's link still navigates to the standalone page, which
+		// is why that page survives slice 6 even though the edit route no
+		// longer uses it.
+		if htmx.IsRequest(r) {
+			createData.InEditor = true
+			renderer.RenderPartial(w, r, "question_form", createData)
+
+			return
+		}
+
+		renderer.Render(w, r, http.StatusOK, createData)
 	})
 }
 
@@ -1925,17 +1938,49 @@ func HandleQuestionEdit(
 			AudioLibrary: audioLibrary,
 		}
 
-		// The two-pane editor (#1244) asks for the form alone; a direct visit
-		// still gets the full page, which is also the no-JS path.
-		if htmx.IsRequest(r) {
-			data.InEditor = true
-			renderer.RenderPartial(w, r, "question_form", data)
-
-			return
-		}
-
-		renderer.Render(w, r, http.StatusOK, data)
+		respondQuestionEdit(w, r, renderer, data, quizID, questionID)
 	})
+}
+
+// respondQuestionEdit writes the question-edit response: the bare form for the
+// editor pane, or a redirect into the editor for a direct visit (#1244 slice
+// 6). One way to edit a question instead of two; the deliberate cost is that
+// editing now needs JavaScript.
+//
+// The redirect is 303, NOT 301: this URL still serves the form itself to htmx,
+// and a permanent redirect is cacheable. The browser would cache it and then
+// serve it for the editor pane's own fetch, swapping a whole HTML document
+// into the pane instead of the form.
+func respondQuestionEdit(
+	w http.ResponseWriter,
+	r *http.Request,
+	renderer *render.Renderer,
+	data questionFormData,
+	quizID, questionID int64,
+) {
+	if htmx.IsRequest(r) {
+		data.InEditor = true
+		renderer.RenderPartial(w, r, "question_form", data)
+
+		return
+	}
+
+	// questionID 0 is the defensive blank-question branch, which has no editor
+	// URL to point at - it keeps rendering the page.
+	if questionID == 0 {
+		renderer.Render(w, r, http.StatusOK, data)
+
+		return
+	}
+
+	// strconv.FormatInt rather than fmt.Sprintf: both ids came off the request
+	// path, and %d taints the redirect for gosec G710.
+	http.Redirect(
+		w, r,
+		"/admin/quizzes/"+strconv.FormatInt(quizID, 10)+
+			"/questions?q="+strconv.FormatInt(questionID, 10),
+		http.StatusSeeOther,
+	)
 }
 
 // HandleQuizSetMode flips a quiz between solo and live without going through

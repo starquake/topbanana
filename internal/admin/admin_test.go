@@ -1393,6 +1393,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", qz.ID, question.ID),
 			nil,
 		)
+		req.Header.Set("Hx-Request", "true")
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		req.SetPathValue("questionID", strconv.FormatInt(question.ID, 10))
 		rr := httptest.NewRecorder()
@@ -1511,6 +1512,7 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 		fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", qz.ID, original.ID),
 		nil,
 	)
+	editReq.Header.Set("Hx-Request", "true")
 	editReq.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 	editReq.SetPathValue("questionID", strconv.FormatInt(original.ID, 10))
 	editRec := httptest.NewRecorder()
@@ -1641,6 +1643,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", qz.ID, question.ID),
 			nil,
 		)
+		req.Header.Set("Hx-Request", "true")
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		req.SetPathValue("questionID", strconv.FormatInt(question.ID, 10))
 		rr := httptest.NewRecorder()
@@ -1956,6 +1959,7 @@ func TestHandleQuestionEdit_Picker(t *testing.T) {
 			t.Context(), http.MethodGet,
 			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", qz.ID, question.ID), nil,
 		)
+		req.Header.Set("Hx-Request", "true")
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		req.SetPathValue("questionID", strconv.FormatInt(question.ID, 10))
 		rr := httptest.NewRecorder()
@@ -1992,6 +1996,7 @@ func TestHandleQuestionEdit_Picker(t *testing.T) {
 			t.Context(), http.MethodGet,
 			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", qz.ID, question.ID), nil,
 		)
+		req.Header.Set("Hx-Request", "true")
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		req.SetPathValue("questionID", strconv.FormatInt(question.ID, 10))
 		rr := httptest.NewRecorder()
