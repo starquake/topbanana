@@ -1,7 +1,6 @@
 import { test, expect } from './fixtures';
 import {
   createQuizWithQuestions,
-  openQuizOverflow,
   QUIZ_QUESTIONS,
   registerAdmin,
 } from './helpers';
@@ -140,7 +139,6 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await openQuizOverflow(page);
   await page.getByRole('button', { name: 'Share' }).click();
   const shareLinkText = await page.locator('.share-link').textContent();
   expect(shareLinkText).toMatch(/\/play\/[a-z0-9-]+-\d+$/);
