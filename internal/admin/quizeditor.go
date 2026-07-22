@@ -27,6 +27,10 @@ type QuizEditorData struct {
 	// SelectedID is the question the pane opens on, from ?q=. Zero means the
 	// editor opens with nothing selected.
 	SelectedID int64
+	// SelectedRoundID is the round the pane opens on, from ?r=. Rounds and
+	// questions share the pane, so at most one of these is ever set; ?q= wins
+	// if a hand-written URL carries both.
+	SelectedRoundID int64
 }
 
 // HandleQuizEditor renders the question editor for a quiz. Owner-only, via the
@@ -58,12 +62,20 @@ func HandleQuizEditor(
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
 
+		questionID := selectedQuestionID(r)
+
+		roundID := int64(0)
+		if questionID == 0 {
+			roundID = selectedID(r, "r")
+		}
+
 		renderer.Render(w, r, http.StatusOK, QuizEditorData{
-			Title:      "Admin Dashboard - Edit Questions",
-			Quiz:       quizData,
-			Rounds:     buildRoundView(rounds, quizData.Questions),
-			InEditor:   true,
-			SelectedID: selectedQuestionID(r),
+			Title:           "Admin Dashboard - Edit Questions",
+			Quiz:            quizData,
+			Rounds:          buildRoundView(rounds, quizData.Questions),
+			InEditor:        true,
+			SelectedID:      questionID,
+			SelectedRoundID: roundID,
 		})
 	})
 }
@@ -72,7 +84,13 @@ func HandleQuizEditor(
 // is not an error: the editor simply opens with nothing selected, which is
 // also the state after deleting the selected question.
 func selectedQuestionID(r *http.Request) int64 {
-	raw := r.URL.Query().Get("q")
+	return selectedID(r, "q")
+}
+
+// selectedID reads a positive int64 from the named query parameter. A missing
+// or unusable value yields 0, which the editor renders as "nothing selected".
+func selectedID(r *http.Request, param string) int64 {
+	raw := r.URL.Query().Get(param)
 	if raw == "" {
 		return 0
 	}

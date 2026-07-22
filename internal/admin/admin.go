@@ -367,6 +367,10 @@ func parseTemplate(path string) *template.Template {
 		"qrow": func(q *QuestionData, canEdit, inEditor bool) QuestionRowData {
 			return QuestionRowData{Question: q, CanEdit: canEdit, InEditor: inEditor}
 		},
+		// rhead does for round_head what qrow does for question_row.
+		"rhead": func(rnd *RoundData, quizID int64, canEdit, inEditor bool) RoundHeadData {
+			return RoundHeadData{Round: rnd, QuizID: quizID, CanEdit: canEdit, InEditor: inEditor}
+		},
 		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
 		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
@@ -1262,6 +1266,17 @@ type QuizViewData struct {
 // whole list.
 type QuestionRowData struct {
 	Question *QuestionData
+	CanEdit  bool
+	InEditor bool
+	OOB      bool
+}
+
+// RoundHeadData is one rendering of the round_head partial - a round's header
+// and summary without its question list, so a save can swap it out of band
+// without rebuilding the list's SortableJS instance.
+type RoundHeadData struct {
+	Round    *RoundData
+	QuizID   int64
 	CanEdit  bool
 	InEditor bool
 	OOB      bool
