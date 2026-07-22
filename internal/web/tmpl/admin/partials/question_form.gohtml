@@ -15,6 +15,20 @@
          silently falls back to its redirect. */}}
     {{$action := printf "/admin/quizzes/%d/questions" .Quiz.ID}}
     {{if .Question.ID}}{{$action = printf "/admin/quizzes/%d/questions/%d" .Question.QuizID .Question.ID}}{{end}}
+    {{/* Pane header (#1258): nothing else said which question is open - the
+         rail highlight was the only cue. Delete lives here now that the rail's
+         per-row icons are gone (#1244 slice 7). */}}
+    {{if .InEditor}}
+        <div class="editor-pane-head">
+            <h2 class="editor-pane-title">
+                {{if .Question.ID}}Question {{printf "%02d" .Question.Position}}{{else}}New question{{end}}
+            </h2>
+            {{if .Round}}<span class="editor-pane-sub">in {{.Round.Title}}</span>{{end}}
+            {{/* No Delete here yet: the confirm modals are mounted by the quiz
+                 view, and deleting from the pane also has to clear the pane and
+                 refresh the rail. That is a flow, not a button - see #1258. */}}
+        </div>
+    {{end}}
     <form class="form-shell"
             action="{{$action}}"
             method="POST"
@@ -291,11 +305,14 @@
             {{end}}
         </div>
 
-        {{if .Question.ID}}
+        {{/* No Position field in the editor: the rail shows the order and a drag
+             reorders it, so a readonly number telling you to go somewhere else
+             is worse than nothing (#1258). */}}
+        {{if and .Question.ID (not .InEditor)}}
             <div class="form-field">
                 <label class="label-eyebrow" for="position">
                     Position
-                    <span class="label-hint">Use Up/Down on the quiz view to reorder</span>
+                    <span class="label-hint">Drag the grip in the question editor to reorder</span>
                 </label>
                 <input id="position" type="text" readonly
                        value="{{printf "%02d" .Question.Position}}"

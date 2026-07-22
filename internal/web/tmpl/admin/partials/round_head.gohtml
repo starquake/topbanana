@@ -23,7 +23,7 @@
     <div class="flex items-center gap-2 min-w-0">
         <h3 class="font-display font-bold uppercase tracking-[0.08em] text-[0.95rem] truncate">{{$round.Title}}</h3>
     </div>
-    {{if $canEdit}}
+    {{if and $canEdit (not $inEditor)}}
     <div class="flex items-center gap-1">
         <a href="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/edit"
            aria-label="Edit round" title="Edit round" class="icon-btn">
@@ -39,7 +39,10 @@
     {{end}}
 </header>
 
-{{if $round.Summary}}
+{{/* The summary box is quiz-view furniture: in the rail it triples the height
+     of every round, and the summary is editable in the pane one click away
+     (#1258). */}}
+{{if and $round.Summary (not $inEditor)}}
 <div class="mb-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
     <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
     <p class="mt-1 text-text">{{$round.Summary}}</p>

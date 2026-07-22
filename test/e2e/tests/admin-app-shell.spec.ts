@@ -365,3 +365,34 @@ test('a question can be duplicated from the editor', async ({ page, browserName 
     await expect.poll(async () => (await texts())[0]).toBe(after[after.length - 1]);
   }
 });
+
+// Editor pane polish (#1258). The pane never said which question was open, and
+// it carried furniture that only made sense on a standalone page.
+test('the editor pane names the open question and drops page furniture', async ({ page, browserName }) => {
+  const title = `E2E Pane Polish ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+
+  await page.locator('article.q-row').first().click();
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+
+  // The pane says which question is open, and which round it is in.
+  const head = page.locator('#question-editor .editor-pane-head');
+  await expect(head).toBeVisible();
+  await expect(head).toContainText('Question 01');
+
+  // The readonly Position field pointed at a screen that no longer reorders.
+  await expect(page.locator('#question-editor #position')).toHaveCount(0);
+
+  // Round rows in the rail lose their icon cluster and summary box; the round
+  // is editable in the pane instead.
+  const rail = page.locator('[data-testid="editor-rail"]');
+  await expect(rail.locator('a[aria-label="Edit round"]')).toHaveCount(0);
+  await expect(rail.getByText('Round summary')).toHaveCount(0);
+
+  // Selecting the round still opens it, so nothing was lost by hiding them.
+  await page.locator('[data-editor-round-row]').first().click();
+  await expect(page.locator('#question-editor input[name="title"]')).toBeVisible();
+});
