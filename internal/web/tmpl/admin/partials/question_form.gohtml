@@ -303,11 +303,31 @@
             </div>
         {{end}}
 
-        <div class="form-actions">
-            <button type="submit" name="action" value="Save" class="btn-primary">
-                Save question
-            </button>
-            <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
-        </div>
+        {{if .InEditor}}
+            {{/* In the pane the actions stick to the bottom, so a long form
+                 never hides Save behind a scroll. Cancel is a reload of this
+                 question rather than a link away: navigating to the quiz view
+                 from inside the editor would throw away the whole session
+                 (#1244). Save-and-next is driven by quiz-editor.js. */}}
+            <div class="editor-actions">
+                <button type="submit" name="action" value="Save" class="btn-primary btn-compact">Save</button>
+                <button type="button" class="btn-ghost btn-compact" data-editor-save-next>Save and next</button>
+                <button type="button"
+                        class="btn-ghost btn-compact"
+                        data-testid="editor-discard"
+                        hx-get="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/edit"
+                        hx-target="#question-editor"
+                        hx-swap="innerHTML">Discard</button>
+                <span class="grow"></span>
+                <span class="text-[0.72rem] text-text-mute">Ctrl+S save &middot; Ctrl+Enter next</span>
+            </div>
+        {{else}}
+            <div class="form-actions">
+                <button type="submit" name="action" value="Save" class="btn-primary">
+                    Save question
+                </button>
+                <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
+            </div>
+        {{end}}
     </form>
 {{end}}
