@@ -263,11 +263,21 @@
     /* Admin app chrome (#1245). The context bar carries a page's identity and
      * its actions on one line, replacing the per-page breadcrumb + display
      * heading. It sticks below the global top bar, which is itself sticky at
-     * top-0 with a higher z-index - hence the offset matching that bar's
-     * min-h-[3.5rem], or this one would slide underneath it. */
+     * top-0 - hence the offset matching that bar's min-h-[3.5rem], or this one
+     * would slide underneath it.
+     * Layering: below the top bar (z-30) and modals (z-40), above the quiz
+     * card action clusters (relative z-10), which scroll past it. */
     .app-bar {
-        @apply sticky top-[3.5rem] z-10 flex flex-wrap items-center gap-x-4 gap-y-2
+        @apply sticky top-[3.5rem] z-20 flex flex-wrap items-center gap-x-4 gap-y-2
                px-4 py-2.5 bg-surface border-b border-border;
+    }
+    /* While a reorder drag is in flight the bar must not be hit-tested: a row
+     * dragged upward lands on the sticky bar instead of its target row, and
+     * the drop is silently a no-op (it broke quiz-reorder.spec.ts). Dropping
+     * hit-testing lets the dragover/drop reach the list underneath.
+     * quiz-reorder.js sets the attribute on drag start and clears it on end. */
+    body[data-reordering] .app-bar {
+        @apply pointer-events-none;
     }
     .app-bar-title {
         @apply m-0 font-display font-extrabold uppercase tracking-[0.06em]
