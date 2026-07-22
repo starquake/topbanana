@@ -31,7 +31,7 @@
      instead of navigating; everywhere else it stays a plain link. One
      partial, two behaviours - see QuizEditorData.InEditor. */}}
 {{$inEditor := .InEditor}}
-<div id="questions-list" class="flex flex-col gap-6" data-quiz-id="{{$quizID}}" data-csrf="{{csrfToken}}">
+<div id="questions-list" class="flex flex-col gap-6" data-quiz-id="{{$quizID}}" data-csrf="{{csrfToken}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
     {{range .Rounds}}
         {{$round := .Round}}
         <section id="round-section-{{$round.ID}}" data-testid="round-section-{{$round.ID}}" class="round-section" data-round="true" data-round-id="{{$round.ID}}">

@@ -347,4 +347,19 @@ function initSortable(root) {
 onDomReady(() => {
     const root = document.getElementById(QUESTIONS_LIST_ID);
     if (root) initSortable(root);
+
+    // This module rebinds Sortable after its own reorder fetches, but the list
+    // can also be replaced by an htmx swap from elsewhere - adding a round
+    // re-renders it out of band (#1257), because a brand new round has no row
+    // to graft onto. Without this the swapped-in list has no Sortable bound to
+    // it and dragging silently stops working.
+    document.body.addEventListener('htmx:afterSwap', (evt) => {
+        const target = evt.target;
+        if (!(target instanceof Element)) return;
+
+        const list = target.id === QUESTIONS_LIST_ID
+            ? target
+            : target.querySelector(`#${QUESTIONS_LIST_ID}`);
+        if (list) swapProcessed(list);
+    });
 });

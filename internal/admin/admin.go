@@ -1231,6 +1231,9 @@ type QuizViewData struct {
 	// links. The field exists because questions_list is shared with the
 	// two-pane editor and references it. See QuizEditorData.
 	InEditor bool
+	// OOB is always false on this page; the partial references it so a handler
+	// can render the rail as an out-of-band swap (#1257).
+	OOB bool
 	// Images is the quiz's image library, newest first, for the thumbnail
 	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
 	// in the template; the data loads regardless so an owner sees their
@@ -1457,6 +1460,9 @@ type roundsPartialData struct {
 	// Always false here: a move swap re-renders the rail in whichever page it
 	// came from, and the editor re-renders its own rows. See QuizEditorData.
 	InEditor bool
+	// OOB marks the rail as an out-of-band swap, for handlers that re-render
+	// it alongside another fragment (#1257).
+	OOB bool
 }
 
 // renderRoundsPartial refetches the quiz tree and emits the

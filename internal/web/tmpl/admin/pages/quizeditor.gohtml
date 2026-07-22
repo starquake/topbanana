@@ -34,6 +34,18 @@
              aria-label="Play sequence"
              data-testid="editor-rail">
             {{template "questions_list" .}}
+
+            {{/* The rail had no way to add a round at all (#1257): you had to
+                 leave for the quiz view and come back. Opens the blank round
+                 form in the pane, like the per-round "Add question". */}}
+            {{if .Quiz.CanEdit}}
+                <a href="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
+                   hx-get="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
+                   hx-target="#question-editor"
+                   hx-swap="innerHTML"
+                   data-testid="editor-add-round"
+                   class="btn-ghost btn-compact mt-3 w-full justify-center">+ Add round</a>
+            {{end}}
         </nav>
 
         {{/* htmx swaps the selected question's form in here. The empty state

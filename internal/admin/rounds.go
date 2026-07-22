@@ -47,11 +47,22 @@ func HandleRoundCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
-		renderer.Render(w, r, http.StatusOK, roundFormData{
+		data := roundFormData{
 			Title: "Admin Dashboard - Round Create",
 			Quiz:  quizDataFromQuiz(qz),
 			Round: &RoundData{QuizID: qz.ID},
-		})
+		}
+
+		// "Add round" in the editor rail opens the blank form in the pane
+		// (#1257); the quiz view's own control still navigates.
+		if htmx.IsRequest(r) {
+			data.InEditor = true
+			renderer.RenderPartial(w, r, "round_form", data)
+
+			return
+		}
+
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -142,6 +153,16 @@ func HandleRoundSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		// the whole round section - that would replace the question list and
 		// rebuild its SortableJS instance mid-session.
 		if htmx.IsRequest(r) {
+			// A new round has no header in the rail to graft onto, so the rail
+			// re-renders whole. That rebuilds every SortableJS instance, which
+			// is why quiz-reorder.js rebinds on htmx swaps - acceptable here
+			// because adding a round is rare, unlike saving a question.
+			if gctx.IsNew {
+				renderNewRound(w, r, logger, csrfMgr, formRenderer, quizStore, gctx)
+
+				return
+			}
+
 			formRenderer.RenderPartials(w, r,
 				render.Fragment{Name: "round_form", Data: roundFormData{
 					Title:    "Admin Dashboard - Round Edit",
@@ -166,6 +187,43 @@ func HandleRoundSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		// with %d would taint the redirect path.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(gctx.Quiz.ID, 10), http.StatusSeeOther)
 	})
+}
+
+// renderNewRound writes the editor's response after a round is created: the
+// saved round's form for the pane, plus the whole rail out of band. The
+// per-round header swap the edit path uses cannot work here - there is no
+// existing element with that id for htmx to replace (#1257).
+func renderNewRound(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	renderer *render.Renderer,
+	quizStore quiz.Store,
+	gctx *roundSaveCtx,
+) {
+	rounds, ok := loadRounds(w, r, logger, csrfMgr, quizStore, gctx.Quiz.ID)
+	if !ok {
+		return
+	}
+
+	quizData := quizDataFromQuiz(gctx.Quiz)
+	attachCanEdit(r, quizData)
+
+	renderer.RenderPartials(w, r,
+		render.Fragment{Name: "round_form", Data: roundFormData{
+			Title:    "Admin Dashboard - Round Edit",
+			Quiz:     quizData,
+			Round:    roundDataFromRound(gctx.Round),
+			InEditor: true,
+		}},
+		render.Fragment{Name: "questions_list", Data: roundsPartialData{
+			Quiz:     quizData,
+			Rounds:   buildRoundView(rounds, quizData.Questions),
+			InEditor: true,
+			OOB:      true,
+		}},
+	)
 }
 
 // HandleRoundMove handles the per-round up/down reorder buttons on the
