@@ -312,6 +312,18 @@
             <div class="editor-actions">
                 <button type="submit" name="action" value="Save" class="btn-primary btn-compact">Save</button>
                 <button type="button" class="btn-ghost btn-compact" data-editor-save-next>Save and next</button>
+                {{/* Duplicate lands a copy right after this question and opens
+                     it, so a near-identical question is one click plus an edit
+                     (#1246). Only for a saved question - there is nothing to
+                     copy until it exists. */}}
+                {{if .Question.ID}}
+                <button type="button" class="btn-ghost btn-compact"
+                        data-testid="editor-duplicate"
+                        hx-post="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/duplicate"
+                        hx-target="#question-editor"
+                        hx-swap="innerHTML"
+                        hx-vals='{"csrf_token": "{{csrfToken}}"}'>Duplicate</button>
+                {{end}}
                 <button type="button"
                         class="btn-ghost btn-compact"
                         data-testid="editor-discard"
