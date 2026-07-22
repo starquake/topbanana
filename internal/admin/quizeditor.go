@@ -114,6 +114,7 @@ func renderSavedQuestion(
 			Question:     questionData,
 			Library:      library,
 			AudioLibrary: audioLibrary,
+			InEditor:     true,
 		}},
 		render.Fragment{Name: "question_row", Data: QuestionRowData{
 			Question: questionData,

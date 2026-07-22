@@ -1744,6 +1744,12 @@ type questionFormData struct {
 	Quiz     *QuizData
 	Question *QuestionData
 	Round    *RoundData
+	// InEditor makes the form post through htmx into the editor pane instead
+	// of navigating (#1244). Without it the form is plain HTML: the browser
+	// submits normally, the handler never sees HX-Request, and the save falls
+	// back to its redirect - which looks like it works, because the quiz view
+	// it lands on also renders the rail.
+	InEditor bool
 	// Library is the question's own quiz image library, newest first, for
 	// the image-picker grid (#937). Empty when the quiz has no images yet,
 	// which the template renders as an upload-first hint instead of a
@@ -1907,6 +1913,7 @@ func HandleQuestionEdit(
 		// The two-pane editor (#1244) asks for the form alone; a direct visit
 		// still gets the full page, which is also the no-JS path.
 		if htmx.IsRequest(r) {
+			data.InEditor = true
 			renderer.RenderPartial(w, r, "question_form", data)
 
 			return

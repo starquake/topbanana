@@ -292,6 +292,22 @@
     .btn-compact {
         @apply min-h-[36px] px-3 text-[0.7rem];
     }
+    /* Editor selection + dirty state (#1244). The rail row the pane is showing
+     * carries aria-current, which is both the accessible "you are here" and
+     * what this keys on; data-unsaved marks a row with pending edits. */
+    .q-row[aria-current="true"] {
+        @apply border-cyan bg-cyan-soft;
+    }
+    .q-row[data-unsaved]::after {
+        @apply content-[''] absolute right-2 top-2 w-1.5 h-1.5 rounded-full bg-warning;
+    }
+    .savestate {
+        @apply text-[0.8rem] text-text-mute whitespace-nowrap;
+    }
+    .savestate[data-state="dirty"] {
+        @apply text-warning;
+    }
+
     /* Row in the context bar's overflow menu (#1245). */
     .menu-item {
         @apply block w-full text-left px-3 py-2 rounded-sm text-[0.82rem] text-text

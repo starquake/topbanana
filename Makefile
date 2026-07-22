@@ -385,6 +385,7 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js \
                    $(JS_WEB_SRC)/quiz-image-upload.js \
                    $(JS_WEB_SRC)/quiz-audio-upload.js \
+                   $(JS_WEB_SRC)/quiz-editor.js \
                    $(JS_WEB_SRC)/home.js
 
 # Third-party libraries (Alpine, anime.js, SortableJS, Howler) are sourced from

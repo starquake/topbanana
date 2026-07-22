@@ -89,6 +89,47 @@ func TestHandleQuizEditor(t *testing.T) {
 		}
 	})
 
+	// A ?q= deep link loads that question into the pane on page load, so a
+	// shared or bookmarked URL opens on the question it names rather than the
+	// empty state (#1244 slice 3).
+	t.Run("a deep link loads the named question into the pane", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Deep Pane Quiz", "deep-pane-quiz"))
+		questionID := qz.Questions[0].ID
+
+		rr := httptest.NewRecorder()
+		HandleQuizEditor(logger, nil, env.quizzes).ServeHTTP(
+			rr, withTestAdmin(newRequest(t, qz.ID, "?q="+strconv.FormatInt(questionID, 10))),
+		)
+
+		body := rr.Body.String()
+		wantGet := "/questions/" + strconv.FormatInt(questionID, 10) + "/edit"
+		if !strings.Contains(body, wantGet) {
+			t.Errorf("pane should fetch %q on load", wantGet)
+		}
+		if want := `hx-trigger="load"`; !strings.Contains(body, want) {
+			t.Errorf("pane should carry %q so the deep link fires without a click", want)
+		}
+	})
+
+	// Without ?q= the pane must not fire a load request - there is nothing to
+	// open, and a stray fetch would 404 on question 0.
+	t.Run("no deep link leaves the pane inert", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Inert Pane Quiz", "inert-pane-quiz"))
+
+		rr := httptest.NewRecorder()
+		HandleQuizEditor(logger, nil, env.quizzes).ServeHTTP(rr, withTestAdmin(newRequest(t, qz.ID, "")))
+
+		if notWant := `hx-trigger="load"`; strings.Contains(rr.Body.String(), notWant) {
+			t.Errorf("pane should not carry %q without a ?q= deep link", notWant)
+		}
+	})
+
 	// The editor is owner-only, via the same guard as the quiz view.
 	t.Run("404s a signed-in non-owner", func(t *testing.T) {
 		t.Parallel()
