@@ -770,6 +770,13 @@ func addAdminQuestionRoutes(
 	requireGameHost func(http.Handler) http.Handler,
 	csrfMgr *csrf.Manager,
 ) {
+	// The two-pane question editor (#1244). Note the sibling path
+	// /admin/quizzes/{quizID}/edit is already the quiz metadata form, so the
+	// editor lives under /questions instead.
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/questions",
+		requireGameHost(admin.HandleQuizEditor(logger, csrfMgr, stores.Quizzes)),
+	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
 		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes, stores.Media)),
