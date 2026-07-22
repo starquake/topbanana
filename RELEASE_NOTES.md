@@ -2,6 +2,22 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.7.3 — 2026-07-22
+
+This release adds an optional admin-approval step for new accounts and redesigns the quiz review page shown before publishing.
+
+### Hosts
+- The review page shown before publishing lists each round as a card with its questions, and marks the correct answer on each one.
+
+### Behind the scenes
+- Setting `LOGIN_APPROVAL_REQUIRED` holds a newly registered account at a pending page until an admin approves it from the player's page.
+- Existing accounts and admin accounts are always approved.
+- The gate covers password sign-in, Google sign-in, and password reset; an invited account is approved by the invite itself.
+- An account held for approval is emailed when it starts waiting and again once approved.
+- Admins with an email address on file are emailed when an account is waiting.
+- The README covers running Top Banana from the published container image, and the build-from-source and testing instructions moved to a separate development guide.
+- Deploys no longer fail when two environments on the shared host deploy at the same time.
+
 ## v2026.7.2 — 2026-07-06
 
 This release adds a draft and published status for quizzes, Dutch language support, and playing private and unlisted quizzes from a direct link.
