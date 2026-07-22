@@ -680,3 +680,20 @@ export async function flashProbeSeen(page: Page, key: string): Promise<boolean> 
     key,
   );
 }
+
+/**
+ * Opens the quiz view's overflow menu. Its secondary actions - Share, Export,
+ * Edit quiz, the mode switch, Delete - live in a collapsed <details> (#1245),
+ * so they are not visible until it is opened. No-ops when already open.
+ */
+export async function openQuizOverflow(page: Page): Promise<void> {
+  const overflow = page.getByTestId('quiz-overflow');
+  await expect(overflow).toBeAttached();
+
+  if (await overflow.evaluate((el) => (el as HTMLDetailsElement).open)) {
+    return;
+  }
+
+  await overflow.locator('summary').click();
+  await expect(overflow).toHaveJSProperty('open', true);
+}
