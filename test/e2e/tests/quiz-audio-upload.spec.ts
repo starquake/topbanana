@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import {
+  createQuizWithQuestions,
+  openMediaPicker,
+  type QuestionSpec,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -112,6 +116,7 @@ test('an edited sound description shows in the question editor audio picker', as
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
 
+  await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByTestId('audio-library-item').first()).toContainText('Theme tune');
@@ -135,6 +140,7 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
 
+  await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByTestId('audio-duration').first()).toHaveText('0:02');

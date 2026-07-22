@@ -321,3 +321,50 @@ func TestHandleQuestionSaveOutOfBand(t *testing.T) {
 		t.Errorf("save response should not re-render the whole list %q", notWant)
 	}
 }
+
+// The media pickers collapse into a single row in the form (#1244 slice 4):
+// the full image grid and the clip list with its <audio> players do not fit
+// beside the rail. The radios stay in the DOM while collapsed, so the form
+// still submits the current selection.
+func TestQuestionFormMediaPickersCollapse(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	env := newAdminEnv(t)
+	qz := env.seedQuiz(t, twoQuestionQuiz("Picker Quiz", "picker-quiz"))
+	env.seedMedia(t, qz.ID)
+	questionID := qz.Questions[0].ID
+
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/admin/quizzes/"+strconv.FormatInt(qz.ID, 10)+"/questions/"+strconv.FormatInt(questionID, 10)+"/edit",
+		nil,
+	)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+	req.SetPathValue("questionID", strconv.FormatInt(questionID, 10))
+
+	rr := httptest.NewRecorder()
+	HandleQuestionEdit(logger, nil, env.quizzes, env.media).ServeHTTP(rr, withTestAdmin(req))
+
+	body := rr.Body.String()
+
+	if want := `data-testid="image-picker"`; !strings.Contains(body, want) {
+		t.Errorf("form should collapse the image picker into %q", want)
+	}
+	// The radio group survives inside the collapsed picker, or the form would
+	// post an empty selection and silently detach the image on every save.
+	if want := `name="image_media_id"`; !strings.Contains(body, want) {
+		t.Errorf("collapsed picker must still carry %q", want)
+	}
+	// The None radio needs its id so the Remove label can point at it without
+	// any JavaScript.
+	if want := `id="image_media_none"`; !strings.Contains(body, want) {
+		t.Errorf("form should give the None radio %q for the Remove label", want)
+	}
+	// Not open by default: that is the whole point of the collapse.
+	if notWant := `data-testid="image-picker" open`; strings.Contains(body, notWant) {
+		t.Errorf("image picker should start collapsed, found %q", notWant)
+	}
+}

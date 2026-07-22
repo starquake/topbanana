@@ -1,7 +1,13 @@
 import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, installPlaythroughClock, publishQuiz, type QuestionSpec } from './helpers';
+import {
+  createQuizWithQuestions,
+  installPlaythroughClock,
+  openMediaPicker,
+  publishQuiz,
+  type QuestionSpec,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // An iPhone SE small viewport: 375 logical px wide, and a height that models the
@@ -46,6 +52,7 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+  await openMediaPicker(page, 'image');
   const pickerThumb = page
     .getByTestId('question-image-picker')
     .getByTestId('library-thumb')
