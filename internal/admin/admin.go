@@ -361,6 +361,12 @@ func parseTemplate(path string) *template.Template {
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 		"add":               func(a, b int) int { return a + b },
+		// qrow builds a QuestionRowData inside questions_list's range; Go
+		// templates pass a single value, and the row needs the page-level
+		// CanEdit / InEditor alongside the question.
+		"qrow": func(q *QuestionData, canEdit, inEditor bool) QuestionRowData {
+			return QuestionRowData{Question: q, CanEdit: canEdit, InEditor: inEditor}
+		},
 		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
 		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
@@ -1249,6 +1255,18 @@ type QuizViewData struct {
 	CancelledCount int
 }
 
+// QuestionRowData is one rendering of the question_row partial. CanEdit and
+// InEditor are page-level, so they are folded in per row rather than reached
+// for inside the template; OOB marks the row as an out-of-band swap, which is
+// how a save refreshes the rail without re-rendering (and re-binding) the
+// whole list.
+type QuestionRowData struct {
+	Question *QuestionData
+	CanEdit  bool
+	InEditor bool
+	OOB      bool
+}
+
 // RoundViewData is one round section on the quiz view: the round itself
 // and its questions in quiz-wide position order.
 type RoundViewData struct {
@@ -1878,13 +1896,23 @@ func HandleQuestionEdit(
 			return
 		}
 
-		renderer.Render(w, r, http.StatusOK, questionFormData{
+		data := questionFormData{
 			Title:        "Admin Dashboard - Question Edit",
 			Quiz:         quizDataFromQuiz(qz),
 			Question:     questionDataFromQuestion(qs),
 			Library:      library,
 			AudioLibrary: audioLibrary,
-		})
+		}
+
+		// The two-pane editor (#1244) asks for the form alone; a direct visit
+		// still gets the full page, which is also the no-JS path.
+		if htmx.IsRequest(r) {
+			renderer.RenderPartial(w, r, "question_form", data)
+
+			return
+		}
+
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -2155,6 +2183,16 @@ func HandleQuestionSave(
 		// just passes the question through; storeQuestion picks the
 		// right store method based on qs.ID.
 		if !storeQuestion(w, r, logger, csrfMgr, quizStore, qctx.Question) {
+			return
+		}
+
+		// In the editor the save stays on the page: the form re-renders in the
+		// pane and the rail's row follows out-of-band, so its text and flags
+		// update without re-rendering the list (which would tear down every
+		// SortableJS instance mid-session).
+		if htmx.IsRequest(r) {
+			renderSavedQuestion(w, r, logger, csrfMgr, formRenderer, mediaStore, qctx)
+
 			return
 		}
 

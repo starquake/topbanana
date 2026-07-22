@@ -226,6 +226,17 @@
                 {{if .Rounds}}
                     <span class="section-count">{{len .Rounds}} round{{if ne (len .Rounds) 1}}s{{end}}{{if .Quiz.Questions}}, {{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}{{end}}</span>
                 {{end}}
+                {{/* Entry point to the two-pane editor (#1244). Content edits
+                     lock once published, so it follows $canEditContent.
+                     Named "Open question editor", not "Edit questions": the
+                     per-row control is labelled "Edit question", and two
+                     controls a letter apart confuse readers as much as they
+                     confuse getByRole's substring matching. */}}
+                {{if $canEditContent}}
+                    <a href="/admin/quizzes/{{.Quiz.ID}}/questions"
+                       data-testid="open-question-editor"
+                       class="btn-ghost btn-compact ml-auto">Open question editor</a>
+                {{end}}
             </div>
 
             {{if .Rounds}}

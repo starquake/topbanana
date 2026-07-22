@@ -8,6 +8,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/render"
 )
 
 // QuizEditorData backs the two-pane question editor (#1244). The rail on the
@@ -82,4 +83,43 @@ func selectedQuestionID(r *http.Request) int64 {
 	}
 
 	return int64(id)
+}
+
+// renderSavedQuestion writes the editor's post-save response: the re-rendered
+// form for the pane, followed by the question's rail row marked
+// hx-swap-oob so htmx grafts it over the stale one.
+//
+// Both fragments go out in a single response because htmx applies
+// out-of-band elements from the same body it swaps into the target.
+func renderSavedQuestion(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	renderer *render.Renderer,
+	mediaStore QuestionMediaStore,
+	qctx *questionSaveCtx,
+) {
+	library, audioLibrary, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, qctx.Quiz.ID)
+	if !ok {
+		return
+	}
+
+	questionData := questionDataFromQuestion(qctx.Question)
+
+	renderer.RenderPartials(w, r,
+		render.Fragment{Name: "question_form", Data: questionFormData{
+			Title:        "Admin Dashboard - Question Edit",
+			Quiz:         quizDataFromQuiz(qctx.Quiz),
+			Question:     questionData,
+			Library:      library,
+			AudioLibrary: audioLibrary,
+		}},
+		render.Fragment{Name: "question_row", Data: QuestionRowData{
+			Question: questionData,
+			CanEdit:  true,
+			InEditor: true,
+			OOB:      true,
+		}},
+	)
 }
