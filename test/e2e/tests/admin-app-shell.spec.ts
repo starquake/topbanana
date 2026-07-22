@@ -442,3 +442,26 @@ test('the editor shows one pane at a time on a phone', async ({ page, browserNam
   await expect(pane).toBeVisible();
   await expect(back).toBeHidden();
 });
+
+// The top bar's height and the context bar's sticky offset are coupled by hand
+// (#1248): .app-bar is `sticky top-[3rem]`, matched to the nav's min-h-[3rem].
+// Change one without the other and the context bar leaves a gap or slides
+// under. This pins the relationship rather than either number.
+test('the context bar sits flush under the top bar', async ({ page, browserName }) => {
+  await seedQuiz(page, `E2E Bar Coupling ${browserName} ${Date.now()}`, QUIZ_QUESTIONS);
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto('/admin/quizzes');
+  await fontsReady(page);
+
+  await page.evaluate(() => window.scrollTo(0, 400));
+  await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+  const topbar = await boxOf(page, 'nav[aria-label="Primary"]');
+  const bar = await boxOf(page, '.app-bar');
+
+  // Flush: no gap above it, and not overlapping into the top bar. 2px of
+  // tolerance for sub-pixel rounding.
+  const gap = bar.y - (topbar.y + topbar.height);
+  expect(Math.abs(gap), `context bar should sit flush under the top bar, gap was ${gap}px`)
+    .toBeLessThanOrEqual(2);
+});
