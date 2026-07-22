@@ -396,3 +396,49 @@ test('the editor pane names the open question and drops page furniture', async (
   await page.locator('[data-editor-round-row]').first().click();
   await expect(page.locator('#question-editor input[name="title"]')).toBeVisible();
 });
+
+// One pane at a time on a narrow screen (#1259). Below the breakpoint the rail
+// stacked above the pane, so picking a question left the form far below the
+// fold with nothing to say it had moved.
+test('the editor shows one pane at a time on a phone', async ({ page, browserName }) => {
+  const title = `E2E Editor Narrow ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/questions$/);
+
+  const rail = page.getByTestId('editor-rail');
+  const pane = page.getByTestId('question-editor');
+  const back = page.getByTestId('editor-back');
+
+  // Nothing selected: the rail is the screen.
+  await expect(rail).toBeVisible();
+  await expect(pane).toBeHidden();
+  await expect(back).toBeHidden();
+
+  // Selecting swaps to the pane, with a way back.
+  await page.locator('article.q-row').first().click();
+  await expect(pane).toBeVisible();
+  await expect(rail).toBeHidden();
+  await expect(back).toBeVisible();
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+
+  // Back returns to the rail.
+  await back.click();
+  await expect(rail).toBeVisible();
+  await expect(pane).toBeHidden();
+
+  // A deep link lands straight in the pane.
+  const questionId = await page.locator('article.q-row').first().getAttribute('data-question-id');
+  await page.goto(page.url().replace(/\?.*$/, '') + `?q=${questionId}`);
+  await expect(pane).toBeVisible();
+  await expect(rail).toBeHidden();
+
+  // Desktop shows both, and the back control is meaningless there.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(rail).toBeVisible();
+  await expect(pane).toBeVisible();
+  await expect(back).toBeHidden();
+});
