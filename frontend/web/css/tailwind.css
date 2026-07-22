@@ -260,6 +260,39 @@
                transition-colors cursor-pointer
                disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent;
     }
+    /* Admin app chrome (#1245). The context bar carries a page's identity and
+     * its actions on one line, replacing the per-page breadcrumb + display
+     * heading. It sits under the global top bar, so it is sticky at the page
+     * scroll origin rather than the viewport's. */
+    .app-bar {
+        @apply sticky top-0 z-10 flex flex-wrap items-center gap-x-4 gap-y-2
+               px-4 py-2.5 bg-surface border-b border-border;
+    }
+    .app-bar-title {
+        @apply m-0 font-display font-extrabold uppercase tracking-[0.06em]
+               text-[0.95rem] leading-none whitespace-nowrap;
+    }
+    .app-bar-crumb {
+        @apply text-[0.85rem] text-text-dim whitespace-nowrap;
+    }
+    /* Compact modifier for the buttons in the bar. Defined after the .btn-*
+     * rules so it wins on the properties it overrides; the 36px floor keeps a
+     * usable touch target on the tablets hosts run the admin from. */
+    .btn-compact {
+        @apply min-h-[36px] px-3 text-[0.7rem];
+    }
+    /* Section heading inside an app-shell page: a small uppercase label with
+     * its count and actions on the same line, replacing an <h2>. */
+    .section-label {
+        @apply flex items-center gap-3 m-0
+               text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-text-mute;
+    }
+    /* List row at the app rhythm. Lighter than .q-row, which keeps its own
+     * drag-rail geometry. */
+    .dense-row {
+        @apply flex items-center gap-2 px-2 py-1.5 rounded-sm
+               transition-colors hover:bg-surface-2;
+    }
     /* Solo / Live / All filter tabs on the manage-quizzes list (#851). A row of
      * pill links; the active one is recoloured to accent so the current filter
      * reads at a glance. The inactive state mirrors .btn-ghost's dim treatment. */
