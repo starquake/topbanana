@@ -27,6 +27,8 @@ type QuizEditorData struct {
 	// SelectedID is the question the pane opens on, from ?q=. Zero means the
 	// editor opens with nothing selected.
 	SelectedID int64
+	// OOB is unused on the page render; the shared rail partial references it.
+	OOB bool
 	// SelectedRoundID is the round the pane opens on, from ?r=. Rounds and
 	// questions share the pane, so at most one of these is ever set; ?q= wins
 	// if a hand-written URL carries both.

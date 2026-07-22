@@ -285,3 +285,45 @@ test('the old question edit URL redirects into the editor', async ({ page, brows
   await expect(page).toHaveURL(/\/questions(\?|$)/);
   await expect(page.locator('#question-editor textarea[name="text"]')).toHaveValue('');
 });
+
+// Adding a round from the editor (#1257). The rail could create questions but
+// not rounds, so authoring meant bouncing out to the quiz view. A new round has
+// no header to graft onto, so the save re-renders the whole rail out of band -
+// which rebuilds every Sortable instance, hence the drag check at the end.
+test('a round can be added from the editor rail', async ({ page, browserName }) => {
+  const title = `E2E Add Round ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+  await expect(page).toHaveURL(/\/questions$/);
+
+  const roundsBefore = await page.locator('section.round-section').count();
+
+  await page.getByTestId('editor-add-round').click();
+  // The blank round form fills the pane rather than navigating away.
+  await expect(page).toHaveURL(/\/questions$/);
+  const titleInput = page.locator('#question-editor input[name="title"]');
+  await expect(titleInput).toBeVisible();
+  await expect(titleInput).toHaveValue('');
+
+  const roundName = `Bonus round ${Date.now()}`;
+  await titleInput.fill(roundName);
+  await page.locator('#question-editor button[type="submit"]').first().click();
+
+  // The rail gains the section without a reload.
+  await expect.poll(async () => page.locator('section.round-section').count())
+    .toBe(roundsBefore + 1);
+  await expect(page.locator('section.round-section h3', { hasText: roundName })).toBeVisible();
+
+  // The rail was re-rendered wholesale, so Sortable had to rebind: drag still works.
+  if (browserName !== 'chromium') {
+    const texts = async () => page.locator('article.q-row .q-text').allTextContents();
+    const before = await texts();
+    if (before.length > 1) {
+      await page.locator('article.q-row').last().locator('[data-question-handle]')
+        .dragTo(page.locator('article.q-row').first(), { force: true });
+      await expect.poll(async () => (await texts())[0]).toBe(before[before.length - 1]);
+    }
+  }
+});
