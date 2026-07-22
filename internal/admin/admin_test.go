@@ -316,6 +316,104 @@ func TestHandleQuizView(t *testing.T) {
 		}
 	})
 
+	// The app shell (#1245) replaced the breadcrumb + display heading with a
+	// context bar. These pin the chrome itself: the old assertions keyed on
+	// max-w-shell, which the topbar and site footer also carry, so they passed
+	// whatever the page rendered.
+	t.Run("renders the context bar chrome", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Chrome Quiz", "chrome-quiz"))
+
+		handler := HandleQuizView(
+			logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
+		)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		body := rr.Body.String()
+		for _, want := range []string{
+			`class="app-bar"`,
+			`class="app-bar-title"`,
+			`data-testid="quiz-status"`,
+			`data-testid="quiz-visibility"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("quiz view body should contain %q", want)
+			}
+		}
+		// The page opts into the full-bleed shell, so the document container
+		// the layout renders by default must be gone.
+		if notWant := `class="max-w-shell w-full mx-auto px-5 py-10 grow"`; strings.Contains(body, notWant) {
+			t.Errorf("quiz view body should not contain the document container %q", notWant)
+		}
+	})
+
+	// Share sits in the bar rather than the overflow, so it stays one click
+	// away. The overflow itself is owner-only chrome - though note the page is
+	// owner-only outright: requireQuizViewAccess 404s anyone who cannot edit,
+	// so a read-only viewer never reaches this template at all.
+	t.Run("renders Share in the bar and the overflow for an editor", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Overflow Quiz", "overflow-quiz"))
+
+		handler := HandleQuizView(
+			logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
+		)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		body := rr.Body.String()
+		if want := `data-testid="quiz-overflow"`; !strings.Contains(body, want) {
+			t.Errorf("editor body should contain the overflow menu %q", want)
+		}
+		// Share must be outside the <details>, so it is reachable in one click.
+		shareIdx := strings.Index(body, "modal-share-quiz-")
+		overflowIdx := strings.Index(body, `data-testid="quiz-overflow"`)
+		if shareIdx < 0 {
+			t.Fatal("editor body should contain the Share control")
+		}
+		if shareIdx > overflowIdx {
+			t.Errorf(
+				"Share (at %d) should render before the overflow menu (at %d), not inside it",
+				shareIdx,
+				overflowIdx,
+			)
+		}
+	})
+
+	// The quiz view is owner-only: a signed-in host who does not own it gets a
+	// 404 rather than a read-only render. Pins the guard the overflow gating
+	// leans on.
+	t.Run("404s a signed-in non-owner", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Private Quiz", "private-quiz"))
+
+		handler := HandleQuizView(
+			logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
+		)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestViewer(req))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Errorf("non-owner quiz view status = %d, want %d", got, want)
+		}
+	})
+
 	t.Run("renders the upload limits", func(t *testing.T) {
 		t.Parallel()
 
@@ -3102,6 +3200,14 @@ const testAdminID int64 = 1
 // tests and the untagged render tests below share one helper.
 func withTestAdmin(r *http.Request) *http.Request {
 	signedIn := &auth.Player{ID: testAdminID, DisplayName: "admin", Role: auth.RoleAdmin}
+
+	return r.WithContext(auth.WithPlayer(r.Context(), signedIn))
+}
+
+// withTestViewer signs in a host who does not own the quiz under test, so
+// CanEdit is false and the owner-only chrome must not render.
+func withTestViewer(r *http.Request) *http.Request {
+	signedIn := &auth.Player{ID: testAdminID + 1, DisplayName: "viewer", Role: auth.RoleHost}
 
 	return r.WithContext(auth.WithPlayer(r.Context(), signedIn))
 }
