@@ -327,3 +327,41 @@ test('a round can be added from the editor rail', async ({ page, browserName }) 
     }
   }
 });
+
+// Duplicating a question from the editor (#1246). The copy lands directly after
+// its source and opens in the pane. Like adding a round, the rail re-renders
+// wholesale because the new row has nothing to graft onto - hence the drag
+// check, which is what catches a Sortable that failed to rebind.
+test('a question can be duplicated from the editor', async ({ page, browserName }) => {
+  const title = `E2E Duplicate ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: title }).click();
+  await page.getByTestId('open-question-editor').click();
+
+  const rows = page.locator('article.q-row');
+  const texts = async () => rows.locator('.q-text').allTextContents();
+  const before = await texts();
+
+  await rows.first().click();
+  await expect(page.locator('#question-editor textarea[name="text"]')).toBeVisible();
+  const sourceText = before[0];
+
+  await page.getByTestId('editor-duplicate').click();
+
+  // One more row, and the copy sits immediately behind its source.
+  await expect.poll(async () => (await texts()).length).toBe(before.length + 1);
+  const after = await texts();
+  expect(after[0]).toBe(sourceText);
+  expect(after[1]).toBe(sourceText);
+
+  // The pane holds the copy, ready to edit.
+  await expect(page.locator('#question-editor textarea[name="text"]')).toHaveValue(sourceText);
+
+  // The rail was replaced wholesale, so Sortable had to rebind.
+  if (browserName !== 'chromium') {
+    await rows.last().locator('[data-question-handle]')
+      .dragTo(rows.first(), { force: true });
+    await expect.poll(async () => (await texts())[0]).toBe(after[after.length - 1]);
+  }
+});
