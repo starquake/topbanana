@@ -122,14 +122,11 @@ func TestRounds_CRUD(t *testing.T) {
 	if got, want := viewBody, "Picture Round"; !strings.Contains(got, want) {
 		t.Errorf("quiz view should contain round title %q", want)
 	}
+	if got, want := viewBody, "Halfway summary"; !strings.Contains(got, want) {
+		t.Errorf("quiz view should contain round summary %q", want)
+	}
 
 	roundID := roundByTitle(ctx, t, stores, quizID, "Picture Round").ID
-
-	// The summary shows in the editor's round form, not the quiz view (#1260).
-	formBody := readPartial(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/rounds/%d/edit", quizID, roundID))
-	if got, want := formBody, "Halfway summary"; !strings.Contains(got, want) {
-		t.Errorf("round edit form should contain the summary %q", want)
-	}
 
 	// --- Edit the round - rename + change summary ---------------------------
 	editToken := fetchCSRFToken(
@@ -153,12 +150,11 @@ func TestRounds_CRUD(t *testing.T) {
 	if got, want := viewBody, "Music Round"; !strings.Contains(got, want) {
 		t.Errorf("quiz view should contain updated round title %q", want)
 	}
+	if got, want := viewBody, "Almost done!"; !strings.Contains(got, want) {
+		t.Errorf("quiz view should contain updated round summary %q", want)
+	}
 	if got, want := viewBody, "Picture Round"; strings.Contains(got, want) {
 		t.Errorf("quiz view still contains the stale round title %q", want)
-	}
-	formBody = readPartial(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/rounds/%d/edit", quizID, roundID))
-	if got, want := formBody, "Almost done!"; !strings.Contains(got, want) {
-		t.Errorf("round edit form should contain the updated summary %q", want)
 	}
 
 	// --- Delete the round ---------------------------------------------------
@@ -401,29 +397,6 @@ func TestRounds_DeleteQuizCascadesRounds(t *testing.T) {
 	if _, err := stores.Quizzes.GetRound(ctx, roundID); !errors.Is(err, quiz.ErrRoundNotFound) {
 		t.Errorf("GetRound after quiz delete err = %v, want %v", err, quiz.ErrRoundNotFound)
 	}
-}
-
-// readPartial GETs target with the HX-Request header, so a route that serves a
-// fragment to htmx and redirects a plain visit (the editor forms, #1260)
-// returns the fragment.
-func readPartial(ctx context.Context, t *testing.T, client *http.Client, target string) string {
-	t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		t.Fatalf("new request err = %v", err)
-	}
-	req.Header.Set("Hx-Request", "true")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s err = %v", target, err)
-	}
-	defer closeBody(t, resp.Body)
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll err = %v", err)
-	}
-
-	return string(b)
 }
 
 // readBody GETs target and returns the response body as a string.

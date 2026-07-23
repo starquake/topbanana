@@ -1,30 +1,33 @@
-{{/* Full-bleed app shell (#1245): the quiz list is the quiz view's parent,
-     so it adopts the same chrome rather than leaving a seam on the walk
-     Quizzes -> a quiz -> back. */}}
-{{define "shell"}}
-<section class="w-full grow flex flex-col min-w-0">
-    {{template "content" .}}
-</section>
-{{end}}
-
 {{define "content"}}
-    <div class="app-bar">
-        <span class="app-bar-crumb"><a href="/admin" class="hover:text-text">Admin</a> /</span>
-        <h1 class="app-bar-title">Quizzes</h1>
-        <span class="grow"></span>
-        <a href="/admin/quizzes/new" class="btn-primary btn-compact gap-2">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-            <span>New quiz</span>
-        </a>
-        <a href="/admin/quizzes/import" class="btn-ghost btn-compact gap-2"
-           title="Import a quiz from a .zip archive or pasted JSON">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.5 1.5a.5.5 0 0 0-1 0V10.293L4.354 7.146a.5.5 0 1 0-.708.708l4 4a.5.5 0 0 0 .708 0l4-4a.5.5 0 0 0-.708-.708L8.5 10.293V1.5zM3 13.5a.5.5 0 0 0-1 0v1A1.5 1.5 0 0 0 3.5 16h9a1.5 1.5 0 0 0 1.5-1.5v-1a.5.5 0 0 0-1 0v1a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-1z"/></svg>
-            <span>Import quiz</span>
-        </a>
-    </div>
+    {{/* Breadcrumb */}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Quizzes</span></li>
+        </ol>
+    </nav>
 
-    <div class="flex flex-col gap-6 px-4 py-6 grow">
-
+    {{/* Page header. */}}
+    <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+        <div>
+            <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Quizzes</h1>
+            <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">{{.Title}}. Author, share, and review quizzes. Tap a card to manage questions.</p>
+        </div>
+        <div class="flex flex-wrap gap-2 self-start">
+            <a href="/admin/quizzes/new"
+               class="btn-primary gap-2">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                <span>New quiz</span>
+            </a>
+            <a href="/admin/quizzes/import"
+               class="btn-ghost gap-2"
+               title="Import a quiz from a .zip archive or pasted JSON">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.5 1.5a.5.5 0 0 0-1 0V10.293L4.354 7.146a.5.5 0 1 0-.708.708l4 4a.5.5 0 0 0 .708 0l4-4a.5.5 0 0 0-.708-.708L8.5 10.293V1.5zM3 13.5a.5.5 0 0 0-1 0v1A1.5 1.5 0 0 0 3.5 16h9a1.5 1.5 0 0 0 1.5-1.5v-1a.5.5 0 0 0-1 0v1a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-1z"/></svg>
+                <span>Import quiz</span>
+            </a>
+        </div>
+    </header>
 
     {{/* Play-mode filter (#851): Solo / Live / All tabs. The active tab is
          recoloured to accent. "All" is active when no recognised mode is set;
@@ -102,5 +105,4 @@
             </a>
         </div>
     {{end}}
-    </div>
 {{end}}

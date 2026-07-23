@@ -41,21 +41,6 @@ function captureSnapshot() {
     preDragHTML = root ? root.outerHTML : '';
 }
 
-// The sticky context bar (#1245) overlays the top of the list, so a row
-// dragged upward lands on the bar and the drop is silently a no-op. The
-// attribute drops the bar out of hit-testing for the duration of the drag.
-//
-// Set on pointerdown rather than Sortable's onStart: onStart fires on
-// dragstart, and the browser dispatches the first dragover in the same input
-// batch, before the attribute's style change has been applied.
-function beginReorderFlag() {
-    document.body.dataset.reordering = '';
-}
-
-function endReorderFlag() {
-    delete document.body.dataset.reordering;
-}
-
 function csrfToken(root) {
     return root.dataset.csrf || '';
 }
@@ -156,7 +141,6 @@ function restoreSnapshot(snapshotHTML) {
 }
 
 function onRoundEnd(evt) {
-    endReorderFlag();
     const root = document.getElementById(QUESTIONS_LIST_ID);
     if (!root) return;
     const section = evt.item;
@@ -179,7 +163,6 @@ function onRoundEnd(evt) {
 }
 
 function onQuestionEnd(evt) {
-    endReorderFlag();
     const root = document.getElementById(QUESTIONS_LIST_ID);
     if (!root) return;
     const article = evt.item;
@@ -289,15 +272,6 @@ function initSortable(root) {
     // so it survives every partial swap without per-handle rebinding.
     root.addEventListener('keydown', onHandleKeydown);
 
-    // Delegated like the keydown above, so it survives every partial swap.
-    // pointerup clears the flag for a press that never became a drag.
-    root.addEventListener('pointerdown', (evt) => {
-        if (evt.target.closest('[data-question-handle], [data-round-handle]')) {
-            beginReorderFlag();
-        }
-    });
-    root.addEventListener('pointerup', endReorderFlag);
-
     if (typeof window.Sortable !== 'function') return;
 
     const shared = { name: 'questions' };
@@ -347,19 +321,4 @@ function initSortable(root) {
 onDomReady(() => {
     const root = document.getElementById(QUESTIONS_LIST_ID);
     if (root) initSortable(root);
-
-    // This module rebinds Sortable after its own reorder fetches, but the list
-    // can also be replaced by an htmx swap from elsewhere - adding a round
-    // re-renders it out of band (#1257), because a brand new round has no row
-    // to graft onto. Without this the swapped-in list has no Sortable bound to
-    // it and dragging silently stops working.
-    document.body.addEventListener('htmx:afterSwap', (evt) => {
-        const target = evt.target;
-        if (!(target instanceof Element)) return;
-
-        const list = target.id === QUESTIONS_LIST_ID
-            ? target
-            : target.querySelector(`#${QUESTIONS_LIST_ID}`);
-        if (list) swapProcessed(list);
-    });
 });

@@ -21,8 +21,6 @@ make smoke            # validate startup against the existing dev DB (no HTTP li
 - `frontend/` — build-time JS/CSS source (`client/`, `web/`, `shared/`); built bundles + Tailwind output are committed under `internal/*/static/` (served, embedded — see `.claude/rules/frontend-style.md`).
 - `test/integration/` (black-box, through the running server) and `test/e2e/` (Playwright); `internal/dbtest` is the layer-test DB choke point.
 
-**Templates**: `render.Parse` parses layouts/partials first and the page **last**, so a page's `{{define "x"}}` overrides a layout's `{{block "x"}}` — that is how a page opts into a different shell. Each page passes its own data struct (there is no shared page view-model), so a layout must never reference a field only some pages carry: it fails to evaluate on all the rest.
-
 ## Commits and PRs
 
 ### Attribution
@@ -39,7 +37,7 @@ Every PR description and every comment you post — on a PR or an issue — ends
 
 Start from `main` (`git pull`), then branch with dashes (not slashes), prefixed with the ticket number — e.g. `1059-add-audio`. Ask for the number if it is not given; omit the prefix when there is no ticket. Delegate non-trivial code to the right dev agent — `backend-dev` for Go under `internal/`, `cmd/`, migrations and queries; `frontend-dev` for the player client and admin templates — and use whatever agent skills fit. Give the PR URL after each piece of work.
 
-Rebasing/updating a branch: rebase **locally** onto main (`git rebase origin/main`; `git rebase -f origin/main` to re-create commits already on top) and `git push --force-with-lease` — never by merging, never via `gh pr update-branch` or auto-merge's implicit update. `main`'s ruleset requires **signed commits**; local git signs them (SSH key), but a server-side rebase re-creates them **unsigned**, leaving the PR `mergeStateStatus=BLOCKED` with every required check green. Don't `gh pr merge --admin` past it — the Claude Code classifier blocks bypassing the ruleset, and the signed local rebase is the fix. Confirm the diagnosis with `gh api repos/starquake/topbanana/commits/<sha> --jq .commit.verification`.
+Rebasing/updating a branch: rebase **locally** onto main (`git rebase origin/main`; `git rebase -f origin/main` to re-create commits already on top) and `git push --force-with-lease` — never by merging, never via `gh pr update-branch` or auto-merge's implicit update. `main`'s ruleset requires **signed commits**; local git signs them (SSH key), but a server-side rebase re-creates them **unsigned**, leaving the PR `mergeStateStatus=BLOCKED` with every required check green. Don't `gh pr merge --admin` past it — the Claude Code classifier blocks bypassing the ruleset, and the signed local rebase is the fix.
 
 ### Working a ticket the maintainer hands you (one at a time)
 
@@ -91,7 +89,6 @@ Rules:
 - A **conflict-free rebase keeps `ready to merge`** — no fresh sign-off needed.
 - Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a `changes requested` comment, new work, or a rebase where you had to **resolve conflicts**.
 - Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
-- **Dependabot PRs merge themselves** once required checks are green (`.github/workflows/dependabot-auto-merge.yml`), so they need no label. `/tools` is excluded: those pins are tracking-only and still need the Makefile + `ci.yml` mirror by hand.
 
 ### Linking a PR to a ticket
 
@@ -153,8 +150,6 @@ The image is **built once, after the suite is green**, and reused — the `CI` w
 Consequences for work in flight: "merged to `main`" means live in **staging**, not production. Production stays on the last tag until a new one is cut, and all changes since the previous tag ship together when it is. A schema migration runs on staging at next container boot, on production at next tag deploy.
 
 Both jobs build a fresh `.env` from GitHub **secrets** (masked in logs: `SESSION_KEY`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`, ...) and **variables** (unmasked: `BASE_URL`, `REGISTRATION_ENABLED`, `ADMIN_EMAILS`). Both are scoped per-environment — a value set on `staging` is not visible to `production`.
-
-Each environment restricts deployments to `branch:main`, so a workflow running on a PR branch cannot claim staging/production/demo secrets. `main` is correct even for a tag deploy: `workflow_run`-triggered runs execute on the **default branch**, not the tag.
 
 ## Comments
 

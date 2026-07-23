@@ -1,13 +1,7 @@
 import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import {
-  createQuizWithQuestions,
-  installPlaythroughClock,
-  openMediaPicker,
-  publishQuiz,
-  type QuestionSpec,
-} from './helpers';
+import { createQuizWithQuestions, installPlaythroughClock, publishQuiz, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // An iPhone SE small viewport: 375 logical px wide, and a height that models the
@@ -50,18 +44,15 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   const libraryThumb = page.getByTestId('library-thumb').first();
   await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
 
-  // Editing happens in the editor now (#1260); open it and select the question.
-  await page.getByTestId('open-question-editor').click();
-  await page.locator('article.q-row').first().click();
-  await expect(page.locator('#question-editor form')).toBeVisible();
-  await openMediaPicker(page, 'image');
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
   const pickerThumb = page
     .getByTestId('question-image-picker')
     .getByTestId('library-thumb')
     .first();
   await expect(pickerThumb).toBeVisible();
   await pickerThumb.click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.q-text', { hasText: REALISTIC[0].text })).toBeVisible({ timeout: 15_000 });
 }
 

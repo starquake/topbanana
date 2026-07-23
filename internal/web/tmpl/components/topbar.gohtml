@@ -6,12 +6,7 @@
      in the middle is admin-only ({{showSectionNav}}). */}}
 {{define "topbar"}}
     <nav class="sticky top-0 z-30 bg-bg/80 backdrop-blur-xl border-b border-border-soft" aria-label="Primary">
-        {{/* Full width, matching the context bar beneath it (#1248): the inner
-             max-w-shell container used to stop the logo and nav short of the
-             page edges while everything below ran edge to edge. */}}
-        {{/* 3rem, matching .app-bar's sticky offset (#1248). Change one and the
-             other has to follow, or the context bar leaves a gap or overlaps. */}}
-        <div class="w-full px-4 py-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 min-h-[3rem]">
+        <div class="max-w-shell mx-auto px-5 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 min-h-[3.5rem]">
             <div class="flex items-center gap-6">
                 {{/* aria-label pins the accessible name as "Top Banana!" so role-
                      based locators (e2e: getByRole('link', { name: 'Top Banana!' }))
@@ -33,23 +28,23 @@
                 </a>
                 {{if showSectionNav}}
                     {{$s := navSection}}
-                    <div class="hidden sm:flex items-center gap-1">
+                    <div class="hidden sm:flex items-center gap-1 text-sm">
                         <a href="/admin/quizzes" {{if eq $s "quizzes"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "quizzes"}} app-nav-link-active{{end}}">Quizzes</a>
+                           class="px-3 py-2 rounded-sm transition-colors {{if eq $s "quizzes"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Quizzes</a>
                         {{if isAdmin}}
                         <a href="/admin/players" {{if eq $s "players"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "players"}} app-nav-link-active{{end}}">Players</a>
+                           class="px-3 py-2 rounded-sm transition-colors {{if eq $s "players"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Players</a>
                         <a href="/admin/invites" {{if eq $s "invites"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "invites"}} app-nav-link-active{{end}}">Invites</a>
+                           class="px-3 py-2 rounded-sm transition-colors {{if eq $s "invites"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Invites</a>
                         <a href="/admin/email" {{if eq $s "email"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "email"}} app-nav-link-active{{end}}">Email</a>
+                           class="px-3 py-2 rounded-sm transition-colors {{if eq $s "email"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Email</a>
                         <a href="/admin/settings" {{if eq $s "settings"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "settings"}} app-nav-link-active{{end}}">Settings</a>
+                           class="px-3 py-2 rounded-sm transition-colors {{if eq $s "settings"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Settings</a>
                         {{end}}
                     </div>
                 {{end}}
             </div>
-            <div class="flex shrink-0 items-center gap-3 sm:gap-4 text-[0.8rem]">
+            <div class="flex shrink-0 items-center gap-3 sm:gap-4 text-sm">
                 {{if isSignedIn}}
                     <span class="hidden lg:inline whitespace-nowrap text-text-dim">Signed in as&nbsp;<a href="{{profileHref}}"
                            class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{viewerName}}</a></span>
@@ -74,16 +69,16 @@
             {{$s := navSection}}
             <div class="sm:hidden border-t border-border-soft px-5 py-2 flex gap-1 text-sm">
                 <a href="/admin/quizzes" {{if eq $s "quizzes"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "quizzes"}} app-nav-link-active{{end}}">Quizzes</a>
+                   class="px-3 py-2 rounded-sm transition-colors {{if eq $s "quizzes"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Quizzes</a>
                 {{if isAdmin}}
                 <a href="/admin/players" {{if eq $s "players"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "players"}} app-nav-link-active{{end}}">Players</a>
+                   class="px-3 py-2 rounded-sm transition-colors {{if eq $s "players"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Players</a>
                 <a href="/admin/invites" {{if eq $s "invites"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "invites"}} app-nav-link-active{{end}}">Invites</a>
+                   class="px-3 py-2 rounded-sm transition-colors {{if eq $s "invites"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Invites</a>
                 <a href="/admin/email" {{if eq $s "email"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "email"}} app-nav-link-active{{end}}">Email</a>
+                   class="px-3 py-2 rounded-sm transition-colors {{if eq $s "email"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Email</a>
                 <a href="/admin/settings" {{if eq $s "settings"}}aria-current="page"{{end}}
-                           class="app-nav-link{{if eq $s "settings"}} app-nav-link-active{{end}}">Settings</a>
+                   class="px-3 py-2 rounded-sm transition-colors {{if eq $s "settings"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Settings</a>
                 {{end}}
             </div>
         {{end}}

@@ -771,17 +771,6 @@ func addAdminQuestionRoutes(
 	csrfMgr *csrf.Manager,
 ) {
 	mux.Handle(
-		"POST /admin/quizzes/{quizID}/questions/{questionID}/duplicate",
-		csrfMW(requireGameHost(admin.HandleQuestionDuplicate(logger, csrfMgr, stores.Quizzes, stores.Media))),
-	)
-	// The two-pane question editor (#1244). Note the sibling path
-	// /admin/quizzes/{quizID}/edit is already the quiz metadata form, so the
-	// editor lives under /questions instead.
-	mux.Handle(
-		"GET /admin/quizzes/{quizID}/questions",
-		requireGameHost(admin.HandleQuizEditor(logger, csrfMgr, stores.Quizzes)),
-	)
-	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
 		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes, stores.Media)),
 	)

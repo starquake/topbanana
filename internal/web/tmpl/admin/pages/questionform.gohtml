@@ -23,5 +23,250 @@
         </div>
     </header>
 
-    {{template "question_form" .}}
+    <form class="form-shell"
+            {{if .Question.ID}}
+                action="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}"
+            {{else}}
+                action="/admin/quizzes/{{.Quiz.ID}}/questions"
+            {{end}}
+            method="POST">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        <input type="hidden" name="id" value="{{.Question.ID}}">
+        {{if .Round}}
+            <input type="hidden" name="round_id" value="{{.Round.ID}}">
+        {{end}}
+
+        {{$textErr := index .FieldErrors "text"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="text">Question text</label>
+            <textarea id="text" name="text" rows="3"
+                      class="form-input min-h-[100px] resize-y{{if $textErr}} form-input-error{{end}}"
+                      {{if $textErr}}aria-invalid="true" aria-describedby="text-error"{{end}}>{{.Question.Text}}</textarea>
+            {{if $textErr}}
+                <p id="text-error" class="form-help-error" role="alert">{{$textErr}}</p>
+            {{end}}
+        </div>
+
+        {{/* Image picker (#937): attach one of this quiz's uploaded library
+             images to the question, or None. When the quiz has no images yet,
+             show a hint linking to the quiz view to upload first. Server-side
+             validation re-checks that the chosen id belongs to this quiz. */}}
+        {{$mediaErr := index .FieldErrors "media"}}
+        <fieldset class="form-field border-0 p-0 m-0 min-w-0">
+            <legend class="label-eyebrow p-0">Image</legend>
+            {{if $mediaErr}}
+                <p id="media-error" class="form-help-error" role="alert">{{$mediaErr}}</p>
+            {{end}}
+            {{if .Library}}
+                <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5"
+                     role="radiogroup" aria-label="Attach an image"
+                     data-testid="question-image-picker"
+                     {{if $mediaErr}}aria-describedby="media-error"{{end}}>
+                    <label class="group relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-surface text-center text-xs text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
+                        <input type="radio" name="image_media_id" value="" class="sr-only"
+                               {{if eq .Question.ImageMediaID 0}}checked{{end}}>
+                        None
+                    </label>
+                    {{range .Library}}
+                        <label class="group relative block aspect-square cursor-pointer overflow-hidden rounded-lg border border-border-soft bg-surface has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
+                            <input type="radio" name="image_media_id" value="{{.ID}}" class="sr-only peer"
+                                   {{if eq $.Question.ImageMediaID .ID}}checked{{end}}>
+                            <img src="/media/{{.ID}}/thumb"
+                                 alt="Quiz image {{.ID}}"
+                                 loading="lazy"
+                                 width="{{.Width}}" height="{{.Height}}"
+                                 class="h-full w-full object-cover"
+                                 data-testid="library-thumb">
+                            <span aria-hidden="true"
+                                  class="pointer-events-none absolute inset-0 hidden items-center justify-center bg-accent/20 peer-checked:flex">
+                                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-bg">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.5 4.5 6 12 2.5 8.5l1-1L6 10l6.5-6.5z"/></svg>
+                                </span>
+                            </span>
+                        </label>
+                    {{end}}
+                </div>
+            {{else}}
+                <input type="hidden" name="image_media_id" value="">
+                <p class="text-text-dim text-[0.95rem]">
+                    No images in this quiz's library yet.
+                    <a href="/admin/quizzes/{{.Quiz.ID}}" class="text-accent underline">Upload images on the quiz page first</a>
+                    to attach one here.
+                </p>
+            {{end}}
+        </fieldset>
+
+        {{/* Audio picker (#1059): attach one of this quiz's uploaded audio
+             clips to the question, or None. When the quiz has no audio yet, show
+             a hint linking to the quiz view to upload first. Server-side
+             validation re-checks that the chosen id is audio belonging to this
+             quiz. */}}
+        {{$audioErr := index .FieldErrors "audio"}}
+        <fieldset class="form-field border-0 p-0 m-0 min-w-0">
+            <legend class="label-eyebrow p-0">Audio</legend>
+            {{if $audioErr}}
+                <p id="audio-error" class="form-help-error" role="alert">{{$audioErr}}</p>
+            {{end}}
+            {{if .AudioLibrary}}
+                <div class="flex flex-col gap-2"
+                     role="radiogroup" aria-label="Attach audio"
+                     data-testid="question-audio-picker"
+                     {{if $audioErr}}aria-describedby="audio-error"{{end}}>
+                    <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 text-sm text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
+                        <input type="radio" name="audio_media_id" value="" class="sr-only"
+                               {{if eq .Question.AudioMediaID 0}}checked{{end}}>
+                        None
+                    </label>
+                    {{range .AudioLibrary}}
+                        <label data-testid="audio-library-item"
+                               class="flex cursor-pointer flex-wrap items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
+                            <input type="radio" name="audio_media_id" value="{{.ID}}" class="sr-only"
+                                   {{if eq $.Question.AudioMediaID .ID}}checked{{end}}>
+                            <span class="min-w-0 grow truncate text-text">{{if .Description}}{{.Description}}{{else}}Audio {{.ID}}{{end}}</span>
+                            {{$label := .DurationLabel}}
+                            {{if $label}}
+                                <span data-testid="audio-duration" class="shrink-0 text-xs text-text-dim tabular-nums">{{$label}}</span>
+                            {{end}}
+                            <audio controls preload="none" src="/media/{{.ID}}"
+                                   class="h-9 max-w-full sm:w-64"></audio>
+                        </label>
+                    {{end}}
+                </div>
+                {{/* Repeat toggle (#1073): when an audio clip is attached, replay
+                     it 3 times on the play surfaces. Only meaningful with a clip
+                     selected; harmless (ignored) when None is chosen. */}}
+                <label class="mt-3 flex cursor-pointer items-center gap-3 text-sm text-text-dim"
+                       data-testid="audio-repeat-toggle">
+                    <input type="checkbox" name="audio_repeat" value="on"
+                           {{if .Question.AudioRepeat}}checked{{end}}>
+                    <span>Repeat the audio 3 times</span>
+                </label>
+            {{else}}
+                <input type="hidden" name="audio_media_id" value="">
+                <p class="text-text-dim text-[0.95rem]">
+                    No audio in this quiz's library yet.
+                    <a href="/admin/quizzes/{{.Quiz.ID}}" class="text-accent underline">Upload audio on the quiz page first</a>
+                    to attach one here.
+                </p>
+            {{end}}
+        </fieldset>
+
+        {{$optionsErr := index .FieldErrors "options"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="option[0].text">
+                Options
+                <span class="label-hint">Tap &ldquo;Correct&rdquo; to mark the right answer(s)</span>
+            </label>
+            {{if $optionsErr}}
+                <p class="form-help-error" role="alert">{{$optionsErr}}</p>
+            {{end}}
+            <div>
+                <div class="option-row">
+                    <span class="option-letter" aria-hidden="true">A</span>
+                    <input type="hidden" name="option[0].id"
+                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).ID}}{{end}}">
+                    <input id="option[0].text" name="option[0].text" type="text"
+                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).Text}}{{end}}"
+                           aria-label="Option A"
+                           class="form-input">
+                    <label class="option-check" for="option[0].correct">
+                        <input id="option[0].correct" name="option[0].correct" type="checkbox" value="on"
+                               {{if gt (len .Question.Options) 0}}{{if (index .Question.Options 0).Correct}}checked{{end}}{{end}}>
+                        <span class="option-check-pill">Correct</span>
+                    </label>
+                </div>
+                <div class="option-row">
+                    <span class="option-letter" aria-hidden="true">B</span>
+                    <input type="hidden" name="option[1].id"
+                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).ID}}{{end}}">
+                    <input id="option[1].text" name="option[1].text" type="text"
+                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).Text}}{{end}}"
+                           aria-label="Option B"
+                           class="form-input">
+                    <label class="option-check" for="option[1].correct">
+                        <input id="option[1].correct" name="option[1].correct" type="checkbox" value="on"
+                               {{if gt (len .Question.Options) 1}}{{if (index .Question.Options 1).Correct}}checked{{end}}{{end}}>
+                        <span class="option-check-pill">Correct</span>
+                    </label>
+                </div>
+                <div class="option-row">
+                    <span class="option-letter" aria-hidden="true">C</span>
+                    <input type="hidden" name="option[2].id"
+                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).ID}}{{end}}">
+                    <input id="option[2].text" name="option[2].text" type="text"
+                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).Text}}{{end}}"
+                           aria-label="Option C"
+                           class="form-input">
+                    <label class="option-check" for="option[2].correct">
+                        <input id="option[2].correct" name="option[2].correct" type="checkbox" value="on"
+                               {{if gt (len .Question.Options) 2}}{{if (index .Question.Options 2).Correct}}checked{{end}}{{end}}>
+                        <span class="option-check-pill">Correct</span>
+                    </label>
+                </div>
+                <div class="option-row">
+                    <span class="option-letter" aria-hidden="true">D</span>
+                    <input type="hidden" name="option[3].id"
+                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).ID}}{{end}}">
+                    <input id="option[3].text" name="option[3].text" type="text"
+                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Text}}{{end}}"
+                           aria-label="Option D"
+                           class="form-input">
+                    <label class="option-check" for="option[3].correct">
+                        <input id="option[3].correct" name="option[3].correct" type="checkbox" value="on"
+                               {{if gt (len .Question.Options) 3}}{{if (index .Question.Options 3).Correct}}checked{{end}}{{end}}>
+                        <span class="option-check-pill">Correct</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        {{$timeLimitErr := index .FieldErrors "timelimitseconds"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="time_limit_seconds">
+                Time limit (seconds)
+                <span class="label-hint">Leave blank to inherit the quiz default ({{.Quiz.TimeLimitSeconds}}s).</span>
+            </label>
+            {{/* Quick-pick chips write into the number input below.
+                 "Inherit" clears the input so the row falls back to the
+                 quiz default at game time. */}}
+            <div class="flex flex-wrap gap-1.5 mb-2" role="group" aria-label="Quick pick">
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=''">Inherit</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=3">3s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=6">6s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=8">8s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=10">10s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=12">12s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=15">15s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=20">20s</button>
+            </div>
+            <input id="time_limit_seconds" name="time_limit_seconds" type="number"
+                   min="1" max="600" step="1"
+                   value="{{.Question.TimeLimitSecondsValue}}"
+                   placeholder="{{.Quiz.TimeLimitSeconds}}"
+                   class="form-input max-w-[160px]{{if $timeLimitErr}} form-input-error{{end}}"
+                   {{if $timeLimitErr}}aria-invalid="true" aria-describedby="time_limit_seconds-error"{{end}}>
+            {{if $timeLimitErr}}
+                <p id="time_limit_seconds-error" class="form-help-error" role="alert">{{$timeLimitErr}}</p>
+            {{end}}
+        </div>
+
+        {{if .Question.ID}}
+            <div class="form-field">
+                <label class="label-eyebrow" for="position">
+                    Position
+                    <span class="label-hint">Use Up/Down on the quiz view to reorder</span>
+                </label>
+                <input id="position" type="text" readonly
+                       value="{{printf "%02d" .Question.Position}}"
+                       class="form-input form-input-readonly max-w-[120px]">
+            </div>
+        {{end}}
+
+        <div class="form-actions">
+            <button type="submit" name="action" value="Save" class="btn-primary">
+                Save question
+            </button>
+            <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
 {{end}}

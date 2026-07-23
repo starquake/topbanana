@@ -185,8 +185,3 @@ const ArchiveFormatVersion = archiveFormatVersion
 // ArchiveExtForMedia exposes the unexported MIME-to-archive-extension mapper so
 // the export test can pin every branch without driving the full exporter.
 var ArchiveExtForMedia = archiveExtForMedia
-
-// SelectedQuestionID exposes the unexported ?q= deep-link parser so the
-// external admin_test package can pin the blank / valid / garbage mapping
-// without driving the editor handler (#1244).
-var SelectedQuestionID = selectedQuestionID
