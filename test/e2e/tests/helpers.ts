@@ -397,43 +397,41 @@ export async function createQuizWithQuestions(
     );
   }
   await page.waitForURL(/\/admin\/quizzes\/\d+$/);
-  const quizViewPath = new URL(page.url()).pathname;
-
-  // Questions are authored in the two-pane editor now (#1260); the quiz view
-  // only summarises. Open it once, then add each question in the pane.
-  await page.getByTestId('open-question-editor').click();
-  await expect(page.locator('#questions-list')).toBeVisible();
 
   for (const q of questions) {
-    // "Add question" opens a blank form in the pane. The imported quiz has a
-    // single default round, so the first add button is it.
-    await page.locator('[data-editor-add-question]').first().click();
-    const form = page.locator('#question-editor');
-    await expect(form.locator(':is(input, textarea)[name=text]')).toBeVisible();
+    // Each round carries its own "Add question" button now (#929); the
+    // imported quiz has a single default round, so the first match is it.
+    // The link targets the round-scoped create form, so the URL carries a
+    // round_id query.
+    await page.getByRole('link', { name: /add question/i }).first().click();
+    await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new\?round_id=\d+$/);
 
-    await form.locator(':is(input, textarea)[name=text]').fill(q.text);
+    // Question text became a <textarea> in the redesign. Position is
+    // auto-assigned by the server now (#16) - no input field on the form.
+    await page.locator(':is(input, textarea)[name=text]').fill(q.text);
     for (let i = 0; i < q.options.length; i++) {
-      await form.locator(`input[name="option[${i}].text"]`).fill(q.options[i]);
+      await page.locator(`input[name="option[${i}].text"]`).fill(q.options[i]);
       if (q.correctIndices.includes(i)) {
-        // The form hides the real checkbox and exposes a styled
-        // <label class="option-check"> pill; click the label as a user would.
-        const label = form.locator('label.option-check').nth(i);
+        // The redesigned form hides the real checkbox (opacity: 0,
+        // pointer-events: none) and exposes a styled <label class="option-check">
+        // pill instead. Click the label to mirror what a real user does —
+        // the browser propagates the click to the wrapped input. Drives
+        // the actual user-facing affordance instead of force-clicking the
+        // hidden control, so a regression in the label/input wiring would
+        // surface here.
+        const label = page.locator('label.option-check').nth(i);
         await label.scrollIntoViewIfNeeded();
         await label.click();
       }
     }
-    // The editor's Save (exact, so it does not also match "Save and next").
-    await form.getByRole('button', { name: 'Save', exact: true }).click();
-    // The saved question lands in the rail via the out-of-band row swap.
-    await expect(page.locator('article.q-row', { hasText: q.text }))
-      .toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Save' }).click();
+    // Anchor on the question we just saved appearing in the quiz
+    // view's list, not on the URL bar (#396). waitForURL still
+    // races slow navigations on contended runners; waiting for the
+    // destination-page content also doubles as a check that the
+    // save round-tripped.
+    await expect(page.locator('.q-text', { hasText: q.text })).toBeVisible({ timeout: 15_000 });
   }
-
-  // Return to the quiz view, which is where this helper has always left the
-  // page - callers rely on it (the media library and share controls live
-  // there). Authoring moved to the editor (#1260), the landing spot did not.
-  await page.goto(quizViewPath);
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 }
 
 // playThroughQuiz walks the full quiz by clicking the first option on each
@@ -681,41 +679,4 @@ export async function flashProbeSeen(page: Page, key: string): Promise<boolean> 
     (k) => Boolean((window as unknown as Record<string, boolean>)[k]),
     key,
   );
-}
-
-/**
- * Opens the quiz view's overflow menu. Its secondary actions - Share, Export,
- * Edit quiz, the mode switch, Delete - live in a collapsed <details> (#1245),
- * so they are not visible until it is opened. No-ops when already open.
- */
-export async function openQuizOverflow(page: Page): Promise<void> {
-  const overflow = page.getByTestId('quiz-overflow');
-  await expect(overflow).toBeAttached();
-
-  if (await overflow.evaluate((el) => (el as HTMLDetailsElement).open)) {
-    return;
-  }
-
-  await overflow.locator('summary').click();
-  await expect(overflow).toHaveJSProperty('open', true);
-}
-
-/**
- * Opens a collapsed media picker on the question form. The image and audio
- * pickers are `<details>` that start closed (#1244), so their radios and
- * thumbnails are not clickable until the summary is toggled. No-ops when the
- * picker is already open, and when the quiz has no library at all (the form
- * renders an upload-first hint instead of a picker).
- */
-export async function openMediaPicker(page: Page, kind: 'image' | 'audio'): Promise<void> {
-  const picker = page.getByTestId(`${kind}-picker`);
-  if ((await picker.count()) === 0) {
-    return;
-  }
-  if (await picker.evaluate((el) => (el as HTMLDetailsElement).open)) {
-    return;
-  }
-
-  await picker.locator('summary').click();
-  await expect(picker).toHaveJSProperty('open', true);
 }

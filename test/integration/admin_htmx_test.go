@@ -481,7 +481,7 @@ func TestAdminHTMX_DeleteSwaps(t *testing.T) {
 
 	// Question delete.
 	qHX := seedDelQuiz(t, "htmx-del-q-hx")
-	assertHXDeleteEditor(ctx, t, client, srv.BaseURL,
+	assertHXDelete(ctx, t, client, srv.BaseURL,
 		fmt.Sprintf("/admin/quizzes/%d/questions/%d/delete", qHX.ID, qHX.Questions[0].ID))
 	qPlain := seedDelQuiz(t, "htmx-del-q-plain")
 	assertPlainDelete(ctx, t, client, srv.BaseURL,
@@ -494,7 +494,7 @@ func TestAdminHTMX_DeleteSwaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDefaultRound err = %v, want nil", err)
 	}
-	assertHXDeleteEditor(ctx, t, client, srv.BaseURL,
+	assertHXDelete(ctx, t, client, srv.BaseURL,
 		fmt.Sprintf("/admin/quizzes/%d/rounds/%d/delete", rHX.ID, rHXRound.ID))
 	rPlain := seedDelQuiz(t, "htmx-del-r-plain")
 	rPlainRound, err := stores.Quizzes.GetDefaultRound(ctx, rPlain.ID)
@@ -548,39 +548,6 @@ func assertHXDelete(ctx context.Context, t *testing.T, client *http.Client, base
 	}
 	if len(body) != 0 {
 		t.Errorf("HX delete body = %q, want empty", body)
-	}
-}
-
-// assertHXDeleteEditor is assertHXDelete for the editor's question and round
-// deletes (#1260): they clear the pane and re-render the rail out of band
-// rather than returning an empty body.
-func assertHXDeleteEditor(ctx context.Context, t *testing.T, client *http.Client, baseURL, path string) {
-	t.Helper()
-
-	token := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes")
-	form := url.Values{"csrf_token": {token}}
-	req := newFormReq(ctx, t, baseURL+path, form)
-	req.Header.Set("Hx-Request", "true")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("HX editor delete Do err = %v, want nil", err)
-	}
-	defer closeBody(t, resp.Body)
-
-	if got, want := resp.StatusCode, http.StatusOK; got != want {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("HX editor delete status = %d, want %d; body=%q", got, want, body)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("HX editor delete body read err = %v, want nil", err)
-	}
-	// The empty pane plus the rail out of band.
-	for _, want := range []string{"Pick a question or round", `id="questions-list"`, `hx-swap-oob="true"`} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("HX editor delete body should contain %q; body=%q", want, body)
-		}
 	}
 }
 

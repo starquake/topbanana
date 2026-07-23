@@ -165,14 +165,13 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
-	// Pin Tailwind classes on the quiz list. .app-bar is the app shell's
-	// context bar (#1245); hover:border-accent-line is on every quiz-card
-	// article. Together they prove both the chrome and the per-card reskin
-	// rendered. See #213 (#934 removed the play-URL chip the old assertion
-	// keyed on; #1245 replaced max-w-shell, which the topbar and site footer
-	// also carry, so it passed whatever the page itself rendered).
-	if got, want := string(body), `class="app-bar"`; !strings.Contains(got, want) {
-		t.Errorf("string(body) should contain the context bar %q, got %q", want, got)
+	// Pin Tailwind classes on the quiz list. max-w-shell is a custom
+	// theme token from tailwind-src.css used by the navbar shell;
+	// hover:border-accent-line is on every quiz-card article. Together
+	// they prove both the navbar and the per-card reskin rendered. See
+	// #213 (#934 removed the play-URL chip the old assertion keyed on).
+	if got, want := string(body), `class="max-w-shell`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain Tailwind shell class %q, got %q", want, got)
 	}
 	if got, want := string(body), `hover:border-accent-line`; !strings.Contains(got, want) {
 		t.Errorf("string(body) should contain per-card Tailwind class %q, got %q", want, got)
@@ -216,14 +215,12 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
-	// Questions belong to a round (#929): scrape the default round's id off the
-	// editor's per-round "Add question" link and create the question against
-	// it. The quiz view only summarises the sequence now (#1260), so the link
-	// lives in the editor.
-	editorBody := readPartial(ctx, t, client, baseURL+quizLocation+"/questions")
-	roundMatch := roundIDPattern.FindStringSubmatch(editorBody)
+	// Questions belong to a round (#929): scrape the default round's id
+	// off the quiz view's per-round "Add question" link and create the
+	// question against it, mirroring the button a host would click.
+	roundMatch := roundIDPattern.FindStringSubmatch(string(body))
 	if roundMatch == nil {
-		t.Fatalf("editor body has no per-round Add question link, body:\n%s", editorBody)
+		t.Fatalf("quiz view body has no per-round Add question link, body:\n%s", string(body))
 	}
 	roundID := roundMatch[1]
 
@@ -316,15 +313,34 @@ func TestAdmin_Integration(t *testing.T) {
 	if got, want := string(body), quizDesc; !strings.Contains(got, want) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
-
-	// The questions live in the editor now (#1260), not the quiz view's
-	// summary. The rail shows the question text; option persistence is covered
-	// by the handler-level save tests.
-	editorView := readPartial(ctx, t, client, baseURL+quizLocation+"/questions")
-	if !strings.Contains(editorView, questionText) {
-		t.Errorf("editor rail should contain the question %q", questionText)
+	if got, want := string(body), questionText; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
+	if got, want := string(body), questionOption1; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
+	if got, want := string(body), questionOption2; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
+	if got, want := string(body), questionOption3; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
+	if got, want := string(body), questionOption4; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
-	// The spoiler is gone (#1260): the quiz view no longer renders the sequence,
-	// and the editor puts answers in the pane rather than behind a toggle.
+	// #246 — options sit behind a <details class="q-spoiler"> wrapper so an
+	// admin can present the quiz without exposing answers. Server-rendered
+	// HTML still contains the option text (the closed-by-default state is
+	// CSS-controlled), so the integration test just pins the structural
+	// shape; the open/close click behaviour is covered by e2e.
+	if got, want := string(body), `<details class="q-spoiler">`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler wrapper %q", want)
+	}
+	if got, want := string(body), `Show spoilers`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler affordance label %q", want)
+	}
+	if got, want := string(body), `aria-label="Toggle answer options for question`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler aria-label prefix %q", want)
+	}
 }

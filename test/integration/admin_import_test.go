@@ -140,16 +140,35 @@ func TestAdminImport_Integration(t *testing.T) {
 	// Follow the redirect and verify both question texts render on the
 	// resulting quiz view — confirming the tree (quiz + questions +
 	// options) was persisted, not just the quiz row.
-	// Questions render in the editor rail now (#1260), not the quiz view. The
-	// rail carries the question text; option persistence is covered by the
-	// import-translation and save tests.
-	body := readPartial(ctx, t, client, srv.BaseURL+location+"/questions")
+	viewURL := srv.BaseURL + location
+	viewReq, err := http.NewRequestWithContext(ctx, http.MethodGet, viewURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	viewResp, err := client.Do(viewReq)
+	if err != nil {
+		t.Fatalf("GET quiz view client.Do err = %v, want nil", err)
+	}
+	viewBody, err := io.ReadAll(viewResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := viewResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := viewResp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("GET quiz view status = %d, want %d", got, want)
+	}
+	body := string(viewBody)
 	for _, want := range []string{
+		"Import Round-Trip",
 		"What is the capital of the Czech Republic?",
 		"Lisbon is the capital of which country?",
+		"Prague",
+		"Portugal",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("editor rail should contain the question %q", want)
+			t.Errorf("quiz view body got %q, should contain %q", body, want)
 		}
 	}
 
@@ -409,22 +428,38 @@ func TestAdminImport_Integration(t *testing.T) {
 			t.Fatalf("Location = %q, want prefix /admin/quizzes/", quizPath)
 		}
 
-		// Rounds and questions render in the editor rail now (#1260): round
-		// titles and question texts. Round summaries collapse in the rail (they
-		// show in the pane form), so they are not asserted here.
-		body := readPartial(ctx, t, client, srv.BaseURL+quizPath+"/questions")
+		viewReq, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+quizPath, nil)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		viewResp, err := client.Do(viewReq)
+		if err != nil {
+			t.Fatalf("GET quiz view client.Do err = %v, want nil", err)
+		}
+		viewBytes, err := io.ReadAll(viewResp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := viewResp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := viewResp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("GET quiz view status = %d, want %d", got, want)
+		}
+		body := string(viewBytes)
 		for _, want := range []string{
-			"Geography", "Science",
+			"Geography", "Where in the world.",
+			"Science", "A harder finish.",
 			"Capital of France?", "Capital of Italy?", "Chemical symbol for water?",
 		} {
 			if !strings.Contains(body, want) {
-				t.Errorf("editor rail should contain %q", want)
+				t.Errorf("quiz view body should contain %q", want)
 			}
 		}
-		// The authored rounds replace the default round rather than sitting
-		// alongside an empty "Round 1": exactly two round sections.
-		if got, want := strings.Count(body, `data-testid="round-section-`), 2; got != want {
-			t.Errorf("editor rail round-section count = %d, want %d (no stray default round)", got, want)
+		// The authored rounds replace the default round rather than
+		// sitting alongside an empty "Round 1": exactly two rounds.
+		if want := "2 rounds"; !strings.Contains(body, want) {
+			t.Errorf("quiz view body should contain %q (no stray default round)", want)
 		}
 	})
 

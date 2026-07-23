@@ -1,9 +1,5 @@
 import { test, expect } from './fixtures';
-import {
-  createQuizWithQuestions,
-  openMediaPicker,
-  type QuestionSpec,
-} from './helpers';
+import { createQuizWithQuestions, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -113,12 +109,9 @@ test('an edited sound description shows in the question editor audio picker', as
   await page.getByTestId('audio-description-save').first().click();
   await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Theme tune');
 
-  // Editing happens in the editor now (#1260); open it and select the question.
-  await page.getByTestId('open-question-editor').click();
-  await page.locator('article.q-row').first().click();
-  await expect(page.locator('#question-editor form')).toBeVisible();
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
 
-  await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByTestId('audio-library-item').first()).toContainText('Theme tune');
@@ -139,12 +132,9 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
 
   // Open the question editor for the one seeded question.
-  // Editing happens in the editor now (#1260); open it and select the question.
-  await page.getByTestId('open-question-editor').click();
-  await page.locator('article.q-row').first().click();
-  await expect(page.locator('#question-editor form')).toBeVisible();
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
 
-  await openMediaPicker(page, 'audio');
   const picker = page.getByTestId('question-audio-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByTestId('audio-duration').first()).toHaveText('0:02');
@@ -157,16 +147,12 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
     .first()
     .locator('input[name="audio_media_id"]')
     .check({ force: true });
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  // Saving from the pane stays on the page now (#1244 slice 2) rather than
-  // redirecting to the quiz view; the rail row picks up the audio flag.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions/);
-  await expect(page.getByTestId('q-badge-audio').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Reload from the deep link; the audio's radio is still checked.
-  await page.reload();
-  await expect(page.locator('#question-editor form')).toBeVisible();
-  await openMediaPicker(page, 'audio');
+  // Re-open the editor; the audio's radio is now checked.
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
   const chosen = page
     .getByTestId('question-audio-picker')
     .getByTestId('audio-library-item')

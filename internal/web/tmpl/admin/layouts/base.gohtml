@@ -43,16 +43,9 @@
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh flex flex-col leading-relaxed">
 {{template "topbar" .}}
-{{/* Shell wrapper (#1245). A page that wants the full-bleed app layout
-     redefines "shell"; render.Parse parses the page after the layouts, so the
-     page's definition wins. Declared as a block, not an {{if .FullBleed}}
-     field, because each admin page passes its own data struct - a field
-     reference would fail to evaluate on every page that lacks it. */}}
-{{block "shell" .}}
 <section class="max-w-shell w-full mx-auto px-5 py-10 grow">
     {{template "content" .}}
 </section>
-{{end}}
 {{/* Build stamp (#663) lives in the shared metadata footer; log out moved
      into the top bar's account cluster (#844). */}}
 {{template "site_footer" .}}

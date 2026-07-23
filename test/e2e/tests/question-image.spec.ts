@@ -1,17 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import {
-  createQuizWithQuestions,
-  endHostedSession,
-  installPlaythroughClock,
-  openMediaPicker,
-  playerRow,
-  publishQuiz,
-  setQuizMode,
-  type QuestionSpec,
-  waitForHostRoom,
-} from './helpers';
+import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, publishQuiz, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -47,20 +37,15 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   const libraryThumb = page.getByTestId('library-thumb').first();
   await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
 
-  // Editing happens in the two-pane editor now (#1260); open it and select the
-  // question to attach the image.
-  await page.getByTestId('open-question-editor').click();
-  await page.locator('article.q-row').first().click();
-  await expect(page.locator('#question-editor form')).toBeVisible();
-  // The picker is collapsed in the form (#1244); open it before clicking.
-  await openMediaPicker(page, 'image');
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
   const pickerThumb = page
     .getByTestId('question-image-picker')
     .getByTestId('library-thumb')
     .first();
   await expect(pickerThumb).toBeVisible();
   await pickerThumb.click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.q-text', { hasText: SINGLE_QUESTION[0].text })).toBeVisible({ timeout: 15_000 });
 }
 

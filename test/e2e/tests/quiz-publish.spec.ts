@@ -3,7 +3,6 @@ import type { Page } from './fixtures';
 import {
   answerRemainingQuestions,
   installPlaythroughClock,
-  openQuizOverflow,
   QUIZ_QUESTIONS,
   seedQuiz,
 } from './helpers';
@@ -33,8 +32,6 @@ test('a host publishes a draft quiz through the confirm screen', async ({ page, 
   await expect(page.getByTestId('quiz-status')).toHaveText('Draft');
   await expect(page.getByTestId('publish-quiz')).toBeVisible();
   await expect(page.getByTestId('preview-quiz')).toBeVisible();
-  // Edit quiz and Delete moved into the overflow menu (#1245).
-  await openQuizOverflow(page);
   await expect(page.getByRole('link', { name: 'Edit quiz' })).toBeVisible();
   await expect(page.getByTestId('delete-quiz')).toBeVisible();
 
@@ -60,7 +57,6 @@ test('a host publishes a draft quiz through the confirm screen', async ({ page, 
   await expect(page.getByTestId('unpublish-quiz')).toBeVisible();
 
   // Delete stays available to the owner on a published quiz (#1192).
-  await openQuizOverflow(page);
   await expect(page.getByTestId('delete-quiz')).toBeVisible();
 });
 

@@ -99,41 +99,6 @@ func (re *Renderer) RenderPartial(w http.ResponseWriter, r *http.Request, name s
 	}
 }
 
-// Fragment is one named template plus the data to execute it with.
-type Fragment struct {
-	Name string
-	Data any
-}
-
-// RenderPartials executes several named templates into a single 200 response.
-// htmx applies out-of-band elements from the same body it swaps into the
-// target, so a handler updating both the target and an out-of-band element
-// has to emit them together rather than in two responses.
-//
-// A failure partway through cannot unwrite what already reached the client,
-// so it is logged and the remaining fragments are skipped - the same contract
-// [Renderer.RenderPartial] has.
-func (re *Renderer) RenderPartials(w http.ResponseWriter, r *http.Request, fragments ...Fragment) {
-	t, ok := re.prepare(w, r)
-	if !ok {
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	for _, f := range fragments {
-		if err := t.ExecuteTemplate(w, f.Name, f.Data); err != nil {
-			re.logger.ErrorContext(
-				r.Context(),
-				"error executing partial template",
-				slog.String("name", f.Name),
-				slog.Any("err", err),
-			)
-
-			return
-		}
-	}
-}
-
 // prepare clones the tree and binds csrfToken plus the surface's per-request
 // funcs. Returns the prepared tree and true; on clone failure it surfaces 500
 // and returns false. The csrf.Token call writes a header (the nonce cookie),

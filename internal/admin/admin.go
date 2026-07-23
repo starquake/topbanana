@@ -361,16 +361,6 @@ func parseTemplate(path string) *template.Template {
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 		"add":               func(a, b int) int { return a + b },
-		// qrow builds a QuestionRowData inside questions_list's range; Go
-		// templates pass a single value, and the row needs the page-level
-		// CanEdit / InEditor alongside the question.
-		"qrow": func(q *QuestionData, canEdit, inEditor bool) QuestionRowData {
-			return QuestionRowData{Question: q, CanEdit: canEdit, InEditor: inEditor}
-		},
-		// rhead does for round_head what qrow does for question_row.
-		"rhead": func(rnd *RoundData, quizID int64, canEdit, inEditor bool) RoundHeadData {
-			return RoundHeadData{Round: rnd, QuizID: quizID, CanEdit: canEdit, InEditor: inEditor}
-		},
 		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
 		// render.Renderer rebinds them per request.
 		"t":    func(string) string { return "" },
@@ -1227,13 +1217,6 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
-	// InEditor is always false on this page: the quiz view's rows stay plain
-	// links. The field exists because questions_list is shared with the
-	// two-pane editor and references it. See QuizEditorData.
-	InEditor bool
-	// OOB is always false on this page; the partial references it so a handler
-	// can render the rail as an out-of-band swap (#1257).
-	OOB bool
 	// Images is the quiz's image library, newest first, for the thumbnail
 	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
 	// in the template; the data loads regardless so an owner sees their
@@ -1260,29 +1243,6 @@ type QuizViewData struct {
 	UploadedCount  int
 	FailedCount    int
 	CancelledCount int
-}
-
-// QuestionRowData is one rendering of the question_row partial. CanEdit and
-// InEditor are page-level, so they are folded in per row rather than reached
-// for inside the template; OOB marks the row as an out-of-band swap, which is
-// how a save refreshes the rail without re-rendering (and re-binding) the
-// whole list.
-type QuestionRowData struct {
-	Question *QuestionData
-	CanEdit  bool
-	InEditor bool
-	OOB      bool
-}
-
-// RoundHeadData is one rendering of the round_head partial - a round's header
-// and summary without its question list, so a save can swap it out of band
-// without rebuilding the list's SortableJS instance.
-type RoundHeadData struct {
-	Round    *RoundData
-	QuizID   int64
-	CanEdit  bool
-	InEditor bool
-	OOB      bool
 }
 
 // RoundViewData is one round section on the quiz view: the round itself
@@ -1457,12 +1417,6 @@ func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*qu
 type roundsPartialData struct {
 	Quiz   *QuizData
 	Rounds []RoundViewData
-	// Always false here: a move swap re-renders the rail in whichever page it
-	// came from, and the editor re-renders its own rows. See QuizEditorData.
-	InEditor bool
-	// OOB marks the rail as an out-of-band swap, for handlers that re-render
-	// it alongside another fragment (#1257).
-	OOB bool
 }
 
 // renderRoundsPartial refetches the quiz tree and emits the
@@ -1765,12 +1719,6 @@ type questionFormData struct {
 	Quiz     *QuizData
 	Question *QuestionData
 	Round    *RoundData
-	// InEditor makes the form post through htmx into the editor pane instead
-	// of navigating (#1244). Without it the form is plain HTML: the browser
-	// submits normally, the handler never sees HX-Request, and the save falls
-	// back to its redirect - which looks like it works, because the quiz view
-	// it lands on also renders the rail.
-	InEditor bool
 	// Library is the question's own quiz image library, newest first, for
 	// the image-picker grid (#937). Empty when the quiz has no images yet,
 	// which the template renders as an upload-first hint instead of a
@@ -1817,27 +1765,14 @@ func HandleQuestionCreate(
 			return
 		}
 
-		createData := questionFormData{
+		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:        "Admin Dashboard - Question Create",
 			Quiz:         quizDataFromQuiz(qz),
 			Question:     &QuestionData{},
 			Round:        roundDataFromRound(rnd),
 			Library:      library,
 			AudioLibrary: audioLibrary,
-		}
-
-		// "Add question" in the editor rail opens the blank form in the pane;
-		// the quiz view's link still navigates to the standalone page, which
-		// is why that page survives slice 6 even though the edit route no
-		// longer uses it.
-		if htmx.IsRequest(r) {
-			createData.InEditor = true
-			renderer.RenderPartial(w, r, "question_form", createData)
-
-			return
-		}
-
-		renderer.Render(w, r, http.StatusOK, createData)
+		})
 	})
 }
 
@@ -1936,57 +1871,14 @@ func HandleQuestionEdit(
 			return
 		}
 
-		data := questionFormData{
+		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:        "Admin Dashboard - Question Edit",
 			Quiz:         quizDataFromQuiz(qz),
 			Question:     questionDataFromQuestion(qs),
 			Library:      library,
 			AudioLibrary: audioLibrary,
-		}
-
-		respondQuestionEdit(w, r, renderer, data, quizID, questionID)
+		})
 	})
-}
-
-// respondQuestionEdit writes the question-edit response: the bare form for the
-// editor pane, or a redirect into the editor for a direct visit (#1244 slice
-// 6). One way to edit a question instead of two; the deliberate cost is that
-// editing now needs JavaScript.
-//
-// The redirect is 303, NOT 301: this URL still serves the form itself to htmx,
-// and a permanent redirect is cacheable. The browser would cache it and then
-// serve it for the editor pane's own fetch, swapping a whole HTML document
-// into the pane instead of the form.
-func respondQuestionEdit(
-	w http.ResponseWriter,
-	r *http.Request,
-	renderer *render.Renderer,
-	data questionFormData,
-	quizID, questionID int64,
-) {
-	if htmx.IsRequest(r) {
-		data.InEditor = true
-		renderer.RenderPartial(w, r, "question_form", data)
-
-		return
-	}
-
-	// questionID 0 is the defensive blank-question branch, which has no editor
-	// URL to point at - it keeps rendering the page.
-	if questionID == 0 {
-		renderer.Render(w, r, http.StatusOK, data)
-
-		return
-	}
-
-	// strconv.FormatInt rather than fmt.Sprintf: both ids came off the request
-	// path, and %d taints the redirect for gosec G710.
-	http.Redirect(
-		w, r,
-		"/admin/quizzes/"+strconv.FormatInt(quizID, 10)+
-			"/questions?q="+strconv.FormatInt(questionID, 10),
-		http.StatusSeeOther,
-	)
 }
 
 // HandleQuizSetMode flips a quiz between solo and live without going through
@@ -2172,8 +2064,6 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 
 // HandleQuestionDelete deletes a question and all its options.
 func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	deleteRenderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizeditor.gohtml")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -2205,10 +2095,10 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		// From the editor the delete clears the pane and refreshes the rail
-		// (#1260). A plain form post falls back to the 303 reload.
+		// htmx removes the question row in place via an outerHTML swap; a
+		// plain form post falls back to the 303 reload of the quiz view.
 		if htmx.IsRequest(r) {
-			renderEditorAfterDelete(w, r, logger, csrfMgr, deleteRenderer, quizStore, quizID)
+			w.WriteHeader(http.StatusOK)
 
 			return
 		}
@@ -2258,16 +2148,6 @@ func HandleQuestionSave(
 		// just passes the question through; storeQuestion picks the
 		// right store method based on qs.ID.
 		if !storeQuestion(w, r, logger, csrfMgr, quizStore, qctx.Question) {
-			return
-		}
-
-		// In the editor the save stays on the page: the form re-renders in the
-		// pane and the rail's row follows out-of-band, so its text and flags
-		// update without re-rendering the list (which would tear down every
-		// SortableJS instance mid-session).
-		if htmx.IsRequest(r) {
-			renderSavedQuestion(w, r, logger, csrfMgr, formRenderer, quizStore, mediaStore, qctx)
-
 			return
 		}
 
