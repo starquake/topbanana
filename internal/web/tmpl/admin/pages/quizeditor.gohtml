@@ -54,6 +54,13 @@
              A ?q= deep link loads that question's form on page load rather
              than waiting for a click, so a shared or bookmarked URL opens on
              the question it names. */}}
+        {{/* Narrow screens show one pane at a time (#1259), so the pane needs a
+             way back to the rail. Hidden at desktop widths, where both are
+             visible and the control would be meaningless. */}}
+        <button type="button" class="editor-back" data-editor-back data-testid="editor-back">
+            &larr; All questions
+        </button>
+
         <main id="question-editor"
               class="min-h-0 overflow-y-auto p-6"
               data-testid="question-editor"

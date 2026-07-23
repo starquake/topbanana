@@ -345,6 +345,27 @@
     .editor-pane-sub {
         @apply text-[0.8rem] text-text-mute;
     }
+    /* One pane at a time below lg (#1259). Stacking the rail above the pane
+     * meant scrolling past every question in the quiz to reach the form for
+     * the one you picked, with nothing to say the form had moved below the
+     * fold. quiz-editor.js maintains data-pane-open as the selection changes,
+     * because an htmx selection never reloads the page. */
+    .editor-back {
+        @apply hidden items-center gap-2 px-3 py-2 text-[0.85rem] text-text-dim
+               bg-surface border-b border-border cursor-pointer
+               hover:text-text focus-visible:outline-none focus-visible:shadow-focus;
+    }
+    @media (width < 64rem) {
+        body[data-pane-open] .editor-back {
+            @apply flex;
+        }
+        body[data-pane-open] [data-testid="editor-rail"] {
+            @apply hidden;
+        }
+        body:not([data-pane-open]) #question-editor {
+            @apply hidden;
+        }
+    }
 
     /* Collapsed media pickers in the question form (#1244). The summary is
      * the current-selection row; the body is the library grid or clip list. */

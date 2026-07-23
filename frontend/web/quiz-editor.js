@@ -44,6 +44,17 @@ function markSelected(row) {
     }
 }
 
+// Below the editor's breakpoint only one pane shows at a time (#1259). The
+// flag lives on <body> rather than in the URL alone because an htmx selection
+// never reloads the page, so the server-rendered markup cannot track it.
+function setPaneOpen(open) {
+    if (open) {
+        document.body.dataset.paneOpen = '';
+    } else {
+        delete document.body.dataset.paneOpen;
+    }
+}
+
 function setDirty(dirty) {
     const label = document.querySelector('[data-editor-savestate]');
     if (label) {
@@ -136,7 +147,12 @@ function init() {
 
     // A ?q= deep link renders the pane's hx-trigger="load" fetch; mirror the
     // selection in the rail so the highlight matches what is open.
-    const selected = new URLSearchParams(window.location.search).get('q');
+    const params = new URLSearchParams(window.location.search);
+    // A deep link opens straight into the pane on a narrow screen; without a
+    // selection the rail is what you land on.
+    setPaneOpen(Boolean(params.get('q') || params.get('r')));
+
+    const selected = params.get('q');
     if (selected) {
         const row = document.querySelector(`${RAIL_ROW}[data-question-id="${CSS.escape(selected)}"]`);
         if (row) markSelected(row);
@@ -144,7 +160,20 @@ function init() {
 
     document.addEventListener('click', (event) => {
         const row = event.target.closest(RAIL_ROW);
-        if (row) markSelected(row);
+        if (row) {
+            markSelected(row);
+            setPaneOpen(true);
+        }
+        if (event.target.closest('[data-editor-round-row]')) {
+            setPaneOpen(true);
+        }
+        if (event.target.closest('[data-editor-add-question], [data-editor-add-round]')) {
+            setPaneOpen(true);
+        }
+        if (event.target.closest('[data-editor-back]')) {
+            event.preventDefault();
+            setPaneOpen(false);
+        }
     });
 
     // Any edit in the pane marks it dirty. Delegated on the pane because htmx
@@ -163,6 +192,13 @@ function init() {
     });
 
     document.addEventListener('keydown', onKeydown);
+
+    // hx-push-url puts the selection in history, so Back should return to the
+    // rail rather than leaving a stale pane on screen.
+    window.addEventListener('popstate', () => {
+        const q = new URLSearchParams(window.location.search);
+        setPaneOpen(Boolean(q.get('q') || q.get('r')));
+    });
 
     // The Save-and-next button takes the same path as Ctrl+Enter. Delegated on
     // the pane because htmx replaces the form on every selection and save.
