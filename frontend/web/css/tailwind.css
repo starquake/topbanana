@@ -334,6 +334,18 @@
                border-t border-border bg-surface px-6 py-3;
     }
 
+    /* Editor pane header (#1258): says which question is open, which nothing
+     * else did - the rail highlight was the only cue. */
+    .editor-pane-head {
+        @apply flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-5 pb-3 border-b border-border-soft;
+    }
+    .editor-pane-title {
+        @apply m-0 font-display font-extrabold uppercase tracking-[0.06em] text-[0.95rem];
+    }
+    .editor-pane-sub {
+        @apply text-[0.8rem] text-text-mute;
+    }
+
     /* Collapsed media pickers in the question form (#1244). The summary is
      * the current-selection row; the body is the library grid or clip list. */
     .media-picker {
