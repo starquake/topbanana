@@ -27,6 +27,8 @@ test('re-creating a quiz with an existing title yields a clean quiz, not a slug-
   await createQuizWithQuestions(page, title, QUIZ_QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
+  // The questions live in the editor now (#1260); the quiz view summarises.
+  await page.getByTestId('open-question-editor').click();
   await expect(page.locator('.q-text')).toHaveCount(QUIZ_QUESTIONS.length);
   for (const q of QUIZ_QUESTIONS) {
     await expect(page.locator('.q-text', { hasText: q.text })).toHaveCount(1);

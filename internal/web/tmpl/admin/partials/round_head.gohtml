@@ -23,6 +23,8 @@
     <div class="flex items-center gap-2 min-w-0">
         <h3 class="font-display font-bold uppercase tracking-[0.08em] text-[0.95rem] truncate">{{$round.Title}}</h3>
     </div>
+    {{/* Per-round icons are quiz-view furniture; the editor edits and deletes
+         a round in the pane (#1260). */}}
     {{if and $canEdit (not $inEditor)}}
     <div class="flex items-center gap-1">
         <a href="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/edit"

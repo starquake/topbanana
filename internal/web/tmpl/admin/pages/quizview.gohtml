@@ -220,18 +220,15 @@
         {{/* Rounds section. Questions are grouped into rounds in play
              order (#444); each round shows the authored round-summary text
              above its questions. */}}
-        <section aria-label="Rounds">
+        {{/* The editor owns the play sequence now (#1260, option B): the quiz
+             view no longer renders the rounds and questions itself. A compact
+             summary and a link into the editor replace it. */}}
+        <section aria-label="Play sequence">
             <div class="section-head">
-                <h2>Rounds</h2>
+                <h2>Play sequence</h2>
                 {{if .Rounds}}
                     <span class="section-count">{{len .Rounds}} round{{if ne (len .Rounds) 1}}s{{end}}{{if .Quiz.Questions}}, {{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}{{end}}</span>
                 {{end}}
-                {{/* Entry point to the two-pane editor (#1244). Content edits
-                     lock once published, so it follows $canEditContent.
-                     Named "Open question editor", not "Edit questions": the
-                     per-row control is labelled "Edit question", and two
-                     controls a letter apart confuse readers as much as they
-                     confuse getByRole's substring matching. */}}
                 {{if $canEditContent}}
                     <a href="/admin/quizzes/{{.Quiz.ID}}/questions"
                        data-testid="open-question-editor"
@@ -240,96 +237,19 @@
             </div>
 
             {{if .Rounds}}
-                {{template "questions_list" .}}
-
-                {{/* Delete modals - only mounted for the creator so
-                     non-owners can't open the dialog. The questions_list
-                     partial gates the per-row buttons on the same rule. */}}
-                {{if $canEditContent}}
-                {{range .Quiz.Questions}}
-                    <div id="modal-delete-question-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-question-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-                        <div class="absolute inset-0" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
-                        <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                            <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                                <p id="modal-delete-question-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete question</p>
-                                <button type="button" aria-label="close"
-                                        onclick="closeModal('modal-delete-question-{{.ID}}')"
-                                        class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                            </header>
-                            <section class="px-6 py-5 text-[0.95rem]">
-                                Are you sure you want to delete question <strong class="text-text">&#34;{{.Text}}&#34;</strong>? This will also delete all its options. This action cannot be undone.
-                            </section>
-                            <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
-                            <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                                <button type="button"
-                                        onclick="closeModal('modal-delete-question-{{.ID}}')"
-                                        class="btn-ghost">Cancel</button>
-                                {{/* after-request gates on success: on 5xx htmx skips the
-                                     swap, so the modal stays open and shows the error. */}}
-                                <form method="post"
-                                      action="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete"
-                                      hx-post="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete"
-                                      hx-target="#q-row-{{.ID}}"
-                                      hx-swap="outerHTML"
-                                      hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-question-{{.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
-                                      class="inline-flex">
-                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                    <button type="submit" class="btn-danger">Delete</button>
-                                </form>
-                            </footer>
-                        </div>
-                    </div>
-                {{end}}
-                {{range .Rounds}}
-                    {{$rnd := .Round}}
-                    <div id="modal-delete-round-{{$rnd.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-round-{{$rnd.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-                        <div class="absolute inset-0" onclick="closeModal('modal-delete-round-{{$rnd.ID}}')"></div>
-                        <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                            <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                                <p id="modal-delete-round-{{$rnd.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete round</p>
-                                <button type="button" aria-label="close"
-                                        onclick="closeModal('modal-delete-round-{{$rnd.ID}}')"
-                                        class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                            </header>
-                            <section class="px-6 py-5 text-[0.95rem]">
-                                Are you sure you want to delete round <strong class="text-text">&#34;{{$rnd.Title}}&#34;</strong>? Its questions will be deleted too. This action cannot be undone.
-                            </section>
-                            <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
-                            <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                                <button type="button"
-                                        onclick="closeModal('modal-delete-round-{{$rnd.ID}}')"
-                                        class="btn-ghost">Cancel</button>
-                                {{/* after-request gates on success: on 5xx htmx skips the
-                                     swap, so the modal stays open and shows the error. */}}
-                                <form method="post"
-                                      action="/admin/quizzes/{{$rnd.QuizID}}/rounds/{{$rnd.ID}}/delete"
-                                      hx-post="/admin/quizzes/{{$rnd.QuizID}}/rounds/{{$rnd.ID}}/delete"
-                                      hx-target="#round-section-{{$rnd.ID}}"
-                                      hx-swap="outerHTML"
-                                      hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-round-{{$rnd.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
-                                      class="inline-flex">
-                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                    <button type="submit" class="btn-danger">Delete</button>
-                                </form>
-                            </footer>
-                        </div>
-                    </div>
-                {{end}}
-                {{end}}
+                <ol class="flex flex-col gap-2" data-testid="round-summary">
+                    {{range .Rounds}}
+                        {{$round := .Round}}
+                        <li class="flex items-baseline gap-3 px-3 py-2 bg-surface border border-border-soft rounded-sm">
+                            <span class="font-display font-bold uppercase tracking-[0.08em] text-[0.85rem] truncate">{{$round.Title}}</span>
+                            <span class="text-[0.78rem] text-text-mute shrink-0">{{len .Questions}} question{{if ne (len .Questions) 1}}s{{end}}</span>
+                        </li>
+                    {{end}}
+                </ol>
             {{else}}
-                <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
-                    This quiz has no rounds yet.
-                </div>
-            {{end}}
-
-            {{if $canEditContent}}
-            <div class="mt-6 flex flex-wrap gap-2">
-                <a href="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
-                   class="btn-ghost gap-2">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-                    <span>Add round</span>
-                </a>
-            </div>
+                <p class="text-text-dim text-[0.9rem] italic">No rounds yet.
+                    {{if $canEditContent}}<a href="/admin/quizzes/{{.Quiz.ID}}/questions" class="text-accent underline">Open the editor</a> to add one.{{end}}
+                </p>
             {{end}}
         </section>
 
@@ -859,12 +779,9 @@
             openModal('image-modal-viewer');
         }
     </script>
-    {{/* Drag-and-drop reorder for rounds and questions (#199). Vendored
-         SortableJS plus a plain ES module; both are admin-only and loaded
-         only on this page, not in the global base layout. The module
-         self-noops when the edit handles are absent (read-only viewer). */}}
-    <script src="/static/js/vendor/sortable.min.js" defer></script>
-    <script type="module" src="/static/js/dist/quiz-reorder.js" defer></script>
+    {{/* No reorder scripts here anymore (#1260): reordering lives in the
+         question editor, which loads them itself. The quiz view only renders a
+         read-only play-sequence summary now. */}}
     <script type="module" src="/static/js/dist/quiz-image-upload.js" defer></script>
     <script type="module" src="/static/js/dist/quiz-audio-upload.js" defer></script>
 {{end}}

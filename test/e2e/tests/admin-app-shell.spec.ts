@@ -188,16 +188,11 @@ test('the editor rail and pane drop their full-page furniture', async ({ page, b
   await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: title }).click();
-
-  // The quiz view keeps both: it is the screen a host presents from.
-  await expect(page.locator('.q-spoiler').first()).toBeAttached();
-  await expect(page.locator('.q-actions').first()).toBeAttached();
-
   await page.getByTestId('open-question-editor').click();
   await expect(page).toHaveURL(/\/questions$/);
 
   // The rail drops them - answers are in the pane, and a row is a selector.
-  await expect(page.locator('[data-testid="editor-rail"] .q-spoiler')).toHaveCount(0);
+  // Per-row edit/delete icons belong to the old quiz view; the rail has none.
   await expect(page.locator('[data-testid="editor-rail"] .q-actions')).toHaveCount(0);
 
   await page.locator('article.q-row').first().click();

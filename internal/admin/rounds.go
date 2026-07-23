@@ -416,6 +416,8 @@ func positionFromForm(
 // creator can drop one of its rounds. Deleting a round cascades to its
 // questions via the ON DELETE CASCADE on questions.round_id.
 func HandleRoundDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	deleteRenderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizeditor.gohtml")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
 		if !ok {
@@ -456,7 +458,7 @@ func HandleRoundDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 		// FK cascade drops them too. A plain form post falls back to the
 		// 303 reload of the quiz view.
 		if htmx.IsRequest(r) {
-			w.WriteHeader(http.StatusOK)
+			renderEditorAfterDelete(w, r, logger, csrfMgr, deleteRenderer, quizStore, quizID)
 
 			return
 		}

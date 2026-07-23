@@ -216,12 +216,14 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
-	// Questions belong to a round (#929): scrape the default round's id
-	// off the quiz view's per-round "Add question" link and create the
-	// question against it, mirroring the button a host would click.
-	roundMatch := roundIDPattern.FindStringSubmatch(string(body))
+	// Questions belong to a round (#929): scrape the default round's id off the
+	// editor's per-round "Add question" link and create the question against
+	// it. The quiz view only summarises the sequence now (#1260), so the link
+	// lives in the editor.
+	editorBody := readPartial(ctx, t, client, baseURL+quizLocation+"/questions")
+	roundMatch := roundIDPattern.FindStringSubmatch(editorBody)
 	if roundMatch == nil {
-		t.Fatalf("quiz view body has no per-round Add question link, body:\n%s", string(body))
+		t.Fatalf("editor body has no per-round Add question link, body:\n%s", editorBody)
 	}
 	roundID := roundMatch[1]
 
@@ -314,34 +316,15 @@ func TestAdmin_Integration(t *testing.T) {
 	if got, want := string(body), quizDesc; !strings.Contains(got, want) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
-	if got, want := string(body), questionText; !strings.Contains(got, want) {
-		t.Errorf("string(body) = %q, should contain %q", got, want)
-	}
-	if got, want := string(body), questionOption1; !strings.Contains(got, want) {
-		t.Errorf("string(body) = %q, should contain %q", got, want)
-	}
-	if got, want := string(body), questionOption2; !strings.Contains(got, want) {
-		t.Errorf("string(body) = %q, should contain %q", got, want)
-	}
-	if got, want := string(body), questionOption3; !strings.Contains(got, want) {
-		t.Errorf("string(body) = %q, should contain %q", got, want)
-	}
-	if got, want := string(body), questionOption4; !strings.Contains(got, want) {
-		t.Errorf("string(body) = %q, should contain %q", got, want)
+
+	// The questions live in the editor now (#1260), not the quiz view's
+	// summary. The rail shows the question text; option persistence is covered
+	// by the handler-level save tests.
+	editorView := readPartial(ctx, t, client, baseURL+quizLocation+"/questions")
+	if !strings.Contains(editorView, questionText) {
+		t.Errorf("editor rail should contain the question %q", questionText)
 	}
 
-	// #246 — options sit behind a <details class="q-spoiler"> wrapper so an
-	// admin can present the quiz without exposing answers. Server-rendered
-	// HTML still contains the option text (the closed-by-default state is
-	// CSS-controlled), so the integration test just pins the structural
-	// shape; the open/close click behaviour is covered by e2e.
-	if got, want := string(body), `<details class="q-spoiler">`; !strings.Contains(got, want) {
-		t.Errorf("string(body) should contain spoiler wrapper %q", want)
-	}
-	if got, want := string(body), `Show spoilers`; !strings.Contains(got, want) {
-		t.Errorf("string(body) should contain spoiler affordance label %q", want)
-	}
-	if got, want := string(body), `aria-label="Toggle answer options for question`; !strings.Contains(got, want) {
-		t.Errorf("string(body) should contain spoiler aria-label prefix %q", want)
-	}
+	// The spoiler is gone (#1260): the quiz view no longer renders the sequence,
+	// and the editor puts answers in the pane rather than behind a toggle.
 }
