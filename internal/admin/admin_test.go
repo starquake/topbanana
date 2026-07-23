@@ -487,7 +487,7 @@ func TestHandleQuizView(t *testing.T) {
 // for questions carrying that media, the option and correct-answer counts
 // reflect the seeded options, and a question with no correct option marked gets
 // the warning tint.
-func TestHandleQuizView_QuestionIndicators(t *testing.T) {
+func TestHandleQuizEditor_QuestionIndicators(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.DiscardHandler)
@@ -524,17 +524,15 @@ func TestHandleQuizView_QuestionIndicators(t *testing.T) {
 		t.Fatalf("UpdateQuestion err = %v, want nil", err)
 	}
 
-	handler := HandleQuizView(
-		logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{}, testUploadLimits(),
-	)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+	handler := HandleQuizEditor(logger, nil, env.quizzes)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/questions", nil)
 	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, withTestAdmin(req))
 
 	if got, want := rr.Code, http.StatusOK; got != want {
-		t.Fatalf("quiz view status = %d, want %d", got, want)
+		t.Fatalf("editor status = %d, want %d", got, want)
 	}
 	body := rr.Body.String()
 

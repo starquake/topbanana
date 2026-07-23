@@ -127,6 +127,7 @@ func renderSavedQuestion(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	renderer *render.Renderer,
+	quizStore quiz.Store,
 	mediaStore QuestionMediaStore,
 	qctx *questionSaveCtx,
 ) {
@@ -136,16 +137,45 @@ func renderSavedQuestion(
 	}
 
 	questionData := questionDataFromQuestion(qctx.Question)
+	formFragment := render.Fragment{Name: "question_form", Data: questionFormData{
+		Title:        "Admin Dashboard - Question Edit",
+		Quiz:         quizDataFromQuiz(qctx.Quiz),
+		Question:     questionData,
+		Library:      library,
+		AudioLibrary: audioLibrary,
+		InEditor:     true,
+	}}
 
-	renderer.RenderPartials(w, r,
-		render.Fragment{Name: "question_form", Data: questionFormData{
-			Title:        "Admin Dashboard - Question Edit",
-			Quiz:         quizDataFromQuiz(qctx.Quiz),
-			Question:     questionData,
-			Library:      library,
-			AudioLibrary: audioLibrary,
-			InEditor:     true,
-		}},
+	// A new question has no rail row to graft onto, so the whole rail
+	// re-renders; an edit swaps just the one row it already owns. Same split
+	// as adding a round (#1257).
+	if qctx.IsNew {
+		// Re-read the quiz: qctx.Quiz predates the insert, so its question list
+		// is missing the row we just saved and the rail would render empty.
+		refreshed, ok := quizByID(w, r, logger, csrfMgr, quizStore, qctx.Quiz.ID)
+		if !ok {
+			return
+		}
+		rounds, ok := loadRounds(w, r, logger, csrfMgr, quizStore, qctx.Quiz.ID)
+		if !ok {
+			return
+		}
+		quizData := quizDataFromQuiz(refreshed)
+		attachCanEdit(r, quizData)
+
+		renderer.RenderPartials(w, r, formFragment,
+			render.Fragment{Name: "questions_list", Data: roundsPartialData{
+				Quiz:     quizData,
+				Rounds:   buildRoundView(rounds, quizData.Questions),
+				InEditor: true,
+				OOB:      true,
+			}},
+		)
+
+		return
+	}
+
+	renderer.RenderPartials(w, r, formFragment,
 		render.Fragment{Name: "question_row", Data: QuestionRowData{
 			Question: questionData,
 			CanEdit:  true,

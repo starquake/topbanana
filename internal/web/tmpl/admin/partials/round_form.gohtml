@@ -90,6 +90,17 @@
                 <button type="button" class="btn-ghost btn-compact" data-testid="editor-discard"
                         hx-get="/admin/quizzes/{{.Round.QuizID}}/rounds/{{.Round.ID}}/edit"
                         hx-target="#question-editor" hx-swap="innerHTML">Discard</button>
+                {{if .Round.ID}}
+                {{/* Deleting a round takes its questions with it - the confirm
+                     says so. Same pane-clear + rail-refresh as question delete
+                     (#1260). */}}
+                <button type="button" class="btn-ghost btn-compact text-danger"
+                        data-testid="editor-delete-round"
+                        hx-post="/admin/quizzes/{{.Round.QuizID}}/rounds/{{.Round.ID}}/delete"
+                        hx-target="#question-editor" hx-swap="innerHTML"
+                        hx-confirm="Delete this round and all its questions? This cannot be undone."
+                        hx-vals='{"csrf_token": "{{csrfToken}}"}'>Delete round</button>
+                {{end}}
             {{else}}
                 <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
             {{end}}

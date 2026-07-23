@@ -113,10 +113,9 @@ test('an edited sound description shows in the question editor audio picker', as
   await page.getByTestId('audio-description-save').first().click();
   await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Theme tune');
 
-  await page.getByRole('link', { name: 'Edit question' }).first().click();
-  // The standalone question page is retired (#1244 slice 6): editing now
-  // happens in the two-pane editor.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  // Editing happens in the editor now (#1260); open it and select the question.
+  await page.getByTestId('open-question-editor').click();
+  await page.locator('article.q-row').first().click();
   await expect(page.locator('#question-editor form')).toBeVisible();
 
   await openMediaPicker(page, 'audio');
@@ -140,10 +139,9 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
 
   // Open the question editor for the one seeded question.
-  await page.getByRole('link', { name: 'Edit question' }).first().click();
-  // The standalone question page is retired (#1244 slice 6): editing now
-  // happens in the two-pane editor.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  // Editing happens in the editor now (#1260); open it and select the question.
+  await page.getByTestId('open-question-editor').click();
+  await page.locator('article.q-row').first().click();
   await expect(page.locator('#question-editor form')).toBeVisible();
 
   await openMediaPicker(page, 'audio');

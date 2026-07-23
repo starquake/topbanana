@@ -88,6 +88,8 @@ async function openQuiz(page: Page, title: string): Promise<void> {
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: doc.title }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  // Reordering moved to the editor (#1260); the quiz view only summarises now.
+  await page.getByTestId('open-question-editor').click();
   await expect(page.locator('#questions-list')).toBeVisible();
 }
 

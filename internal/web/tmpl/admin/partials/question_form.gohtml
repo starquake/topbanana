@@ -347,6 +347,17 @@
                         hx-get="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/edit"
                         hx-target="#question-editor"
                         hx-swap="innerHTML">Discard</button>
+                {{/* Delete lives in the editor now the quiz view no longer
+                     renders the sequence (#1260). hx-confirm gates it; the
+                     handler clears the pane and refreshes the rail. */}}
+                <button type="button"
+                        data-testid="editor-delete-question"
+                        hx-post="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/delete"
+                        hx-target="#question-editor"
+                        hx-swap="innerHTML"
+                        hx-confirm="Delete this question? This cannot be undone."
+                        hx-vals='{"csrf_token": "{{csrfToken}}"}'
+                        class="btn-ghost btn-compact text-danger">Delete</button>
                 <span class="grow"></span>
                 <span class="text-[0.72rem] text-text-mute">Ctrl+S save &middot; Ctrl+Enter next</span>
             </div>

@@ -47,12 +47,12 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   const libraryThumb = page.getByTestId('library-thumb').first();
   await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole('link', { name: 'Edit question' }).first().click();
-  // The standalone question page is retired (#1244 slice 6): editing now
-  // happens in the two-pane editor.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\?q=\d+$/);
+  // Editing happens in the two-pane editor now (#1260); open it and select the
+  // question to attach the image.
+  await page.getByTestId('open-question-editor').click();
+  await page.locator('article.q-row').first().click();
   await expect(page.locator('#question-editor form')).toBeVisible();
-  // The picker is collapsed in the form now (#1244); open it before clicking.
+  // The picker is collapsed in the form (#1244); open it before clicking.
   await openMediaPicker(page, 'image');
   const pickerThumb = page
     .getByTestId('question-image-picker')

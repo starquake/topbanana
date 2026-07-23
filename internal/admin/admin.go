@@ -2172,6 +2172,8 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 
 // HandleQuestionDelete deletes a question and all its options.
 func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	deleteRenderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizeditor.gohtml")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -2203,10 +2205,10 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		// htmx removes the question row in place via an outerHTML swap; a
-		// plain form post falls back to the 303 reload of the quiz view.
+		// From the editor the delete clears the pane and refreshes the rail
+		// (#1260). A plain form post falls back to the 303 reload.
 		if htmx.IsRequest(r) {
-			w.WriteHeader(http.StatusOK)
+			renderEditorAfterDelete(w, r, logger, csrfMgr, deleteRenderer, quizStore, quizID)
 
 			return
 		}
@@ -2264,7 +2266,7 @@ func HandleQuestionSave(
 		// update without re-rendering the list (which would tear down every
 		// SortableJS instance mid-session).
 		if htmx.IsRequest(r) {
-			renderSavedQuestion(w, r, logger, csrfMgr, formRenderer, mediaStore, qctx)
+			renderSavedQuestion(w, r, logger, csrfMgr, formRenderer, quizStore, mediaStore, qctx)
 
 			return
 		}

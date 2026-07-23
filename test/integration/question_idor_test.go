@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -187,25 +186,8 @@ func verifyAdminBSeesVictimQuestion(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID int64, victimText string,
 ) {
 	t.Helper()
-	viewReq, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID), nil,
-	)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	viewResp, err := client.Do(viewReq)
-	if err != nil {
-		t.Fatalf("Do err = %v, want nil", err)
-	}
-	defer closeBody(t, viewResp.Body)
-	if got, want := viewResp.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("victim quiz view status = %d, want %d", got, want)
-	}
-	body, err := io.ReadAll(viewResp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll err = %v, want nil", err)
-	}
-	if !strings.Contains(string(body), victimText) {
-		t.Errorf("victim quiz view body missing %q (adminB should still see their own question)", victimText)
+	body := readPartial(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/questions", quizID))
+	if !strings.Contains(body, victimText) {
+		t.Errorf("adminB editor missing %q (they should still see their own question)", victimText)
 	}
 }
