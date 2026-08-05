@@ -5,14 +5,13 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Fetch Dependabot metadata
         id: meta
@@ -33,6 +32,9 @@ jobs:
   rebase-stale:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       # Auto-merge alone never lands a PR that main has moved past: the ruleset is
       # strict, and only Dependabot can bring its branch forward while keeping the
