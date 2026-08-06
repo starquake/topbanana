@@ -1,15 +1,17 @@
 name: Dependabot auto-merge
 
-on: pull_request
-
-permissions:
-  contents: write
-  pull-requests: write
+on:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Fetch Dependabot metadata
         id: meta
@@ -17,12 +19,52 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Skip /tools: those pins are tracking-only, and the version that is
-      # actually used has to be mirrored into the Makefile + ci.yml by hand.
+      # Skip only /tools direct requires: those versions have to be mirrored into
+      # the Makefile + ci.yml by hand. Indirect bumps there are mirrored nowhere.
       # Safe under the signed-commit ruleset: Dependabot signs its own rebases and GitHub signs the squash-merge.
       - name: Enable auto-merge
-        if: steps.meta.outputs.directory != '/tools'
+        if: steps.meta.outputs.directory != '/tools' || !startsWith(steps.meta.outputs.dependency-type, 'direct')
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  rebase-stale:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Auto-merge alone never lands a PR that main has moved past: the ruleset is
+      # strict, and only Dependabot can bring its branch forward while keeping the
+      # commits signed. One PR per push, so the queue drains as a train rather than
+      # rebuilding every branch to land a single merge.
+      - name: Rebase the oldest stale Dependabot PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.ref_name }}
+        run: |
+          candidates=$(gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,headRefName,author,autoMergeRequest \
+            --jq '[.[] | select(.author.login == "app/dependabot" and .autoMergeRequest != null)]
+                  | sort_by(.number)[] | "\(.number) \(.headRefName)"')
+
+          if [ -z "$candidates" ]; then
+            echo "No open Dependabot PR has auto-merge enabled."
+            exit 0
+          fi
+
+          while read -r number head; do
+            behind=$(gh api "repos/$REPO/compare/$BASE...$head" --jq '.behind_by' 2>/dev/null || true)
+            case "$behind" in ''|*[!0-9]*) behind=0 ;; esac
+            if [ "$behind" -gt 0 ]; then
+              echo "PR #$number is $behind commit(s) behind $BASE; asking Dependabot to rebase."
+              gh pr comment "$number" --repo "$REPO" --body '@dependabot rebase'
+              exit 0
+            fi
+            echo "PR #$number is up to date with $BASE."
+          done <<< "$candidates"
+
+          echo "No stale Dependabot PR to rebase."
