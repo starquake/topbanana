@@ -2,6 +2,10 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.8.0 — 2026-08-06
+
+This release updates internal dependencies and contains no user-facing changes.
+
 ## v2026.7.3 — 2026-07-22
 
 This release adds an optional admin-approval step for new accounts and redesigns the quiz review page shown before publishing.
