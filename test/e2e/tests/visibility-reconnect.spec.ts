@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, execSqlite } from './helpers';
+import { seedQuiz, claimAndJoin, execSqlite, waitForAlpineComponent } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -78,6 +78,7 @@ test.describe('lobby visibility reconnect', () => {
     // EventSource never reconnects on its own, so no further ticks arrive. This
     // reaches the eventSource handle directly (not a fix-only helper) so the
     // assertions below fail against the unfixed code, pinning the regression.
+    await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
     const dropped = await page.evaluate(() => {
       const root = document.querySelector('[x-data="joinApp"]');
       // window.Alpine is the vendored global; $data returns the component.
@@ -159,6 +160,7 @@ test.describe('lobby visibility reconnect', () => {
     // ticks entirely. A closed EventSource never reconnects, so no further
     // state reads fire. This reaches the eventSource handle directly (not a
     // fix-only helper) so the assertion below fails against unfixed code.
+    await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
     const dropped = await page.evaluate(() => {
       const root = document.querySelector('[x-data="joinApp"]');
       // window.Alpine is the vendored global; $data returns the component.

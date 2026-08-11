@@ -11,6 +11,7 @@ import {
   markAdmin,
   login,
   setQuizMode,
+  waitForAlpineComponent,
   waitForHostRoom,
 } from './helpers';
 
@@ -124,6 +125,7 @@ test.describe('live client connection trouble', () => {
     await page.route(`**/api/sessions/${code}/state`, (route) =>
       route.fulfill({ status: 500, body: 'boom' }),
     );
+    await waitForAlpineComponent(page, '[x-data^="hostBigScreen"]', 'refresh');
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => {
         const root = document.querySelector('[x-data^="hostBigScreen"]');
@@ -178,6 +180,7 @@ test.describe('live client connection trouble', () => {
     await page.route(`**/api/sessions/${code}/state`, (route) =>
       route.fulfill({ status: 404, body: 'not found' }),
     );
+    await waitForAlpineComponent(page, '[x-data^="hostBigScreen"]', 'refresh');
     await page.evaluate(() => {
       const root = document.querySelector('[x-data^="hostBigScreen"]');
       const cmp = (window as unknown as { Alpine: { $data: (el: Element) => { refresh: () => Promise<void> } } }).Alpine.$data(root!);

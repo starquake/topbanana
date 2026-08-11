@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, execSqlite } from './helpers';
+import { seedQuiz, claimAndJoin, execSqlite, waitForAlpineComponent } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -54,6 +54,7 @@ function deleteSession(joinCode: string): void {
 // recovery. Reaches the eventSource handle directly (not a fix-only helper), the
 // same hook visibility-reconnect.spec.ts uses.
 async function dropStream(page: import('./fixtures').Page): Promise<boolean> {
+  await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
   return page.evaluate(() => {
     const root = document.querySelector('[x-data="joinApp"]');
     const cmp = (window as unknown as {

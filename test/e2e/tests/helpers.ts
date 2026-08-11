@@ -584,6 +584,26 @@ export async function waitForHostRoom(host: Page): Promise<string> {
   return host.url().split('/host/')[1];
 }
 
+// waitForAlpineComponent waits until the component exposes key, so a reach-in
+// cannot run before the deferred Alpine script initializes it (#1281); keyed
+// because $data on an un-initialized element returns an empty proxy, not a throw.
+export async function waitForAlpineComponent(
+  page: Page,
+  selector: string,
+  key: string,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ sel, k }) => {
+      const root = document.querySelector(sel);
+      const alpine = (window as unknown as {
+        Alpine?: { $data: (el: Element) => Record<string, unknown> };
+      }).Alpine;
+      return Boolean(root && alpine && k in alpine.$data(root));
+    },
+    { sel: selector, k: key },
+  );
+}
+
 // endHostedSession ends a live session through its lobby End-session control so
 // the host's dashboard returns to a hostable state for the next test (a host
 // runs one session at a time, #850). Idempotent: a no-op if the room is already

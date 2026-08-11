@@ -1,7 +1,13 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { importQuiz, setQuizMode, claimAndJoin, playerRow } from './helpers';
+import {
+  importQuiz,
+  setQuizMode,
+  claimAndJoin,
+  playerRow,
+  waitForAlpineComponent,
+} from './helpers';
 
 // #1179: the host big screen had no recovery from a hard-closed SSE stream. When
 // EventSource gives up for good (a fatal non-200, e.g. the server bouncing during
@@ -41,6 +47,7 @@ async function seedLiveQuiz(host: Page, title: string): Promise<void> {
 // never reconnects on its own, so no further state reads fire until a recovery
 // path re-subscribes.
 async function closeHostStream(page: Page): Promise<boolean> {
+  await waitForAlpineComponent(page, '[x-data^="hostBigScreen"]', 'source');
   return page.evaluate(() => {
     const root = document.querySelector('[x-data^="hostBigScreen"]');
     const cmp = (window as unknown as {
@@ -58,6 +65,7 @@ async function closeHostStream(page: Page): Promise<boolean> {
 // gives up permanently. The component's onerror sees CLOSED and schedules the
 // backoff re-subscribe - the exact path that used to be a dead end (#1179).
 async function hardCloseHostStream(page: Page): Promise<boolean> {
+  await waitForAlpineComponent(page, '[x-data^="hostBigScreen"]', 'source');
   return page.evaluate(() => {
     const root = document.querySelector('[x-data^="hostBigScreen"]');
     const cmp = (window as unknown as {
