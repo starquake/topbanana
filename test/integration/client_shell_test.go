@@ -17,7 +17,7 @@ func TestClientShell_RootCarriesXCloak(t *testing.T) {
 
 	ctx, srv := startServer(t, nil)
 
-	// Both shell entry points render the same static index.html, so a
+	// Both shell entry points render the same static index.gohtml, so a
 	// regression in the template surfaces on either path.
 	assertRootCloaked(ctx, t, srv.BaseURL+"/client/")
 	assertRootCloaked(ctx, t, srv.BaseURL+"/play/does-not-exist-99999")

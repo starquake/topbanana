@@ -142,7 +142,9 @@ const (
 	// behaviours flip on this (see [Config.SecureCookies] and the DB_URI /
 	// SESSION_KEY validation in [Parse]).
 	AppEnvironmentProduction = "production"
-	// ClientDirDefault specifies the default directory for the player-client static files.
+	// ClientDirDefault is the default override for the player-client package
+	// directory (the one holding static/ and tmpl/). Empty means "use the
+	// embedded FS".
 	ClientDirDefault = ""
 	// WebStaticDirDefault is the default override for the shared static-asset
 	// directory served at /static/. Empty means "serve from the embedded FS"; a
@@ -253,6 +255,12 @@ type Config struct {
 	// has no writable app FS by default. Created at startup if missing.
 	MediaDir string
 
+	// ClientDir overrides the player-client package directory, whose static/
+	// subtree is served at /client/ and whose tmpl/ subtree holds the shell
+	// templates. Empty means "use the embedded FS" (the production default);
+	// set to e.g. internal/client in dev so an esbuild or template edit lands
+	// without a binary restart. Honoured only when AppEnvironment ==
+	// "development".
 	ClientDir string
 
 	// WebStaticDir overrides the on-disk path served at /static/ for the

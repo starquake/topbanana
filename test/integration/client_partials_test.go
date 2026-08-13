@@ -9,8 +9,8 @@ import (
 
 // TestStandingsBarsPartial_SharedAcrossLiveBlocks pins #754: the standings
 // bar-graph rows are a single {{define "standings-bars"}} partial
-// (partials/standings_bars.html) reused by the round_results, intermission
-// (#836), and finished blocks of the live player shell (join.html). Serving the
+// (partials/standings_bars.gohtml) reused by the round_results, intermission
+// (#836), and finished blocks of the live player shell (join.gohtml). Serving the
 // shell exercises the render path that parses the partial; a missing, renamed,
 // or non-embedded partial fails the parse and returns 500. The partial also
 // depends on the static/* embed recursing into the partials subdirectory, which
@@ -46,8 +46,8 @@ func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 }
 
 // TestBrandMarkPartial_SharedAcrossShells pins #754: the banana wordmark is a
-// single {{define "brand-mark"}} partial (partials/brand_mark.html) reused by
-// the solo shell (index.html) and the live player shell (join.html). Serving
+// single {{define "brand-mark"}} partial (partials/brand_mark.gohtml) reused by
+// the solo shell (index.gohtml) and the live player shell (join.gohtml). Serving
 // both shells exercises the render path that parses the partial.
 func TestBrandMarkPartial_SharedAcrossShells(t *testing.T) {
 	t.Parallel()
@@ -79,8 +79,8 @@ func assertBrandMarkPartial(ctx context.Context, t *testing.T, url string) {
 	}
 }
 
-// TestPlayerHeader_SharedAcrossShells pins #844: the solo shell (index.html)
-// and the live player shell (join.html) carry one consistent header - the
+// TestPlayerHeader_SharedAcrossShells pins #844: the solo shell (index.gohtml)
+// and the live player shell (join.gohtml) carry one consistent header - the
 // brand mark plus the signed-in account control. The control gates on
 // isAuthenticated() (an Alpine expression Alpine evaluates client-side), so
 // the inert <template x-if> markup ships in the served HTML for both shells

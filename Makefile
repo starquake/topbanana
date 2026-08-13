@@ -400,7 +400,7 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
 # player client loads Alpine + anime too, but from this same web-served copy at
 # /static/js/vendor/ rather than a per-client duplicate, so only this one tree
 # is built (the client shells reference the /static/ URLs; see
-# internal/client/static/index.html and join.html).
+# internal/client/tmpl/index.gohtml and join.gohtml).
 JS_VENDOR_SRC     := frontend/vendor
 JS_VENDOR_WEB_OUT := internal/assets/static/js/vendor
 JS_VENDOR_WEB_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
