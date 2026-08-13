@@ -254,8 +254,8 @@ test('the host TV roster reflects a player rename', async ({
 });
 
 // #755 cross-surface contract (TV half): the host TV round-intro names the round
-// and words its heading correctly, matching the live player surface (join.html)
-// and the solo client (index.html) field-for-field even though the TV uses its
+// and words its heading correctly, matching the live player surface (join.gohtml)
+// and the solo client (index.gohtml) field-for-field even though the TV uses its
 // own room-scale typography. A two-round quiz with a round summary exercises all
 // three round-intro fields the surfaces share: the title (round-title), the
 // optional summary (round-summary), and an accurate "Round N of M" eyebrow
