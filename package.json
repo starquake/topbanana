@@ -4,7 +4,7 @@
   "description": "Build tooling for the Top Banana player client JS bundles (esbuild). Not a runtime dependency.",
   "license": "UNLICENSED",
   "devDependencies": {
-    "alpinejs": "3.15.12",
+    "alpinejs": "3.16.1",
     "animejs": "4.5.0",
     "esbuild": "0.28.1",
     "howler": "2.2.4",
