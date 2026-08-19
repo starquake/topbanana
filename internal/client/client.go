@@ -11,29 +11,32 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 )
 
-//go:embed static/*
-var staticFS embed.FS
+//go:embed static/* tmpl/*
+var clientFS embed.FS
 
-// Handler returns an [http.Handler] that serves the client files.
-// If cfg.ClientDir is not empty, it serves files from that directory.
-func Handler(cfg *config.Config) http.Handler {
-	var fsys fs.FS
+// subFS returns the named subtree of this package: the on-disk copy under
+// cfg.ClientDir when that dev override is set, the embedded copy otherwise.
+func subFS(cfg *config.Config, dir string) fs.FS {
+	var root fs.FS = clientFS
 	if cfg.ClientDir != "" {
-		fsys = os.DirFS(cfg.ClientDir)
-	} else {
-		var err error
-		fsys, err = fs.Sub(staticFS, "static")
-		if err != nil {
-			panic(err)
-		}
+		root = os.DirFS(cfg.ClientDir)
+	}
+	sub, err := fs.Sub(root, dir)
+	if err != nil {
+		panic(err)
 	}
 
-	return http.StripPrefix("/client", http.FileServer(http.FS(noDirFS{fsys})))
+	return sub
+}
+
+// Handler returns an [http.Handler] that serves the client files.
+// If cfg.ClientDir is not empty, it serves static/ from that directory.
+func Handler(cfg *config.Config) http.Handler {
+	return http.StripPrefix("/client", http.FileServer(http.FS(noDirFS{subFS(cfg, "static")})))
 }
 
 // noDirFS wraps an [fs.FS] so [http.FileServer] returns 404 for a directory
-// instead of generating a browsable index that would list the raw template
-// fragments under static/partials/.
+// instead of generating a browsable index of the served tree.
 type noDirFS struct {
 	fsys fs.FS
 }

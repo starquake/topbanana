@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"html/template"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/config"
@@ -44,7 +42,7 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 	return &ShellHandlers{cfg: cfg, quizStore: quizStore, logger: logger}
 }
 
-// shellData feeds the index.html template. One title value drives both
+// shellData feeds the index.gohtml template. One title value drives both
 // <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
 //
@@ -62,7 +60,7 @@ type shellData struct {
 // Index handles GET /client/{$} - the SPA root with no quiz context. Uses
 // the sitewide default Open Graph card.
 func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "index.html", shellData{
+	s.render(w, r, "index.gohtml", shellData{
 		Title:               defaultOGTitle,
 		Description:         defaultOGDescription,
 		RegistrationEnabled: s.cfg.RegistrationEnabled,
@@ -70,12 +68,12 @@ func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
 }
 
 // Join handles GET /join and GET /join/{code} - the player join + lobby
-// surface (MP-4 / #681). It renders join.html with the sitewide Open Graph
+// surface (MP-4 / #681). It renders join.gohtml with the sitewide Open Graph
 // card: a room code is short-lived and per-session, so a shared /join link
 // must not leak a live game into link previews. The room code is read from
 // the URL client-side; the shell carries no per-session data.
 func (s *ShellHandlers) Join(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "join.html", shellData{
+	s.render(w, r, "join.gohtml", shellData{
 		Title:               defaultOGTitle,
 		Description:         defaultOGDescription,
 		RegistrationEnabled: s.cfg.RegistrationEnabled,
@@ -98,7 +96,7 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 		s.applyQuizOG(r, id, &data)
 	}
 
-	s.render(w, r, "index.html", data)
+	s.render(w, r, "index.gohtml", data)
 }
 
 // applyQuizOG overrides the share card's title/description with the named quiz's
@@ -139,15 +137,15 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		"t":           func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"lang":        func() string { return loc },
 	}
-	// partials/ holds the {{define}} blocks shared between index.html (solo) and
-	// join.html (live): round_intro.html ("round-intro-card"), standings_bars.html
-	// ("standings-bars"), brand_mark.html ("brand-mark"), and lang_switcher.html
+	// partials/ holds the {{define}} blocks shared between index.gohtml (solo) and
+	// join.gohtml (live): round_intro ("round-intro-card"), standings_bars
+	// ("standings-bars"), brand_mark ("brand-mark"), and lang_switcher
 	// ("lang-switcher"). Parsing them alongside every shell keeps both able to
 	// invoke the partials; a missing or renamed file fails loudly here rather than
 	// rendering a blank surface.
-	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name,
-		"partials/round_intro.html", "partials/standings_bars.html", "partials/brand_mark.html",
-		"partials/lang_switcher.html")
+	t, err := template.New(name).Funcs(funcs).ParseFS(subFS(s.cfg, "tmpl"), name,
+		"partials/round_intro.gohtml", "partials/standings_bars.gohtml", "partials/brand_mark.gohtml",
+		"partials/lang_switcher.gohtml")
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "parse shell template", slog.Any("err", err), slog.String("template", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -160,14 +158,4 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		// truncated response rather than a stray 500.
 		s.logger.ErrorContext(r.Context(), "render shell template", slog.Any("err", err), slog.String("template", name))
 	}
-}
-
-// fsys mirrors Handler: ClientDir override for dev, embedded for prod.
-func (s *ShellHandlers) fsys() fs.FS {
-	if s.cfg.ClientDir != "" {
-		return os.DirFS(s.cfg.ClientDir)
-	}
-	sub, _ := fs.Sub(staticFS, "static")
-
-	return sub
 }

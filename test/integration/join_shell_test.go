@@ -9,7 +9,7 @@ import (
 
 // TestJoinShell_ServesCloakedShell pins the MP-4 (#681) player join surface:
 // both the bare /join enter-code entry and the /join/{code} QR deep-link
-// target render the same join.html shell bound to the joinApp Alpine
+// target render the same join.gohtml shell bound to the joinApp Alpine
 // component, carrying x-cloak so the deferred-Alpine window does not flash
 // the wrong phase before init() resolves which one to paint. Alpine strips
 // x-cloak at runtime, so the served HTML is the only place the guard is

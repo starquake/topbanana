@@ -43,8 +43,9 @@ frontend/                         ← build-time SOURCE (edit here)
                                      inlined into BOTH bundle trees via the @shared/ import alias
   vendor/                         ← vendored-lib source
 internal/client/static/           ← SERVED player-client output (do NOT hand-edit)
-  js/dist/{app,join}.js           ← esbuild bundles (committed)   | js/vendor/ ← Alpine, anime, htmx
-  index.html, partials            ← HTML shells
+  js/dist/{app,join}.js           ← esbuild bundles (committed)
+internal/client/tmpl/             ← player-client Go HTML templates (.gohtml)
+  index.gohtml, join.gohtml, partials/
 internal/assets/static/           ← SERVED web/admin/host output (do NOT hand-edit)
   js/dist/*.js                    ← esbuild bundles (committed)   | js/vendor/ ← + sortable.min.js
   css/app.css                     ← built Tailwind output (committed)
@@ -56,12 +57,12 @@ internal/web/tmpl/                ← admin/host Go HTML templates (.gohtml)
 - `make js` rebuilds both bundle trees; `make js-watch-client` / `make js-watch-web` rebuild one tree on change (one watcher per served `dist` dir). `make js-check` (wired into `make check`) fails when the committed bundles drift from source.
 - `make tailwind` builds `app.css`; `make tailwind-watch` rebuilds on change; `make tailwind-check` (in `make check`) fails on drift.
 - **Rebuild and commit the bundles / `app.css` whenever you change JS or Tailwind classes**, or CI flags drift.
-- Dev loop: run the server (optionally `CLIENT_DIR=internal/client/static go run ./cmd/server` to serve the static tree without recompiling the binary), plus `make js-watch-client` and `make tailwind-watch` in separate terminals so the bundles and CSS rebuild on edit. One Make target per long-running process — never a combined supervisor.
+- Dev loop: run the server (optionally `CLIENT_DIR=internal/client go run ./cmd/server` to serve its `static/` tree and parse its `tmpl/` shells from disk without recompiling the binary), plus `make js-watch-client` and `make tailwind-watch` in separate terminals so the bundles and CSS rebuild on edit. One Make target per long-running process — never a combined supervisor.
 - The built bundles are embedded in the distroless image, so production needs no Node.
 
 ## How Alpine + the bundle are wired
 
-The served HTML shell (`internal/client/static/index.html`) loads the vendored libs as classic scripts and the **built** bundle as a module:
+The served HTML shell (`internal/client/tmpl/index.gohtml`) loads the vendored libs as classic scripts and the **built** bundle as a module:
 
 ```html
 <script src="/static/js/vendor/anime.umd.min.js"></script>

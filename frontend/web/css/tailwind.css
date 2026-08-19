@@ -33,6 +33,7 @@
  * vendored-lib bump (a sortablejs/animejs bump otherwise fails tailwind-check). */
 @source "../../../internal/assets/static/js/dist";
 @source "../../../internal/client/static";
+@source "../../../internal/client/tmpl";
 @source "../*.js";
 @source "../../client";
 @source "../../shared";
@@ -678,7 +679,7 @@
     }
 
     /* --- Player-surface components (#238). Lifted from the old
-     * synthwave.css. Used only by internal/client/static/index.html;
+     * synthwave.css. Used only by internal/client/tmpl/index.gohtml;
      * named generically so admin can pick them up if a future page
      * needs the same affordance. */
 

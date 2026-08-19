@@ -13,10 +13,15 @@ the top-level `frontend/` tree: `frontend/client/` (player client), `frontend/we
 (admin/host JS + `css/tailwind.css`), and `frontend/shared/` (cross-tree modules).
 The `internal/client/static` and `internal/assets/static` trees hold **only served
 output**: the committed esbuild bundles (`js/dist/*`), the committed Tailwind
-output (`css/app.css`), vendored libs (`js/vendor/*`), raw-served scripts, HTML
-shells, partials, fonts, and images. Because the static trees are served-only,
-each is embedded with a plain `//go:embed static/*` and the source never ships in
+output (`css/app.css`), vendored libs (`js/vendor/*`), raw-served scripts, fonts,
+and images. Because the static trees are served-only, the source never ships in
 the binary (#756).
+
+The player client's Go templates are **not** served output and live beside the
+static tree in `internal/client/tmpl` (`index.gohtml`, `join.gohtml`,
+`partials/*.gohtml`), mirroring `internal/web/tmpl` for the admin/host surfaces
+(#1284). Keeping them out of `static/` is what stops the file server handing out
+raw `{{ ... }}` template source.
 
 Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.config.js`). The source is `frontend/web/css/tailwind.css`; the built, minified output `internal/assets/static/css/app.css` is committed and served at `/static/css/app.css` for both the web pages (`internal/web`) and the game client (`internal/client`).
 

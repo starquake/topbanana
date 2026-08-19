@@ -9,8 +9,8 @@ import (
 
 // TestRoundIntroPartial_SharedAcrossShells pins #748: the round-intro title
 // and summary markup is a single {{define "round-intro-card"}} partial
-// (partials/round_intro.html) reused by both the solo shell (index.html) and
-// the live player shell (join.html). Serving the shells exercises the render
+// (partials/round_intro.gohtml) reused by both the solo shell (index.gohtml) and
+// the live player shell (join.gohtml). Serving the shells exercises the render
 // path that parses the partial; a missing, renamed, or non-embedded partial
 // fails the parse and returns 500. The partial also depends on the static/*
 // embed recursing into the partials subdirectory, which this guards in
