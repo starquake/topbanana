@@ -1,7 +1,13 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { importQuiz, setQuizMode, claimAndJoin, playerRow } from './helpers';
+import {
+  importQuiz,
+  setQuizMode,
+  claimAndJoin,
+  playerRow,
+  waitForAlpineComponent,
+} from './helpers';
 
 // #1178: GET /state reads fire un-awaited from every SSE tick with no
 // sequencing, so two overlapping reads can resolve out of order and apply an
@@ -71,6 +77,7 @@ async function answerOverApi(request: APIRequestContext, code: string, text: str
 // closeHostStream closes the big screen's SSE channel so no background tick
 // fires refresh() during the controlled out-of-order reads.
 async function closeHostStream(page: Page): Promise<boolean> {
+  await waitForAlpineComponent(page, '[x-data^="hostBigScreen"]', 'source');
   return page.evaluate(() => {
     const root = document.querySelector('[x-data^="hostBigScreen"]');
     const cmp = (window as unknown as {
