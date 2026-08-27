@@ -444,6 +444,7 @@ func TestCreateAdmin_ExistingEmail_ReturnsError(t *testing.T) {
 	t.Cleanup(cleanup)
 	seedPlayer(t, dbURI, "alice")
 
+	//nolint:dupword // password then its confirmation, not a repeated word
 	stdin := strings.NewReader("correct-horse-battery\ncorrect-horse-battery\n")
 	var stdout, stderr bytes.Buffer
 	err := CreateAdmin(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice@example.test")
@@ -836,6 +837,7 @@ func TestResetPassword_UnknownEmail_ReturnsError(t *testing.T) {
 	// Apply migrations so the players table exists.
 	seedPlayer(t, dbURI, "someone-else")
 
+	//nolint:dupword // password then its confirmation, not a repeated word
 	stdin := strings.NewReader("new-correct-battery\nnew-correct-battery\n")
 	var stdout, stderr bytes.Buffer
 	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "ghost@example.test")
