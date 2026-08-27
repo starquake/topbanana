@@ -46,7 +46,7 @@ jobs:
         with:
           # Pinned. MUST match GOLANGCI_VERSION in the project Makefile —
           # bump them together so local `make lint` matches CI exactly.
-          version: v2.12.2
+          version: v2.13.1
           # No golangci result cache either, for the same reason (#1042).
           skip-cache: true
 
