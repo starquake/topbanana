@@ -133,7 +133,8 @@ var ErrSMTPAuthIncomplete = errors.New("SMTP_USERNAME and SMTP_PASSWORD must bot
 // password as PLAIN auth over an unencrypted connection. The local
 // Mailpit setup (SMTP_TLS=false with no credentials) stays allowed.
 var ErrSMTPAuthOverCleartext = errors.New(
-	"smtp_username and smtp_password require smtp_tls=true; refusing to send credentials over cleartext")
+	"smtp_username and smtp_password require smtp_tls=true; refusing to send credentials over cleartext",
+)
 
 const (
 	// AppEnvironmentDefault is the default application environment.

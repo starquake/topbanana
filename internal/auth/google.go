@@ -133,7 +133,8 @@ func HandleGoogleLogin(logger *slog.Logger, authn *GoogleAuthenticator) http.Han
 		// login.
 		if next := SafeNextPath(r.URL.Query().Get("next")); next != "" {
 			http.SetCookie(w, googleNextCookie(
-				signNext(authn.stateKey, next), authn.cfg.SecureCookies, googleStateMaxAge))
+				signNext(authn.stateKey, next), authn.cfg.SecureCookies, googleStateMaxAge,
+			))
 		} else {
 			http.SetCookie(w, googleNextCookie("", authn.cfg.SecureCookies, -1))
 		}

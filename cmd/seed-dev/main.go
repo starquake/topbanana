@@ -164,7 +164,8 @@ func main() {
 		`which seed set to load: "test" (small fixture quizzes) or "demo" (showcase quizzes)`)
 	fixturePath := flag.String("fixtures", "dev/fixtures/quizzes.json", "path to the JSON fixture file (test seed)")
 	demoArchiveDir := flag.String(
-		"demo-archive-dir", defaultDemoArchiveDir, "directory of demo quiz archive zips (demo seed)")
+		"demo-archive-dir", defaultDemoArchiveDir, "directory of demo quiz archive zips (demo seed)",
+	)
 	dbURI := flag.String("db", "", "DB URI (defaults to $DB_URI or the dev default)")
 	mediaDir := flag.String("media-dir", config.MediaDirDefault, "filesystem directory for stored media (audio clips)")
 	playersFlag := flag.Int("players", defaultPlayerCount, "number of anonymous players to seed")

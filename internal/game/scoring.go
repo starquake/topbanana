@@ -59,7 +59,8 @@ func scoreAnswerCurve(
 		// delay - #247). Without clamping, a negative duration would
 		// score above maxPoints. Treat early arrivals as if they landed
 		// at startedAt.
-		answeredAt.Sub(startedAt), 0)
+		answeredAt.Sub(startedAt), 0,
+	)
 
 	return int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 }
