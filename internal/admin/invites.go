@@ -201,7 +201,8 @@ func HandleInviteResend(logger *slog.Logger, deps InviteDeps) http.Handler {
 		// The invited recipient has no account, so no stored locale; the
 		// resent email uses the inviting admin's request locale.
 		err := auth.ResendInviteEmail(
-			r.Context(), deps.Invites, deps.Sender, deps.BaseURL, locale.Resolve(r), inviteID, time.Now().UTC())
+			r.Context(), deps.Invites, deps.Sender, deps.BaseURL, locale.Resolve(r), inviteID, time.Now().UTC(),
+		)
 		switch {
 		case err == nil:
 			setInviteNotice(deps.Flash, w,

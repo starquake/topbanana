@@ -126,7 +126,8 @@ func HandleVerifyEmail(
 		ownerID, err := deps.Tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
 		if err == nil {
 			promoted := promoteVerifiedAdminIfAllowlisted(
-				r.Context(), logger, deps.Players, deps.Roles, deps.AdminEmails, ownerID)
+				r.Context(), logger, deps.Players, deps.Roles, deps.AdminEmails, ownerID,
+			)
 			maybeNotifyAwaitingApproval(r.Context(), logger, deps, ownerID, promoted, locale.Resolve(r))
 		}
 		landing := postVerifyLanding(w, r, deps.Players, deps.Sessions, ownerID)

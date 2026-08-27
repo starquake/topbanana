@@ -165,7 +165,8 @@ func TestResendInviteEmail_RotateFailureSkipsSend(t *testing.T) {
 	mailerStub := &recordingSender{}
 
 	err := ResendInviteEmail(
-		t.Context(), invites, mailerStub, "https://topbanana.example", locale.LocaleEN, 1, time.Now())
+		t.Context(), invites, mailerStub, "https://topbanana.example", locale.LocaleEN, 1, time.Now(),
+	)
 	if got, want := err, ErrInviteNotPending; !errors.Is(got, want) {
 		t.Errorf("err = %v, want wrapping %v", got, want)
 	}

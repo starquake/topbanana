@@ -75,7 +75,8 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_NewUnapprovedBlockedAndNotified(t
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, true, approval)
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, true, approval,
+	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -126,7 +127,8 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_RepeatUnapprovedBlockedNoMail(t *
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, false, approval)
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, false, approval,
+	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -167,7 +169,8 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 
 	// The guest signs in with Google for the first time (claim-session branch).
 	player, firstReg, err := ExportLinkOrCreateGooglePlayerFirstReg(
-		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, true)
+		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, true,
+	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayerFirstReg err = %v, want nil", err)
 	}
@@ -194,7 +197,8 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), player, firstReg, approval)
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), player, firstReg, approval,
+	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -249,7 +253,8 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_ApprovedSignsIn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), approved, false, approval)
+		rec, req, discardLogger(), ps, session.New([]byte("k"), false), approved, false, approval,
+	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
