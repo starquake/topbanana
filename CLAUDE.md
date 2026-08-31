@@ -10,17 +10,6 @@ make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
 make smoke            # validate startup against the existing dev DB (no HTTP listener)
 ```
 
-## Project layout
-
-- `cmd/server/` — binary entrypoint (`app/` wires dependencies; `commands.go` handles `-check` / reset-password / admin tasks); `cmd/seed-dev/` seeds the dev DB.
-- `internal/` — the app, grouped by domain and concern:
-  - **Domains**: `auth`, `admin`, `quiz`, `game` (solo play), `livesession` (live host-driven play), `profile`, `home`, `leaderboard`.
-  - **HTTP**: `server` (routing), `handlers` (shared helpers), `clientapi` (player JSON API), `web` (admin/host templates), `client` (player SPA shell), `media` / `mediahttp` (image uploads).
-  - **Data**: `store` (SQLite impls) over `db` (sqlc-generated — **do not edit**) from `queries/*.sql`; `migrations` (goose); `database` (open/tx helpers).
-  - **Infra**: `config`, `session`, `csrf`, `mailer`, `health`, `version`, `request`, `render`.
-- `frontend/` — build-time JS/CSS source (`client/`, `web/`, `shared/`); built bundles + Tailwind output are committed under `internal/*/static/` (served, embedded — see `.claude/rules/frontend-style.md`).
-- `test/integration/` (black-box, through the running server) and `test/e2e/` (Playwright); `internal/dbtest` is the layer-test DB choke point.
-
 ## Commits and PRs
 
 ### Attribution
@@ -215,7 +204,6 @@ The friendly-client half is a JS concurrency cap in `frontend/shared/uploadQueue
 ## Tooling
 
 - **Prefer modern CLI tools**: `rg` / `fd` / `sd` / `yq` / `ast-grep` over `grep` / `find` / `sed` / `wc`. Reach for `ast-grep` first when matching code structure (invoke it as `ast-grep`, not `sg`). Inspect files with the Read tool, not `sed` / `cat`.
-  - **How to use `rg`** (per `rg --help`): it recurses the cwd by default and honors `.gitignore`, so there is no recursive flag to add. Common flags: `-n` line numbers, `-l` files-with-matches, `-c` count-per-file, `-o` only the match, `-i` ignore-case / `-S` smart-case, `-w` whole-word, `-F` fixed-strings (literal, no regex), `-U` multiline, `-v` invert-match, `-A`/`-B`/`-C NUM` context lines, `-g GLOB` path filter (e.g. `-g '!*_test.go'`), `-t`/`-T TYPE` include/exclude a filetype (`-t go`), `-e PATTERN` (repeatable; needed when the pattern starts with `-`), `-m NUM` max matches per file.
   - **Gotcha: `-r` is `--replace <TEXT>`, NOT grep's "recursive".** Never bundle `-r` expecting recursion: `rg -rn 'pat'` parses as `--replace=n` and `rg -rln 'pat'` as `--replace=ln`, silently rewriting every match to that string in the output (e.g. `dist/cooldown.js` prints as `dist/lncooldown.js`).
 - **`golangci-lint` lives at `build/bin/golangci-lint`** (not on `PATH`). To clear its cache use `rm -rf ~/.cache/golangci-lint` — `golangci-lint cache clean` is a silent no-op because the binary isn't on `PATH`. Bumping `GOLANGCI_VERSION` (or the `sqlc` / `mailpit` / Tailwind pins) re-downloads on the next `make` run: each download records its version beside the binary, and a mismatch deletes the stale one.
 - **"main lint red but local clean" is usually a stale-cache phantom** — an unused-`nolint` flagged on a still-needed directive. `nolintlint.allow-unused: true` in `.golangci.yml` tolerates it; confirm via the failing check-run that only `lint` is red. `.golangci.yml` also excludes `.claude` — agents run in worktrees under `.claude/worktrees/`, and without the exclusion golangci scans those sibling checkouts and floods the run with phantom findings.
