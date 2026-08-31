@@ -126,20 +126,6 @@ gh api repos/starquake/topbanana/rulesets/$RID --jq '.rules[] | select(.type=="r
 
 When removing a job, drop its context from the ruleset too — a stale required-context name blocks every PR indefinitely.
 
-## Deploys
-
-Staging and production are **independent pipelines** (`.github/workflows/deploy.yml`), not a soak-and-promote chain — production never auto-promotes from staging.
-
-The image is **built once, after the suite is green**, and reused — the `CI` workflow's `docker-build` job `needs: [build, lint, e2e]`, so a published image always implies the tests passed for that commit (#630). `deploy.yml` keys on the `CI` workflow succeeding (not a separate Docker build), so a deploy only fires when tests + image are both green.
-
-- **Staging** deploys on every merge to `main`: `docker-build` pushes `edge` + `sha-<commit>` tags after the suite passes, a successful `CI` run on `main` fires `deploy-staging`, goose runs pending migrations on container boot (12x5s health-check loop gates success).
-- **Production** deploys when a `v*.*.*` tag is pushed: the `promote` job **retags the existing `sha-<commit>` image** (the one built and tested on `main`) to `{version}` (e.g. `2026.5.8`) + `{major}.{minor}` — no rebuild and no re-run of the suite. A successful `CI` run on the tag fires `deploy-production` pulling that exact version. Production is whatever the latest `v*.*.*` tag points at.
-- **Manual**: `workflow_dispatch` with an `environment` input redeploys without a code change.
-
-Consequences for work in flight: "merged to `main`" means live in **staging**, not production. Production stays on the last tag until a new one is cut, and all changes since the previous tag ship together when it is. A schema migration runs on staging at next container boot, on production at next tag deploy.
-
-Both jobs build a fresh `.env` from GitHub **secrets** (masked in logs: `SESSION_KEY`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`, ...) and **variables** (unmasked: `BASE_URL`, `REGISTRATION_ENABLED`, `ADMIN_EMAILS`). Both are scoped per-environment — a value set on `staging` is not visible to `production`.
-
 ## Comments
 
 Default to writing **no** comments. Code with well-named identifiers, small functions, and clear control flow explains *what* it does — that's not the comment's job. A comment earns its place only when the *why* is non-obvious: a hidden constraint, a subtle invariant, a workaround for a specific bug, behaviour that would surprise a reader.
@@ -191,15 +177,6 @@ Table rebuilds (SQLite's idiom for `ALTER COLUMN` / FK changes) pick a pattern b
 - **Parent** (others reference it, e.g. `players`): `defer_foreign_keys` does NOT work — use `-- +goose NO TRANSACTION`, `PRAGMA foreign_keys = OFF`, an explicit `BEGIN TRANSACTION ... COMMIT`, then `PRAGMA foreign_keys = ON`, and add the file to the `make lint-migrations` allowlist. Canonical: `20260529160000_roles_player_host_admin.sql`.
 
 `PRAGMA foreign_key_check` is NOT a guard (goose discards its rows) — add the `_fk_guard` CHECK-constraint pattern before COMMIT to abort on a dangling reference. `make lint-migrations` flags new `foreign_keys = OFF` files outside the allowlist (advisory). **Full how-to — the guard SQL, the why, the canonical files — is in the `backend-dev` agent.**
-
-## Media uploads
-
-The media upload route (`POST /admin/quizzes/{quizID}/media`) has a per-request file count cap (`maxUploadFilesPerRequest`), but the form JS fires **one request per picked file**, so that cap alone is bypassable by a runaway/malicious client. Two server-side backstops in `internal/mediahttp/upload.go` close the gap (#988); any new upload-style route must compose the same shape rather than trusting the per-request cap:
-
-- **Per-host file budget** (`UploadBudgetLimiter`): a sliding-window limiter keyed by player id that charges the **file count** per request, so N single-file POSTs draw down the same budget one N-file batch would. Over budget returns **429** with `Retry-After`. Config: `MEDIA_UPLOAD_BUDGET` (default 60) over `MEDIA_UPLOAD_BUDGET_WINDOW` (default 1m); zero disables.
-- **Per-quiz library cap**: rejects an upload that would push a quiz over its image ceiling with **409**, checked **before** the budget charge so a clear admin denial does not also spend the host's rate budget. Config: `MEDIA_QUIZ_IMAGE_LIMIT` (default 200); zero disables.
-
-The friendly-client half is a JS concurrency cap in `frontend/shared/uploadQueue.js` (`MAX_CONCURRENT_UPLOADS`, queues the rest) — CPU/network courtesy only, not a security boundary; the server limits are authoritative.
 
 ## Tooling
 
