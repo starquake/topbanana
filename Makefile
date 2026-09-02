@@ -24,7 +24,12 @@ COV_DIR := $(BUILD_DIR)/coverage
 # binary whose record no longer matches the pin, so the download rule re-fires.
 # Evaluated at parse time, before make stats any target - deleting a target from
 # inside a recipe is too late, as make has already decided it is up to date.
-toolpin = $(shell [ "$$(cat $(1).version 2>/dev/null)" = "$(2)" ] || rm -f $(1))
+# Skipped under -n so a dry run stays free of side effects: MAKEFLAGS' first word
+# carries the single-letter options with no leading dash, so an `n` there means
+# -n/--dry-run, while a long option (--no-print-directory) arrives as its own
+# dashed word and must not match.
+MAKE_DRY_RUN := $(if $(filter-out -%,$(firstword $(MAKEFLAGS))),$(findstring n,$(firstword $(MAKEFLAGS))))
+toolpin = $(if $(MAKE_DRY_RUN),,$(shell [ "$$(cat $(1).version 2>/dev/null)" = "$(2)" ] || rm -f $(1)))
 
 # Host detection. Used by both the Tailwind and golangci-lint download
 # targets to pick the right release asset. Defined here once instead of
