@@ -16,6 +16,16 @@ BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
 COV_DIR := $(BUILD_DIR)/coverage
 
+# Downloaded tools (golangci-lint, sqlc, mailpit, Tailwind) install to a
+# version-independent path, so make's file-exists check cannot tell a stale
+# binary from a current one - `make lint` kept running golangci-lint 2.12.2 for
+# days after the pin moved to 2.13.1, silently disagreeing with CI. Each
+# download records what it installed in <binary>.version; toolpin removes a
+# binary whose record no longer matches the pin, so the download rule re-fires.
+# Evaluated at parse time, before make stats any target - deleting a target from
+# inside a recipe is too late, as make has already decided it is up to date.
+toolpin = $(shell [ "$$(cat $(1).version 2>/dev/null)" = "$(2)" ] || rm -f $(1))
+
 # Host detection. Used by both the Tailwind and golangci-lint download
 # targets to pick the right release asset. Defined here once instead of
 # inside each tool section so future binary pins can reuse the values.
@@ -45,6 +55,9 @@ SQLC_BIN     := $(BIN_DIR)/sqlc
 # the version here manually.
 MAILPIT_VERSION := v1.30.1
 MAILPIT_BIN     := $(BIN_DIR)/mailpit
+
+# Drop any tool binary whose recorded version no longer matches its pin above.
+TOOLPIN_CHECKED := $(call toolpin,$(GOLANGCI_BIN),$(GOLANGCI_VERSION))$(call toolpin,$(SQLC_BIN),$(SQLC_VERSION))$(call toolpin,$(MAILPIT_BIN),$(MAILPIT_VERSION))
 
 # Developer check before committing. Includes smoke (#349) so the
 # migration-against-existing-data class of bug — which test-coverage's
@@ -293,6 +306,7 @@ seed-dev-demo:
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
+TOOLPIN_CHECKED += $(call toolpin,$(TAILWIND_BIN),$(TAILWIND_VERSION))
 TAILWIND_INPUT      := frontend/web/css/tailwind.css
 TAILWIND_OUTPUT     := internal/assets/static/css/app.css
 
@@ -322,6 +336,7 @@ $(TAILWIND_BIN):
 	curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $@ \
 	    https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
 	chmod +x $@
+	@echo $(TAILWIND_VERSION) > $@.version
 
 .PHONY: tailwind
 tailwind: $(TAILWIND_BIN)
@@ -517,6 +532,7 @@ $(GOLANGCI_BIN):
 	    mv $$tmp/$(GOLANGCI_DIR)/golangci-lint $@ && \
 	    rm -rf $$tmp
 	@chmod +x $@
+	@echo $(GOLANGCI_VERSION) > $@.version
 
 # --- sqlc --------------------------------------------------------------------
 #
@@ -556,6 +572,7 @@ $(SQLC_BIN):
 	    mv $$tmp/sqlc $@ && \
 	    rm -rf $$tmp
 	@chmod +x $@
+	@echo $(SQLC_VERSION) > $@.version
 
 # --- mailpit -----------------------------------------------------------------
 #
@@ -591,6 +608,7 @@ $(MAILPIT_BIN):
 	    mv $$tmp/mailpit $@ && \
 	    rm -rf $$tmp
 	@chmod +x $@
+	@echo $(MAILPIT_VERSION) > $@.version
 
 # Build stamp for local `go run` dev (#663). Unlike `go build`, `go run`
 # does NOT embed VCS info, so without these ldflags the admin footer and
