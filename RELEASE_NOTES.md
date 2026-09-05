@@ -2,6 +2,13 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.9.0 — 2026-09-05
+
+This release stops the player client's page templates being served as raw source, and updates internal dependencies.
+
+- The player client's page templates are no longer served as files: `/client/join.html` and the `/client/partials/*.html` fragments used to answer with unrendered template markup and now return 404, while the pages themselves are unaffected.
+- `CLIENT_DIR`, the development-only override for the player client's files, now points at the client package directory rather than its `static` subdirectory; a stale value makes the client assets 404.
+
 ## v2026.8.0 — 2026-08-06
 
 This release updates internal dependencies and contains no user-facing changes.
