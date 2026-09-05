@@ -43,7 +43,7 @@ UNAME_M := $(shell uname -m)
 # the prereq evaluates to empty and the download never fires. The
 # version MUST match `with: version:` in the lint job of .github/workflows/ci.yml
 # — bump both together; dependabot does not track this field.
-GOLANGCI_VERSION := v2.13.1
+GOLANGCI_VERSION := v2.13.2
 GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
 
 # sqlc version + binary path. Same parse-time-expansion reason for the
