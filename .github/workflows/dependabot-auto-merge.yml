@@ -2,13 +2,11 @@ name: Dependabot auto-merge
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    if: github.actor == 'dependabot[bot]'
     permissions:
       contents: write
       pull-requests: write
@@ -29,42 +27,10 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  rebase-stale:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      # Auto-merge alone never lands a PR that main has moved past: the ruleset is
-      # strict, and only Dependabot can bring its branch forward while keeping the
-      # commits signed. One PR per push, so the queue drains as a train rather than
-      # rebuilding every branch to land a single merge.
-      - name: Rebase the oldest stale Dependabot PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          BASE: ${{ github.ref_name }}
-        run: |
-          candidates=$(gh pr list --repo "$REPO" --state open --limit 100 \
-            --json number,headRefName,author,autoMergeRequest \
-            --jq '[.[] | select(.author.login == "app/dependabot" and .autoMergeRequest != null)]
-                  | sort_by(.number)[] | "\(.number) \(.headRefName)"')
-
-          if [ -z "$candidates" ]; then
-            echo "No open Dependabot PR has auto-merge enabled."
-            exit 0
-          fi
-
-          while read -r number head; do
-            behind=$(gh api "repos/$REPO/compare/$BASE...$head" --jq '.behind_by' 2>/dev/null || true)
-            case "$behind" in ''|*[!0-9]*) behind=0 ;; esac
-            if [ "$behind" -gt 0 ]; then
-              echo "PR #$number is $behind commit(s) behind $BASE; asking Dependabot to rebase."
-              gh pr comment "$number" --repo "$REPO" --body '@dependabot rebase'
-              exit 0
-            fi
-            echo "PR #$number is up to date with $BASE."
-          done <<< "$candidates"
-
-          echo "No stale Dependabot PR to rebase."
+# Auto-merge alone does not land a PR that main has moved past: the ruleset is
+# strict. Bringing the branch forward is manual (a local `git rebase origin/main`
+# + force-push, which re-signs the commits) - deliberately, not by omission.
+# A `rebase-stale` job used to post `@dependabot rebase` here; Dependabot refuses
+# commands from github-actions[bot] ("only users with push access"), so it never
+# once worked while reporting success on every run. See #1294 before re-adding
+# anything of that shape.
