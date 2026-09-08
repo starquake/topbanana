@@ -161,7 +161,7 @@ func roundedQuiz() *quiz.Quiz {
 		},
 		{
 			Title:                   "Finish",
-			BoundaryDurationSeconds: ptr(15),
+			BoundaryDurationSeconds: new(15),
 			Questions: []*quiz.Question{
 				{
 					Text:     "Capital of Italy?",
@@ -177,8 +177,6 @@ func roundedQuiz() *quiz.Quiz {
 
 	return qz
 }
-
-func ptr(v int) *int { return &v }
 
 // readArchive unzips the export bytes into a name->bytes map and decodes the
 // manifest, failing the test on any structural problem.

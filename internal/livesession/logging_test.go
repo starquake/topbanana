@@ -169,7 +169,7 @@ func newLoggingHarness(t *testing.T, start time.Time, rounds [][]bool) *loggingH
 	service.SetAdvancer(runner)
 
 	const hostID int64 = 1 // seeded admin
-	sess := &Session{QuizID: quizIDPtr(qz.ID), HostPlayerID: hostID, JoinCode: "LOG234"}
+	sess := &Session{QuizID: new(qz.ID), HostPlayerID: hostID, JoinCode: "LOG234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
