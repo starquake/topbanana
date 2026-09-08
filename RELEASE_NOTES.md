@@ -2,6 +2,12 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.9.1 — 2026-09-08
+
+This release updates internal dependencies and raises the Go version needed to build from source.
+
+- Building from source now needs Go 1.26, up from 1.25; the published container image already carries the right toolchain, so running from it is unchanged.
+
 ## v2026.9.0 — 2026-09-05
 
 This release stops the player client's page templates being served as raw source, and updates internal dependencies.
