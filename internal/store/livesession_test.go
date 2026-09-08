@@ -37,10 +37,6 @@ func newLiveQuiz(t *testing.T, qs *QuizStore) *quiz.Quiz {
 	return qz
 }
 
-// liveQuizIDPtr returns a pointer to a quiz id, for building the optional
-// Session.QuizID in these store tests (#836: quiz_id is nullable).
-func liveQuizIDPtr(id int64) *int64 { return &id }
-
 func TestLiveSessionStore_CreateAndGetByJoinCode(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +45,7 @@ func TestLiveSessionStore_CreateAndGetByJoinCode(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ABC234"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ABC234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -95,12 +91,12 @@ func TestLiveSessionStore_CreateSession_DuplicateJoinCode(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	first := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "DUP234"}
+	first := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "DUP234"}
 	if err := sessionStore.CreateSession(t.Context(), first); err != nil {
 		t.Fatalf("first CreateSession err = %v, want nil", err)
 	}
 
-	second := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "DUP234"}
+	second := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "DUP234"}
 	if got, want := sessionStore.CreateSession(
 		t.Context(),
 		second,
@@ -124,14 +120,14 @@ func TestLiveSessionStore_CreateSession_IDCollisionIsNotJoinCodeUnavailable(t *t
 
 	sessionStore.SetSessionIDForTest("collide00000000000000")
 
-	first := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK1234"}
+	first := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK1234"}
 	if err := sessionStore.CreateSession(t.Context(), first); err != nil {
 		t.Fatalf("first CreateSession err = %v, want nil", err)
 	}
 
 	// Same forced id, fresh join code: the failure is a PK collision, so it
 	// must not be ErrJoinCodeUnavailable.
-	second := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK5678"}
+	second := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK5678"}
 	err := sessionStore.CreateSession(t.Context(), second)
 	if err == nil {
 		t.Fatal("CreateSession err = nil, want an error on id collision")
@@ -150,7 +146,7 @@ func TestLiveSessionStore_AddPlayer_AndRoster(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ROST23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ROST23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -198,7 +194,7 @@ func TestLiveSessionStore_Roster_ReflectsPlayerRename(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RNAM23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RNAM23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -235,7 +231,7 @@ func TestLiveSessionStore_AddPlayer_RejoinIsIdempotent(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "REJN23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "REJN23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -272,7 +268,7 @@ func TestLiveSessionStore_SetReady(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RDY234"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RDY234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -305,7 +301,7 @@ func TestLiveSessionStore_SetReady_NotParticipant(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "NPRT23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "NPRT23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -354,7 +350,7 @@ func TestLiveSessionStore_PhaseTransitions(t *testing.T) {
 	qz := newLiveQuizWithQuestion(t, quizStore)
 	q := qz.Questions[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PHAS23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PHAS23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -463,7 +459,7 @@ func TestLiveSessionStore_ArmAndCancelStart(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuizWithQuestion(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ARM234"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ARM234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -527,7 +523,7 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	q := qz.Questions[0]
 	correctOpt := q.Options[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ANSW23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ANSW23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -592,7 +588,7 @@ func TestLiveSessionStore_RecordAnswer_RefreshesLastSeen(t *testing.T) {
 	qz := newLiveQuizWithQuestion(t, quizStore)
 	q := qz.Questions[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RFLS23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RFLS23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -634,7 +630,7 @@ func TestLiveSessionStore_TouchLastSeen(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "TCH234"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "TCH234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -680,7 +676,7 @@ func TestLiveSessionStore_TouchHostLastSeen(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "HST234"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "HST234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -728,7 +724,7 @@ func TestLiveSessionStore_ActiveCounts(t *testing.T) {
 	qz := newLiveQuizWithQuestion(t, quizStore)
 	q := qz.Questions[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ACTV23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ACTV23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -800,7 +796,7 @@ func TestLiveSessionStore_ActiveCounts_RealTimestampEncoding(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RENC23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "RENC23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -889,7 +885,7 @@ func seedFinishedSession(
 ) {
 	t.Helper()
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: joinCode}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: joinCode}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -921,7 +917,7 @@ func TestLiveSessionStore_Standings(t *testing.T) {
 	r1q1, r1q2, r2q1 := qz.Questions[0], qz.Questions[1], qz.Questions[2]
 	round1, round2 := r1q1.RoundID, r2q1.RoundID
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "STND23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "STND23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1038,7 +1034,7 @@ func TestLiveSessionStore_EnterRoundResults(t *testing.T) {
 	qz := newLiveQuizWithQuestion(t, quizStore)
 	q := qz.Questions[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ERRS23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "ERRS23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1085,7 +1081,7 @@ func TestLiveSessionStore_StaleTransitionDoesNotResurrectFinished(t *testing.T) 
 	qz := newLiveQuizWithQuestion(t, quizStore)
 	q := qz.Questions[0]
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "STAL23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "STAL23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1205,7 +1201,7 @@ func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromRoster(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "LEFT23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "LEFT23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1264,7 +1260,7 @@ func TestLiveSessionStore_MarkPlayerLeft_NotParticipant(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "NLVE23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "NLVE23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1300,7 +1296,7 @@ func TestLiveSessionStore_MarkPlayerLeft_KeepsPlayedInStandings(t *testing.T) {
 	r1q1 := qz.Questions[0]
 	round1 := r1q1.RoundID
 
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "LSTN23"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "LSTN23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1398,7 +1394,7 @@ func TestLiveSessionStore_Intermission_BumpsQuizPlayCount(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 
 	qz := newLiveQuizWithQuestion(t, quizStore)
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT001"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT001"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1431,7 +1427,7 @@ func TestLiveSessionStore_Intermission_SkipsBumpWhenFalse(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 
 	qz := newLiveQuizWithQuestion(t, quizStore)
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT002"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT002"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -1459,7 +1455,7 @@ func TestLiveSessionStore_Intermission_RepeatCallDoesNotDoubleBump(t *testing.T)
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 
 	qz := newLiveQuizWithQuestion(t, quizStore)
-	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT003"}
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT003"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
