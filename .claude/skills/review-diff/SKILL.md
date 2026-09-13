@@ -32,9 +32,14 @@ Ask by posting a review comment on the line the finding is about:
 
 The comment says what is wrong, gives the recommended fix, then lists the three words the maintainer can reply with, and ends with the attribution trailer `_— Claude Code, for @starquake_`:
 
-- fix: Claude fixes it as recommended (or as the reply amends), pushes, and replies with the commit.
+- fix: Claude fixes it as recommended (or as the reply amends), pushes, replies with the commit, and resolves the thread.
 - skip: Claude leaves it, replies to acknowledge, and resolves the thread.
 - ticket: Claude files it as a backlog issue, replies with the link, and resolves the thread.
+
+`main`'s ruleset blocks merging while any review thread is unresolved, so each of the three ends by resolving the thread. There is no `gh` subcommand for it; look up the thread's node id and resolve it through GraphQL:
+
+    gh api graphql -f query='{repository(owner:"starquake",name:"topbanana"){pullRequest(number:<n>){reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId}}}}}}}'
+    gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread node id>
 
 Any other reply is a question or an extra comment: answer it in the thread, and act on it only when it asks for a change. A finding with nothing to anchor to (something missing) goes on the file's first changed line, saying so. Watch the PR's review comments for replies (poll `repos/starquake/topbanana/pulls/comments?since=<time>`), rather than waiting to be told.
 
