@@ -77,6 +77,7 @@ Rules:
 
 - Never merge a PR without `ready to merge`, and never add either label yourself — the maintainer applies them (CI passing is not approval; an earlier PR's merge does not carry to the next).
 - A **conflict-free rebase keeps `ready to merge`** — no fresh sign-off needed.
+- **Unresolved review threads block the merge.** Resolve a thread only once it is answered (a `fix` / `skip` / `ticket` reply acted on), never to get a PR past the rule; a thread you cannot close that way waits for the maintainer.
 - Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a `changes requested` comment, new work, or a rebase where you had to **resolve conflicts**.
 - Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
 
@@ -116,7 +117,7 @@ Keep a purpose-built **fault-injection double** only where a real store genuinel
 
 ## CI required checks
 
-The `main` branch is protected by a repository **ruleset** ("Default"), not classic branch protection (the `branches/main/protection` API 404s). It is **strict**, so a PR must be up to date with `main` and pass every required check to merge. The required list lives in the ruleset, not this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`), matched by job name.
+The `main` branch is protected by a repository **ruleset** ("Default"), not classic branch protection (the `branches/main/protection` API 404s). It is **strict**, so a PR must be up to date with `main` and pass every required check to merge. Its `pull_request` rule also requires every review thread to be resolved (`required_review_thread_resolution`), with no approvals required. The required list lives in the ruleset, not this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`), matched by job name.
 
 **When you add or rename a workflow job**, update the ruleset's required checks in the same PR, or the job is only advisory. Edit via the rulesets API — GET the ruleset, modify `required_status_checks` (each entry needs `integration_id: 15368`, the Actions app), PUT it back:
 
