@@ -60,10 +60,11 @@ When you post a plan with open questions, swap `needs plan` for `needs decision`
 
 ### Self-review
 
-1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git diff main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
+1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git fetch origin && git diff origin/main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
 2. Fix every **critical** issue.
 3. Post the **non-critical** issues on the PR. Handed one ticket: ask which to fix. On your own: fix the ones you would recommend and note what you did.
-4. Mark the PR **ready for review** (clear its draft status) and wait for the maintainer.
+4. **Review the whole diff** against `origin/main` as a reviewer would, per the `review-diff` skill: fix defects in their own commits, post judgement calls as line comments (answered with fix / skip / ticket), and add a "Found in review" section to the PR description.
+5. Mark the PR **ready for review** (clear its draft status) and wait for the maintainer.
 
 ### Merging
 
@@ -76,6 +77,7 @@ Rules:
 
 - Never merge a PR without `ready to merge`, and never add either label yourself — the maintainer applies them (CI passing is not approval; an earlier PR's merge does not carry to the next).
 - A **conflict-free rebase keeps `ready to merge`** — no fresh sign-off needed.
+- **Unresolved review threads block the merge.** Resolve a thread only once it is answered (a `fix` / `skip` / `ticket` reply acted on), never to get a PR past the rule; a thread you cannot close that way waits for the maintainer.
 - Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a `changes requested` comment, new work, or a rebase where you had to **resolve conflicts**.
 - Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
 
@@ -115,7 +117,7 @@ Keep a purpose-built **fault-injection double** only where a real store genuinel
 
 ## CI required checks
 
-The `main` branch is protected by a repository **ruleset** ("Default"), not classic branch protection (the `branches/main/protection` API 404s). It is **strict**, so a PR must be up to date with `main` and pass every required check to merge. The required list lives in the ruleset, not this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`), matched by job name.
+The `main` branch is protected by a repository **ruleset** ("Default"), not classic branch protection (the `branches/main/protection` API 404s). It is **strict**, so a PR must be up to date with `main` and pass every required check to merge. Its `pull_request` rule also requires every review thread to be resolved (`required_review_thread_resolution`), with no approvals required. The required list lives in the ruleset, not this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`), matched by job name.
 
 **When you add or rename a workflow job**, update the ruleset's required checks in the same PR, or the job is only advisory. Edit via the rulesets API — GET the ruleset, modify `required_status_checks` (each entry needs `integration_id: 15368`, the Actions app), PUT it back:
 
