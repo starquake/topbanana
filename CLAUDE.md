@@ -62,7 +62,7 @@ When you post a plan with open questions, swap `needs plan` for `needs decision`
 
 1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git fetch origin && git diff origin/main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
 2. Fix every **critical** issue.
-3. Post the **non-critical** issues on the PR. Handed one ticket: ask which to fix. On your own: fix the ones you would recommend and note what you did.
+3. Post the **non-critical** issues on the PR. Handed one ticket: ask which to fix. On your own: fix the ones you would recommend that have one right answer and note what you did; anything that changes behaviour or the ticket's decisions goes through step 4 as a judgement call.
 4. **Review the whole diff** against `origin/main` as a reviewer would, per the `review-diff` skill: fix defects in their own commits, post judgement calls as line comments (answered with fix / skip / ticket), and add a "Found in review" section to the PR description.
 5. Mark the PR **ready for review** (clear its draft status) and wait for the maintainer.
 
