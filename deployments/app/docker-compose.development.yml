@@ -1,0 +1,53 @@
+services:
+  topbanana-development:
+    # Pinned to an immutable digest, not a tag: deploy.yml writes the digest
+    # its own build step returned into .env, so a later push to the same PR
+    # cannot swap the running bytes. The guard fails the boot loudly if unset.
+    image: ${IMAGE_NAME}@${IMAGE_DIGEST:?IMAGE_DIGEST must be set in .env or environment}
+    container_name: topbanana-development
+    environment:
+      - APP_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Uploaded media must live on the persistent volume: the
+      # distroless image's app filesystem is ephemeral. Shares the data volume.
+      - MEDIA_DIR=/home/nonroot/data/media
+      - BASE_URL=https://development.topbanana.app
+      # Runs behind SWAG on the external `web` network, so trust that network's
+      # subnet: the per-IP rate limiters then read the real client IP from
+      # X-Forwarded-For instead of SWAG's address. Override via env if `web`
+      # uses a different subnet (docker network inspect web).
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-172.19.0.0/16}
+      # Nobody should be able to sign themselves up on a deployment of
+      # unreviewed code; the bootstrap admin below is the way in.
+      - REGISTRATION_ENABLED=false
+      - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # There is no mailer here, so an account can never confirm its own
+      # address. These create a confirmed admin on first boot instead.
+      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL must be set in .env or environment}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD must be set in .env or environment}
+      # No GOOGLE_* vars: Google sign-in is not wired on the development instance.
+      # No SMTP_* vars: the mailer is no-op, so nothing reaches a real inbox
+      # from code that has not been reviewed yet.
+      # Volume layout: DB and media both live on the named volume
+      # topbanana_development_data. Wiping between PRs is deliberate, so the
+      # deploy workflow recreates it when the PR number changes:
+      #   docker compose down -v && docker compose up -d
+    volumes:
+      - topbanana_development_data:/home/nonroot/data
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/home/nonroot/server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  topbanana_development_data:
+networks:
+  web:
+    external: true
