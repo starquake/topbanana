@@ -9,11 +9,14 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"os"
+	"path"
+	"strconv"
 	"strings"
 
 	"github.com/starquake/topbanana/internal/config"
@@ -39,7 +42,84 @@ func Handler(cfg *config.Config) http.Handler {
 	// string, and "font/woff2" is a constant valid one.
 	_ = mime.AddExtensionType(".woff2", "font/woff2")
 
-	return http.StripPrefix("/static", http.FileServer(http.FS(resolveStaticFS(cfg))))
+	fsys := resolveStaticFS(cfg)
+	// The embedded tree is immutable, so its ETags are hashed once; an on-disk
+	// dev tree changes under us and relies on Last-Modified instead.
+	var etags map[string]string
+	if cfg.WebStaticDir == "" {
+		etags = contentETags(fsys)
+	}
+	files := http.FileServer(http.FS(noDirFS{fsys: fsys}))
+
+	return http.StripPrefix("/static", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Asset URLs are not fingerprinted, so a browser must revalidate each
+		// use; the ETag turns that into a 304.
+		w.Header().Set("Cache-Control", "no-cache")
+		if tag, ok := etags[strings.TrimPrefix(path.Clean(r.URL.Path), "/")]; ok {
+			w.Header().Set("ETag", tag)
+		}
+		files.ServeHTTP(w, r)
+	}))
+}
+
+// contentETags maps every file in the embedded tree to a strong ETag over its
+// contents. [http.FileServer] answers a matching If-None-Match from the header.
+func contentETags(fsys fs.FS) map[string]string {
+	etags := make(map[string]string)
+	err := fs.WalkDir(fsys, ".", func(name string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		b, rerr := fs.ReadFile(fsys, name)
+		if rerr != nil {
+			return fmt.Errorf("read static asset %q: %w", name, rerr)
+		}
+		sum := sha256.Sum256(b)
+		etags[name] = strconv.Quote(hex.EncodeToString(sum[:etagHashBytes]))
+
+		return nil
+	})
+	if err != nil {
+		// Like fs.Sub in resolveStaticFS, reading the embedded tree can only
+		// fail if the embed declaration was tampered with.
+		panic(err)
+	}
+
+	return etags
+}
+
+// etagHashBytes is how much of the SHA-256 goes into an asset ETag; 128 bits
+// is ample to tell releases apart.
+const etagHashBytes = 16
+
+// noDirFS wraps an [fs.FS] so [http.FileServer] returns 404 for a directory
+// instead of generating a browsable index of the served tree.
+type noDirFS struct {
+	fsys fs.FS
+}
+
+// Open returns [fs.ErrNotExist] for a directory and otherwise delegates.
+func (n noDirFS) Open(name string) (fs.File, error) {
+	f, err := n.fsys.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("open static asset %q: %w", name, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+
+		return nil, fmt.Errorf("stat static asset %q: %w", name, err)
+	}
+	if info.IsDir() {
+		_ = f.Close()
+
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+
+	return f, nil
 }
 
 // ManifestHandler serves /manifest.webmanifest with the correct
