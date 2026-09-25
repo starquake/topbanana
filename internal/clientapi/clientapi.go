@@ -687,7 +687,6 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		}
 		res := createGameResponse{ID: g.ID}
 
-		w.Header().Set("Location", fmt.Sprintf("/play/game/%v", g.ID))
 		err = handlers.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding createGameResponse", slog.Any("err", err))

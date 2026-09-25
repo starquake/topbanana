@@ -161,6 +161,9 @@ func TestHandleCreateGame(t *testing.T) {
 		if got, want := rec.Code, http.StatusCreated; got != want {
 			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
 		}
+		if got := rec.Header().Get("Location"); got != "" {
+			t.Errorf("Location = %q, want none (no route serves a game by id)", got)
+		}
 
 		// The created game must belong to the player on the context: a
 		// resume probe for that (player, quiz) pair now finds the game.
