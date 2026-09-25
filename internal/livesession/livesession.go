@@ -614,46 +614,9 @@ func (s *Service) CreateSession(
 	hostPlayerID int64,
 	isAdmin bool,
 ) (*Session, error) {
-	if quizID != nil {
-		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get quiz for session: %w", err)
-		}
-		if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
-			return nil, gerr
-		}
-	}
+	sess, _, err := s.openOrReuseRoom(ctx, quizID, hostPlayerID, isAdmin)
 
-	code, err := s.allocateJoinCode(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	sess := &Session{
-		QuizID:       quizID,
-		HostPlayerID: hostPlayerID,
-		JoinCode:     code,
-		Phase:        PhaseLobby,
-	}
-	if err = s.store.CreateSession(ctx, sess); err != nil {
-		if errors.Is(err, ErrHostHasActiveRoom) {
-			return s.existingRoomForHost(ctx, hostPlayerID)
-		}
-
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	attrs := []any{
-		slog.String(logSessionKey, sess.ID),
-		slog.String(logJoinCodeKey, sess.JoinCode),
-		slog.Int64(logHostKey, hostPlayerID),
-	}
-	if quizID != nil {
-		attrs = append(attrs, slog.Int64(logQuizKey, *quizID))
-	}
-	s.logger.InfoContext(ctx, "live session created", attrs...)
-
-	return sess, nil
+	return sess, err
 }
 
 // Join adds the player to the session identified by join code. The player is
@@ -1080,6 +1043,58 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 		slog.Int64(logPlayerKey, playerID))
 
 	return nil
+}
+
+// openOrReuseRoom is [Service.CreateSession], also reporting whether the room was
+// newly opened (false when the host's existing active room was returned).
+func (s *Service) openOrReuseRoom(
+	ctx context.Context,
+	quizID *int64,
+	hostPlayerID int64,
+	isAdmin bool,
+) (*Session, bool, error) {
+	if quizID != nil {
+		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to get quiz for session: %w", err)
+		}
+		if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
+			return nil, false, gerr
+		}
+	}
+
+	code, err := s.allocateJoinCode(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	sess := &Session{
+		QuizID:       quizID,
+		HostPlayerID: hostPlayerID,
+		JoinCode:     code,
+		Phase:        PhaseLobby,
+	}
+	if err = s.store.CreateSession(ctx, sess); err != nil {
+		if errors.Is(err, ErrHostHasActiveRoom) {
+			active, aerr := s.existingRoomForHost(ctx, hostPlayerID)
+
+			return active, false, aerr
+		}
+
+		return nil, false, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	attrs := []any{
+		slog.String(logSessionKey, sess.ID),
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID),
+	}
+	if quizID != nil {
+		attrs = append(attrs, slog.Int64(logQuizKey, *quizID))
+	}
+	s.logger.InfoContext(ctx, "live session created", attrs...)
+
+	return sess, true, nil
 }
 
 // existingRoomForHost returns the host's active room after a create lost the
