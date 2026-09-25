@@ -876,9 +876,9 @@ func (s *Service) CancelStart(ctx context.Context, joinCode string, hostPlayerID
 // The pick is validated against the live question (the option must belong to
 // it and the answer window must be open) and stored without its correctness
 // being surfaced - the runner scores it at close. Returns [ErrSessionNotFound]
-// for an unknown code, [ErrNotParticipant] when the caller has not joined,
-// and [ErrQuestionNotOpen] when no question is currently accepting answers or
-// the option is not part of it.
+// for an unknown code, [ErrNotParticipant] when the caller is not on the
+// roster (the host included), and [ErrQuestionNotOpen] when no question is
+// currently accepting answers or the option is not part of it.
 func (s *Service) SubmitAnswer(
 	ctx context.Context, joinCode string, playerID, optionID int64, answeredAt time.Time,
 ) error {
@@ -886,7 +886,7 @@ func (s *Service) SubmitAnswer(
 	if err != nil {
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
-	if !s.isParticipant(sess, playerID) {
+	if !isRosterPlayer(sess, playerID) {
 		s.logger.InfoContext(ctx, "answer rejected: not a participant",
 			slog.String(logJoinCodeKey, sess.JoinCode),
 			slog.Int64(logPlayerKey, playerID))
@@ -1293,9 +1293,11 @@ func rankStandings(standings []*Standing) []*Standing {
 
 // isParticipant reports whether playerID is the host or a roster player.
 func (*Service) isParticipant(sess *Session, playerID int64) bool {
-	if sess.HostPlayerID == playerID {
-		return true
-	}
+	return sess.HostPlayerID == playerID || isRosterPlayer(sess, playerID)
+}
+
+// isRosterPlayer reports whether playerID is on the session roster.
+func isRosterPlayer(sess *Session, playerID int64) bool {
 	for _, p := range sess.Players {
 		if p.PlayerID == playerID {
 			return true
