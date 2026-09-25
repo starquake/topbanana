@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -383,17 +385,103 @@ func TestMediaServe_Integration(t *testing.T) {
 	})
 	baseURL := setup.BaseURL
 
-	registerAdminClient(ctx, t, baseURL, setup.DBURI, "serve-boss")
+	admin := registerAdminClient(ctx, t, baseURL, setup.DBURI, "serve-boss")
 	owner := registerAdminClient(ctx, t, baseURL, setup.DBURI, "serve-owner")
 	makeHost(ctx, t, setup.DBURI, "serve-owner")
+	player := registerAdminClient(ctx, t, baseURL, setup.DBURI, "serve-player")
+	setPlayerRole(ctx, t, setup.DBURI, "serve-player", auth.RolePlayer)
 
 	publicQuiz := createQuizAs(ctx, t, owner, baseURL, "Public Serve Quiz")
 	privateQuiz := createQuizWithVisibility(ctx, t, owner, baseURL, "Private Serve Quiz", "private")
+	unlistedQuiz := createQuizWithVisibility(ctx, t, owner, baseURL, "Unlisted Serve Quiz", "unlisted")
+	draftQuiz := createQuizAs(ctx, t, owner, baseURL, "Draft Serve Quiz")
+	liveDraftQuiz := createQuizAs(ctx, t, owner, baseURL, "Live Draft Serve Quiz")
 
 	uploadImage(ctx, t, owner, baseURL, publicQuiz, "p.png", pngBytes(t, 240, 160))
 	publicMedia := latestMediaID(ctx, t, setup.Stores, publicQuiz)
 	uploadImage(ctx, t, owner, baseURL, privateQuiz, "s.png", pngBytes(t, 240, 160))
 	privateMedia := latestMediaID(ctx, t, setup.Stores, privateQuiz)
+	uploadImage(ctx, t, owner, baseURL, unlistedQuiz, "u.png", pngBytes(t, 240, 160))
+	unlistedMedia := latestMediaID(ctx, t, setup.Stores, unlistedQuiz)
+	uploadImage(ctx, t, owner, baseURL, draftQuiz, "d.png", pngBytes(t, 240, 160))
+	draftMedia := latestMediaID(ctx, t, setup.Stores, draftQuiz)
+	uploadImage(ctx, t, owner, baseURL, liveDraftQuiz, "l.png", pngBytes(t, 240, 160))
+	liveDraftMedia := latestMediaID(ctx, t, setup.Stores, liveDraftQuiz)
+
+	for _, id := range []int64{publicQuiz, privateQuiz, unlistedQuiz} {
+		if err := setup.Stores.Quizzes.SetQuizPublished(ctx, id, true); err != nil {
+			t.Fatalf("SetQuizPublished(%d) err = %v, want nil", id, err)
+		}
+	}
+	if err := setup.Stores.Quizzes.SetQuizMode(ctx, liveDraftQuiz, quiz.ModeLive); err != nil {
+		t.Fatalf("SetQuizMode err = %v, want nil", err)
+	}
+
+	serveStatus := func(t *testing.T, client *http.Client, mediaID int64) (int, string) {
+		t.Helper()
+		resp := httpGet(ctx, t, client, baseURL+fmt.Sprintf("/media/%d", mediaID))
+		defer closeBody(t, resp.Body)
+
+		return resp.StatusCode, resp.Header.Get("Cache-Control")
+	}
+
+	t.Run("draft image hidden from anonymous and non-owner viewers", func(t *testing.T) {
+		t.Parallel()
+		for name, client := range map[string]*http.Client{"anonymous": newAnonClient(t), "player": player} {
+			status, _ := serveStatus(t, client, draftMedia)
+			if got, want := status, http.StatusNotFound; got != want {
+				t.Errorf("%s draft serve status = %d, want %d", name, got, want)
+			}
+		}
+		resp := httpGet(ctx, t, newAnonClient(t), baseURL+fmt.Sprintf("/media/%d/thumb", draftMedia))
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+			t.Errorf("anonymous draft thumb status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("draft image served privately to owner and admin", func(t *testing.T) {
+		t.Parallel()
+		for name, client := range map[string]*http.Client{"owner": owner, "admin": admin} {
+			status, cacheControl := serveStatus(t, client, draftMedia)
+			if got, want := status, http.StatusOK; got != want {
+				t.Errorf("%s draft serve status = %d, want %d", name, got, want)
+			}
+			if got, want := cacheControl, "private"; !strings.Contains(got, want) {
+				t.Errorf("%s draft Cache-Control = %q, should contain %q", name, got, want)
+			}
+		}
+	})
+
+	t.Run("draft live quiz image served to anonymous session players", func(t *testing.T) {
+		t.Parallel()
+		status, cacheControl := serveStatus(t, newAnonClient(t), liveDraftMedia)
+		if got, want := status, http.StatusOK; got != want {
+			t.Errorf("anonymous live-draft serve status = %d, want %d", got, want)
+		}
+		if got, want := cacheControl, "private"; !strings.Contains(got, want) {
+			t.Errorf("live-draft Cache-Control = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("published unlisted image served with private cache policy", func(t *testing.T) {
+		t.Parallel()
+		status, cacheControl := serveStatus(t, newAnonClient(t), unlistedMedia)
+		if got, want := status, http.StatusOK; got != want {
+			t.Errorf("anonymous unlisted serve status = %d, want %d", got, want)
+		}
+		if got, want := cacheControl, "private"; !strings.Contains(got, want) {
+			t.Errorf("unlisted Cache-Control = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("published private image served to a signed-in non-owner", func(t *testing.T) {
+		t.Parallel()
+		status, _ := serveStatus(t, player, privateMedia)
+		if got, want := status, http.StatusOK; got != want {
+			t.Errorf("player private serve status = %d, want %d", got, want)
+		}
+	})
 
 	t.Run("public image then conditional 304", func(t *testing.T) {
 		t.Parallel()
