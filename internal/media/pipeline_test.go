@@ -334,9 +334,10 @@ func TestProcess_RejectsDecodeBomb(t *testing.T) {
 }
 
 // TestProcess_RejectsOversizedDecodedBuffer pins the decoded-size guard: a
-// 16-bit RGBA png within MaxPixels still decodes at 8 bytes per pixel, so its
-// header alone is enough to reject it, while the same area at 8 bits passes the
-// guard (and then fails to decode, having no pixel data).
+// 16-bit png within MaxPixels still decodes at 8 bytes per pixel (gray too, as
+// a tRNS chunk would promote it), so its header alone is enough to reject it,
+// while the same area at 8 bits passes the guard (and then fails to decode,
+// having no pixel data).
 func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 	t.Parallel()
 
@@ -352,7 +353,8 @@ func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 		"16-bit rgba": {16, 6, ErrImageTooLarge},
 		"16-bit rgb":  {16, 2, ErrImageTooLarge},
 		"8-bit rgba":  {8, 6, ErrUnsupportedImage},
-		"16-bit gray": {16, 0, ErrUnsupportedImage},
+		"16-bit gray": {16, 0, ErrImageTooLarge},
+		"8-bit gray":  {8, 0, ErrUnsupportedImage},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -362,6 +364,50 @@ func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 			if got, want := err, tc.want; !errors.Is(got, want) {
 				t.Errorf("Process(%s png header) err = %v, want %v", name, got, want)
+			}
+		})
+	}
+}
+
+// jpegHeader builds a jpeg SOI, a JFIF APP0, and a start-of-frame segment
+// (marker sof) declaring w x h with three 1x1-sampled components, and no scan
+// data. image/jpeg's DecodeConfig returns at the frame only after a JFIF APP0.
+func jpegHeader(sof byte, w, h uint16) []byte {
+	var b bytes.Buffer
+	b.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 16})
+	b.WriteString("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+	b.Write([]byte{0xFF, sof})
+	frame := []byte{8, 0, 0, 0, 0, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0}
+	binary.BigEndian.PutUint16(frame[1:], h)
+	binary.BigEndian.PutUint16(frame[3:], w)
+	_ = binary.Write(&b, binary.BigEndian, uint16(len(frame)+2))
+	b.Write(frame)
+
+	return b.Bytes()
+}
+
+// TestProcess_RejectsOversizedProgressiveJPEG pins that a progressive jpeg is
+// charged for its coefficient buffer: the same area passes the guard as a
+// baseline jpeg (then fails to decode, having no scan data).
+func TestProcess_RejectsOversizedProgressiveJPEG(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 7000, 7000
+	cases := map[string]struct {
+		sof  byte
+		want error
+	}{
+		"baseline":    {0xC0, ErrUnsupportedImage},
+		"progressive": {0xC2, ErrImageTooLarge},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := jpegHeader(tc.sof, w, h)
+			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+			if got, want := err, tc.want; !errors.Is(got, want) {
+				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
 			}
 		})
 	}

@@ -21,19 +21,13 @@ const (
 )
 
 const (
-	markerPrefix     = 0xFF
-	markerSOI        = 0xD8
-	markerSOS        = 0xDA
-	markerEOI        = 0xD9
-	markerAPP1       = 0xE1
-	tagOrientation   = 0x0112
-	typeShort        = 3
-	ifdEntrySize     = 12
-	tiffHeaderSize   = 8
-	segmentLenSize   = 2
-	ifdCountSize     = 2
-	tiffMagic        = 42
-	markerHeaderSize = 2
+	markerAPP1     = 0xE1
+	tagOrientation = 0x0112
+	typeShort      = 3
+	ifdEntrySize   = 12
+	tiffHeaderSize = 8
+	ifdCountSize   = 2
+	tiffMagic      = 42
 )
 
 const exifHeader = "Exif\x00\x00"
@@ -41,35 +35,17 @@ const exifHeader = "Exif\x00\x00"
 // jpegOrientation returns the EXIF Orientation of a jpeg, or orientationNormal
 // when there is no EXIF segment or it is malformed or out of range.
 func jpegOrientation(raw []byte) int {
-	if len(raw) < markerHeaderSize || raw[0] != markerPrefix || raw[1] != markerSOI {
-		return orientationNormal
-	}
-	for i := markerHeaderSize; i+markerHeaderSize+segmentLenSize <= len(raw); {
-		if raw[i] != markerPrefix {
-			return orientationNormal
+	orientation := orientationNormal
+	jpegSegments(raw, func(marker byte, payload []byte) bool {
+		if marker != markerAPP1 || !bytes.HasPrefix(payload, []byte(exifHeader)) {
+			return true
 		}
-		marker := raw[i+1]
-		if marker == markerPrefix {
-			i++
+		orientation = tiffOrientation(payload[len(exifHeader):])
 
-			continue
-		}
-		if marker == markerSOS || marker == markerEOI {
-			return orientationNormal
-		}
-		segLen := int(binary.BigEndian.Uint16(raw[i+markerHeaderSize:]))
-		start := i + markerHeaderSize + segmentLenSize
-		end := i + markerHeaderSize + segLen
-		if segLen < segmentLenSize || end > len(raw) {
-			return orientationNormal
-		}
-		if marker == markerAPP1 && bytes.HasPrefix(raw[start:end], []byte(exifHeader)) {
-			return tiffOrientation(raw[start+len(exifHeader) : end])
-		}
-		i = end
-	}
+		return false
+	})
 
-	return orientationNormal
+	return orientation
 }
 
 // tiffOrientation reads the Orientation tag from IFD0 of a TIFF block.
