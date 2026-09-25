@@ -163,9 +163,10 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	// The guest signs in with Google for the first time (claim-session branch).
+	// The guest signs in with Google for the first time (claim-session branch),
+	// with registration off: it gates only create-fresh.
 	player, firstReg, err := ExportLinkOrCreateGooglePlayerFirstReg(
-		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, true,
+		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, false,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayerFirstReg err = %v, want nil", err)
