@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -1171,7 +1172,7 @@ func (s *Service) populateStandings(ctx context.Context, state *SessionState) er
 		}
 		state.Standings = rankStandings(standings)
 	case sess.Phase == PhaseIntermission, sess.Phase == PhaseFinished:
-		standings, err := s.finishedStandings(ctx, sess)
+		standings, err := s.finishedStandings(ctx, sess, state.Quiz)
 		if err != nil {
 			return err
 		}
@@ -1186,9 +1187,10 @@ func (s *Service) populateStandings(ctx context.Context, state *SessionState) er
 // finishedStandings returns the final standings ordered best-first by
 // cumulative total, with each player's last-round score overlaid onto
 // RoundScore so the finished bar graph can animate the last round's
-// contribution. When the quiz has no rounds the final standings are returned
-// unchanged (RoundScore 0).
-func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Standing, error) {
+// contribution. The last round is the last one with questions, since an empty
+// round is never played live. When no round has questions the final standings
+// are returned unchanged (RoundScore 0).
+func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz.Quiz) ([]*Standing, error) {
 	standings, err := s.store.ListFinalStandings(ctx, sess.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list final standings for state: %w", err)
@@ -1196,7 +1198,7 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 	// A room shows final standings only after a game, so a quiz is always set
 	// here; guard the deref so a quiz-less room (which has no game to score)
 	// returns the bare standings rather than panicking.
-	if sess.QuizID == nil {
+	if sess.QuizID == nil || qz == nil {
 		return standings, nil
 	}
 
@@ -1204,11 +1206,11 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
 	}
-	if len(rounds) == 0 {
+	lastRoundID, ok := lastPlayedRound(rounds, qz.Questions)
+	if !ok {
 		return standings, nil
 	}
 
-	lastRoundID := rounds[len(rounds)-1].ID
 	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, lastRoundID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list last round standings for state: %w", err)
@@ -1223,6 +1225,22 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 	}
 
 	return standings, nil
+}
+
+// lastPlayedRound returns the id of the last round in play order that has at
+// least one question.
+func lastPlayedRound(rounds []*quiz.Round, questions []*quiz.Question) (int64, bool) {
+	withQuestions := make(map[int64]bool, len(rounds))
+	for _, q := range questions {
+		withQuestions[q.RoundID] = true
+	}
+	for _, r := range slices.Backward(rounds) {
+		if withQuestions[r.ID] {
+			return r.ID, true
+		}
+	}
+
+	return 0, false
 }
 
 // populateRoundIntro fills CurrentRound with the round the session is about to

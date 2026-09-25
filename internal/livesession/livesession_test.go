@@ -789,3 +789,40 @@ func TestService_SubmitAnswer_RejectedWhenCloseWins(t *testing.T) {
 		t.Error("late pick recorded, want none")
 	}
 }
+
+// TestService_FinalStandingsSkipEmptyLastRound pins #1336: when the quiz's last
+// round has no questions (so is never played live), the final standings carry
+// the last played round's points instead of zero.
+func TestService_FinalStandingsSkipEmptyLastRound(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}, {}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	scorer := h.players[0]
+	optRight := correctOptionID(ctx, t, h.service, h.code, scorer)
+	if err := h.service.SubmitAnswer(ctx, h.code, scorer, optRight, *q.QuestionStartedAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	h.tick(ctx)
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after final reveal = %q, want %q", got, want)
+	}
+
+	state, err := h.service.GetSessionState(ctx, h.code, scorer)
+	if err != nil {
+		t.Fatalf("GetSessionState err = %v, want nil", err)
+	}
+	st := findRunnerStanding(t, state.Standings, scorer)
+	if st.TotalScore <= 0 {
+		t.Fatalf("scorer TotalScore = %d, want > 0", st.TotalScore)
+	}
+	if got, want := st.RoundScore, st.TotalScore; got != want {
+		t.Errorf("scorer final RoundScore = %d, want %d (the last played round)", got, want)
+	}
+}
