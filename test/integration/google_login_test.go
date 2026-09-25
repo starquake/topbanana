@@ -1072,28 +1072,21 @@ func TestGoogleLogin_ApprovalRequired_ClaimedGuestCookieDies(t *testing.T) {
 	t.Parallel()
 
 	mock := newGoogleMock(t)
-	mock.email = "boot@example.test"
-	mock.subject = "google-sub-boot"
+	mock.email = "guest@example.test"
+	mock.subject = "google-sub-guest"
 	mock.emailVerified = true
 	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{
-		"REGISTRATION_ENABLED":    "true",
+		"REGISTRATION_ENABLED":    "false",
 		"LOGIN_APPROVAL_REQUIRED": "true",
 	})
-
-	// The bootstrap admin comes first, so the guest's claim lands as a plain,
-	// unapproved player.
-	if got, want := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock).Location, "/admin/quizzes"; got != want {
-		t.Fatalf("bootstrap Google sign-in Location = %q, want %q", got, want)
-	}
+	// A credentialled row first, so the guest's claim lands as a plain,
+	// unapproved player instead of the bootstrap admin.
+	seedCredentialledPlayer(t, srv.DBURI, "boot", "boot@example.test")
 
 	guest := authClient(t)
 	primeAnonymousPlayer(ctx, t, guest, srv.BaseURL)
 	stolen := freshClientSharingSession(t, guest, srv.BaseURL)
 
-	mock.mu.Lock()
-	mock.email = "guest@example.test"
-	mock.subject = "google-sub-guest"
-	mock.mu.Unlock()
 	blocked := driveGoogleFlow(ctx, t, guest, srv.BaseURL, mock)
 	if got, want := blocked.Location, "/login/pending-approval"; got != want {
 		t.Fatalf("guest Google sign-in Location = %q, want %q", got, want)
