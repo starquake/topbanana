@@ -53,6 +53,7 @@ type options struct {
 	writeTimeout                  time.Duration
 	leaderboardHeartbeatInterval  time.Duration
 	sessionEventHeartbeatInterval time.Duration
+	soloRevealDelay               *time.Duration
 }
 
 // WithWriteTimeout overrides the HTTP server's WriteTimeout. The SSE
@@ -88,6 +89,14 @@ func WithSessionEventHeartbeatInterval(d time.Duration) Option {
 		if d > 0 {
 			o.sessionEventHeartbeatInterval = d
 		}
+	}
+}
+
+// WithSoloRevealDelay overrides REVEAL_DELAY for the solo game only; unlike
+// the env var, zero means no read beat.
+func WithSoloRevealDelay(d time.Duration) Option {
+	return func(o *options) {
+		o.soloRevealDelay = &d
 	}
 }
 
@@ -178,6 +187,9 @@ func Run(
 
 	startSweeps(signalCtx, cfg, logger, stores)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
+	if o.soloRevealDelay != nil {
+		gameService.SetRevealDelay(*o.soloRevealDelay)
+	}
 	// Own the runner's context so shutdown waits for its goroutine to exit
 	// before Run returns - else it logs past test teardown under -race (#608).
 	runnerCtx, stopRunner := context.WithCancel(signalCtx)

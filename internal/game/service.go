@@ -460,8 +460,8 @@ func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, ro
 	return nil
 }
 
-// SubmitAnswer records a player's answer. Answers past the window
-// (ExpiredAt plus the latency grace) are rejected with
+// SubmitAnswer records a player's answer. Answers before StartedAt or past
+// the window (ExpiredAt plus the latency grace) are rejected with
 // ErrAnswerWindowClosed; otherwise tappedAt is refunded up to
 // maxLatencyRefund so a slow link is not penalised but a client cannot
 // claim the window start (#237, #1163).
@@ -489,9 +489,10 @@ func (s *Service) SubmitAnswer(
 		return nil, err
 	}
 
-	// Reject an answer that lands past the window; it scores nothing (#1163).
+	// Reject an answer that lands during the read beat or past the window
+	// (#1163, #1337).
 	now := time.Now()
-	if now.After(question.ExpiredAt.Add(lateAnswerGrace)) {
+	if now.Before(question.StartedAt) || now.After(question.ExpiredAt.Add(lateAnswerGrace)) {
 		return nil, ErrAnswerWindowClosed
 	}
 

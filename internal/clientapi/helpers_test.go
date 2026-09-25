@@ -57,6 +57,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	stores := store.New(conn, logger)
 
 	svc := game.NewService(stores.Games, stores.Quizzes, logger)
+	// No read beat, so a test can answer straight after issuing a question.
+	svc.SetRevealDelay(0)
 	svc.SetLeaderboardPublisher(leaderboard.NewHub())
 
 	return &testEnv{
