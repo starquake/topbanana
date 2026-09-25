@@ -31,6 +31,11 @@ const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 // sessionClosed instead.
 const STATE_FAILURE_LIMIT = 3;
 
+// EventSource gives up for good on a fatal non-200, so the live surface
+// re-subscribes itself on a capped backoff, like the host big screen (#1342).
+const RECONNECT_BASE_DELAY = 1000;
+const RECONNECT_MAX_DELAY = 30000;
+
 // rememberSession persists the join code so a reload can resume. Best-effort: a
 // storage exception (private mode, quota) is swallowed - resume is a
 // convenience, not a correctness requirement. The read/forget side and the key
@@ -109,6 +114,8 @@ export class JoinApp {
         this.sessionClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
+        this.reconnectTimer = null;
+        this.reconnectDelay = RECONNECT_BASE_DELAY;
         // The bound visibility/focus handler, wired once in init. Held on the
         // instance so a single shared reference backs all three listeners. Null
         // until init attaches it.
@@ -915,22 +922,50 @@ export class JoinApp {
         if (typeof EventSource === 'undefined') return;
         const url = `/api/sessions/${encodeURIComponent(this.code)}/events`;
         const source = new EventSource(url);
+        source.onopen = () => {
+            this.reconnectDelay = RECONNECT_BASE_DELAY;
+        };
         source.onmessage = () => {
+            this.reconnectDelay = RECONNECT_BASE_DELAY;
             this.refreshState();
         };
         source.onerror = () => {
             // EventSource auto-reconnects, and a reconnect resends the current
-            // version (the resync path), so a transient drop self-heals. Only
-            // tear down on a hard close so we don't leak a dead socket.
+            // version (the resync path), so a transient drop self-heals. A hard
+            // close never retries, so drive our own backoff.
             if (source.readyState === EventSource.CLOSED) {
                 this.eventSource = null;
+                this.connectionTrouble = true;
+                this.scheduleReconnect();
             }
         };
         this.eventSource = source;
     }
 
+    // scheduleReconnect arms a backoff timer that re-opens the stream and
+    // re-reads state after a hard close. Idempotent while a retry is pending.
+    scheduleReconnect() {
+        if (this.reconnectTimer) return;
+        const delay = this.reconnectDelay;
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_DELAY);
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            if (this.sessionClosed || this.step !== 'lobby' || !this.code) return;
+            this.subscribe();
+            this.refreshState();
+        }, delay);
+    }
+
+    clearReconnectTimer() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+    }
+
     // closeStream is safe to call regardless of subscription state.
     closeStream() {
+        this.clearReconnectTimer();
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
