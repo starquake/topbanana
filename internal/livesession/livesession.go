@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
@@ -1214,9 +1213,9 @@ func (s *Service) populateStandings(ctx context.Context, state *SessionState) er
 // finishedStandings returns the final standings ordered best-first by
 // cumulative total, with each player's last-round score overlaid onto
 // RoundScore so the finished bar graph can animate the last round's
-// contribution. The last round is the last one with questions, since an empty
-// round is never played live. When no round has questions the final standings
-// are returned unchanged (RoundScore 0).
+// contribution. The last round is the last one the runner played, so an empty
+// round (never played live) is skipped. When no round was played the final
+// standings are returned unchanged (RoundScore 0).
 func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz.Quiz) ([]*Standing, error) {
 	standings, err := s.store.ListFinalStandings(ctx, sess.ID)
 	if err != nil {
@@ -1229,16 +1228,12 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz
 		return standings, nil
 	}
 
-	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
-	}
-	lastRoundID, ok := lastPlayedRound(rounds, qz.Questions)
-	if !ok {
+	played := newQuestionPlan(qz).rounds
+	if len(played) == 0 {
 		return standings, nil
 	}
 
-	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, lastRoundID)
+	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, played[len(played)-1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to list last round standings for state: %w", err)
 	}
@@ -1252,22 +1247,6 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz
 	}
 
 	return standings, nil
-}
-
-// lastPlayedRound returns the id of the last round in play order that has at
-// least one question.
-func lastPlayedRound(rounds []*quiz.Round, questions []*quiz.Question) (int64, bool) {
-	withQuestions := make(map[int64]bool, len(rounds))
-	for _, q := range questions {
-		withQuestions[q.RoundID] = true
-	}
-	for _, r := range slices.Backward(rounds) {
-		if withQuestions[r.ID] {
-			return r.ID, true
-		}
-	}
-
-	return 0, false
 }
 
 // populateRoundIntro fills CurrentRound with the round the session is about to
