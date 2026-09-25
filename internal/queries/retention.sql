@@ -41,15 +41,25 @@ WHERE p.role = 'player'
   );
 
 -- name: FilterAnonymousPlayerIDs :many
--- Returns the subset of the given ids still anonymous, so the sweep spares a
--- guest claimed after the snapshot (#1175).
+-- Returns the subset of the given ids still anonymous and still without
+-- hosted-room activity, so the sweep spares a guest who claimed a name or
+-- joined a room after the snapshot (#1175). The room predicates match
+-- ListStaleAnonymousPlayerIDs. days sits before the slice so sqlc numbers it
+-- ?1; after the slice its ?N would alias an expanded slice id.
 SELECT p.id
 FROM players p
-WHERE p.id IN (sqlc.slice('ids'))
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
+  )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
   AND p.role = 'player'
   AND p.email IS NULL
   AND p.password_hash IS NULL
-  AND p.display_name_claimed = 0;
+  AND p.display_name_claimed = 0
+  AND p.id IN (sqlc.slice('ids'));
 
 -- name: ListGameIDsForPlayers :many
 -- Lists every distinct game id any of the given players participates in.
