@@ -69,8 +69,16 @@ test.describe('live client connection trouble', () => {
     // Each return-to-foreground drives one refreshState. Three failures in a
     // row trip the banner (STATE_FAILURE_LIMIT). The roster stays on screen the
     // whole time - this is not the closed view.
+    // Wait out each read: overlapping reads coalesce, so a burst counts as fewer failures.
     for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.evaluate(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        const root = document.querySelector('[x-data="joinApp"]');
+        const cmp = (window as unknown as {
+          Alpine: { $data: (el: Element) => { stateRead: Promise<void> | null } };
+        }).Alpine.$data(root!);
+        if (cmp.stateRead) await cmp.stateRead;
+      });
     }
     await expect(page.getByTestId('connection-trouble')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('connection-trouble')).toContainText('Connection problem');

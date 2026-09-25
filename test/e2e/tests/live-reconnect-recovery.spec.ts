@@ -168,8 +168,16 @@ test.describe('live reconnect and recovery', () => {
     await page.route(`**/api/sessions/${joinCode}/state`, (route) =>
       route.fulfill({ status: 500, body: 'boom' }),
     );
+    // Wait out each read: overlapping reads coalesce, so a burst counts as fewer failures.
     for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.evaluate(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        const root = document.querySelector('[x-data="joinApp"]');
+        const cmp = (window as unknown as {
+          Alpine: { $data: (el: Element) => { stateRead: Promise<void> | null } };
+        }).Alpine.$data(root!);
+        if (cmp.stateRead) await cmp.stateRead;
+      });
     }
     await expect(page.getByTestId('connection-trouble')).toBeVisible({ timeout: 10_000 });
     // A non-404 failure is the connection-trouble signal, not the room-gone one.

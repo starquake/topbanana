@@ -121,6 +121,10 @@ function hostBigScreen(joinCode, hasQuiz) {
         // Monotonic id per GET /state read; ignore a superseded response so an
         // out-of-order read can't regress the screen (e.g. reveal->question) (#1178).
         stateSeq: 0,
+        // The in-flight GET /state, plus a flag asking for one follow-up read
+        // when ticks arrive while it is pending.
+        stateRead: null,
+        stateDirty: false,
         // True once GET /state 404s: the session is gone (terminal), distinct
         // from connectionTrouble's retryable fault, so the footer settles.
         sessionGone: false,
@@ -288,7 +292,27 @@ function hostBigScreen(joinCode, hasQuiz) {
             if (this.audio) this.audio.teardown();
         },
 
-        async refresh() {
+        refresh() {
+            if (this.stateRead) {
+                this.stateDirty = true;
+
+                return this.stateRead;
+            }
+            this.stateRead = (async () => {
+                try {
+                    do {
+                        this.stateDirty = false;
+                        await this.readState();
+                    } while (this.stateDirty);
+                } finally {
+                    this.stateRead = null;
+                }
+            })();
+
+            return this.stateRead;
+        },
+
+        async readState() {
             const seq = ++this.stateSeq;
             try {
                 const response = await fetch(

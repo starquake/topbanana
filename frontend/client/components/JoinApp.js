@@ -212,6 +212,10 @@ export class JoinApp {
         // Monotonic id per GET /state read; ignore a superseded response so an
         // out-of-order read can't regress the surface (e.g. reveal->question) (#1178).
         this.stateSeq = 0;
+        // The in-flight GET /state, plus a flag asking for one follow-up read when
+        // ticks arrive while it is pending, so a burst of ticks costs two reads.
+        this.stateRead = null;
+        this.stateDirty = false;
         // Guards the connection-trouble banner's "Reconnect now" control (#1121)
         // so a double-tap does not fire two overlapping recoveries, and drives
         // the button's in-flight "Reconnecting..." label.
@@ -546,13 +550,34 @@ export class JoinApp {
         await this.refreshState();
     }
 
-    // refreshState performs the authoritative read. A null result (404) means
+    // refreshState coalesces reads: one GET /state in flight, at most one follow-up.
+    refreshState() {
+        if (this.stateRead) {
+            this.stateDirty = true;
+
+            return this.stateRead;
+        }
+        this.stateRead = (async () => {
+            try {
+                do {
+                    this.stateDirty = false;
+                    await this.readState();
+                } while (this.stateDirty);
+            } finally {
+                this.stateRead = null;
+            }
+        })();
+
+        return this.stateRead;
+    }
+
+    // readState performs the authoritative read. A null result (404) means
     // the session is gone or the viewer is no longer a participant; the
     // component flips sessionClosed and tears down the stream so the UI stops
     // polling a dead room. A thrown read (network drop, 5xx) leaves the prior
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
-    async refreshState() {
+    async readState() {
         const seq = ++this.stateSeq;
         let state;
         try {
