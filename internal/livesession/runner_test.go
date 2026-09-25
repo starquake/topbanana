@@ -45,6 +45,7 @@ type runnerHarness struct {
 	runner  *Runner
 	clock   *fakeClock
 	store   *store.LiveSessionStore
+	quizzes *store.QuizStore
 	hub     *Hub
 	db      *sql.DB
 	code    string
@@ -123,6 +124,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 		runner:  runner,
 		clock:   clock,
 		store:   sessionStore,
+		quizzes: quizStore,
 		hub:     hub,
 		db:      db,
 		code:    sess.JoinCode,
@@ -1580,5 +1582,374 @@ func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
 	}
 	if got, notWant := *sess.QuizID, game2.ID; got == notWant {
 		t.Errorf("QuizID after rejected re-arm = %d, want it unchanged from the original quiz", got)
+	}
+}
+
+// hookStore wraps the real store to inject the interleavings and failures a
+// real store cannot produce on demand: work that lands between a read and the
+// next write, and a scoring write that fails.
+type hookStore struct {
+	*store.LiveSessionStore
+
+	mu sync.Mutex
+	// The before/after hooks each run once, on the first matching call.
+	beforeEnterReveal  func()
+	beforeRecordAnswer func()
+	afterCountActive   func()
+	afterListLive      func()
+	afterGetActive     func()
+	// failScores is how many SetAnswerScore calls fail before one succeeds.
+	failScores int
+}
+
+var errInjectedScore = errors.New("injected score failure")
+
+func (s *hookStore) EnterReveal(ctx context.Context, sessionID string, expected Phase, questionID int64) (bool, error) {
+	s.takeHook(&s.beforeEnterReveal)()
+
+	return s.LiveSessionStore.EnterReveal(ctx, sessionID, expected, questionID)
+}
+
+func (s *hookStore) RecordAnswer(
+	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
+) error {
+	s.takeHook(&s.beforeRecordAnswer)()
+
+	return s.LiveSessionStore.RecordAnswer(ctx, sessionID, questionID, playerID, optionID, answeredAt)
+}
+
+func (s *hookStore) CountActive(ctx context.Context, sessionID string, since time.Time) (int, error) {
+	n, err := s.LiveSessionStore.CountActive(ctx, sessionID, since)
+	s.takeHook(&s.afterCountActive)()
+
+	return n, err
+}
+
+func (s *hookStore) ListLiveSessionIDs(ctx context.Context) ([]string, error) {
+	ids, err := s.LiveSessionStore.ListLiveSessionIDs(ctx)
+	s.takeHook(&s.afterListLive)()
+
+	return ids, err
+}
+
+func (s *hookStore) GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*Session, error) {
+	sess, err := s.LiveSessionStore.GetActiveSessionForHost(ctx, hostPlayerID)
+	s.takeHook(&s.afterGetActive)()
+
+	return sess, err
+}
+
+func (s *hookStore) SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error {
+	s.mu.Lock()
+	fail := s.failScores > 0
+	if fail {
+		s.failScores--
+	}
+	s.mu.Unlock()
+	if fail {
+		return errInjectedScore
+	}
+
+	return s.LiveSessionStore.SetAnswerScore(ctx, sessionID, questionID, playerID, score)
+}
+
+func (s *hookStore) takeHook(hook *func()) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn := *hook
+	*hook = nil
+	if fn == nil {
+		return func() {}
+	}
+
+	return fn
+}
+
+// runnerOver builds a second runner sharing the harness clock, hub, and quiz
+// store but reading and writing through st.
+func (h *runnerHarness) runnerOver(st Store) *Runner {
+	return h.runnerOverLogged(st, slog.New(slog.DiscardHandler))
+}
+
+// runnerOverLogged is runnerOver with the runner logging to logger.
+func (h *runnerHarness) runnerOverLogged(st Store, logger *slog.Logger) *Runner {
+	discard := slog.New(slog.DiscardHandler)
+	r := NewRunner(st, h.quizzes, h.hub, game.NewService(nil, h.quizzes, discard), logger, runnerCfg)
+	r.SetClock(h.clock)
+
+	return r
+}
+
+// openFirstQuestion starts the harness game and ticks it into its first
+// question, returning the question-phase session.
+func (h *runnerHarness) openFirstQuestion(t *testing.T) *Session {
+	t.Helper()
+	if err := h.service.Start(t.Context(), h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(t.Context())
+	sess := h.reload(t)
+	if got, want := sess.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	return sess
+}
+
+// answerScore returns the recorded score of playerID's pick on questionID, and
+// whether a pick exists at all.
+func (h *runnerHarness) answerScore(t *testing.T, sessionID string, questionID, playerID int64) (*int, bool) {
+	t.Helper()
+	answers, err := h.store.ListAnswers(t.Context(), sessionID, questionID)
+	if err != nil {
+		t.Fatalf("ListAnswers err = %v, want nil", err)
+	}
+	for _, a := range answers {
+		if a.PlayerID == playerID {
+			return a.Score, true
+		}
+	}
+
+	return nil, false
+}
+
+// TestRunner_ScoresAnswerLandingJustBeforeClose pins #1334: a pick that commits
+// after the runner loaded the question but before the close is still scored,
+// because the reveal is written before the answers are listed.
+func TestRunner_ScoresAnswerLandingJustBeforeClose(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.beforeEnterReveal = func() {
+		if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, *q.QuestionExpiresAt); err != nil {
+			t.Errorf("SubmitAnswer at the deadline err = %v, want nil", err)
+		}
+	}
+	r := h.runnerOver(hooked)
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	ExportRunnerTick(ctx, r, h.clock.Now())
+
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after timeout = %q, want %q", got, want)
+	}
+	score, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0])
+	if !ok {
+		t.Fatal("deadline pick missing, want it recorded")
+	}
+	if score == nil {
+		t.Fatal("deadline pick score = nil, want it scored at close")
+	}
+	if got, want := *score, scoreAt(q, *q.QuestionExpiresAt); got != want {
+		t.Errorf("deadline pick score = %d, want %d", got, want)
+	}
+}
+
+// TestRunner_RetriesFailedScoring pins #1335: a scoring failure at close does
+// not leave the picks unscored; the runner retries on every reveal tick,
+// republishes the reveal once the scores land, and only then advances.
+func TestRunner_RetriesFailedScoring(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	answerAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, answerAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	// Fail at close and again on the first retry.
+	hooked := &hookStore{LiveSessionStore: h.store, failScores: 2}
+	r := h.runnerOver(hooked)
+	tick := func() { ExportRunnerTick(ctx, r, h.clock.Now()) }
+	version := func() uint64 {
+		_, v, unsubscribe := h.hub.Subscribe(h.code)
+		unsubscribe()
+
+		return v
+	}
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after timeout = %q, want %q", got, want)
+	}
+	if score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); score != nil {
+		t.Fatalf("score after failed close = %d, want nil (injected failure)", *score)
+	}
+
+	tick()
+	if score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); score != nil {
+		t.Fatalf("score after failed retry = %d, want nil (injected failure)", *score)
+	}
+
+	before := version()
+	tick()
+	score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0])
+	if score == nil {
+		t.Fatal("score after retry = nil, want the pick scored within the reveal beat")
+	}
+	if got, want := *score, scoreAt(q, answerAt); got != want {
+		t.Errorf("score after retry = %d, want %d", got, want)
+	}
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Errorf("phase after late scoring = %q, want %q (beat not elapsed)", got, want)
+	}
+	if got := version(); got <= before {
+		t.Errorf("hub version after late scoring = %d, want > %d (reveal republished)", got, before)
+	}
+
+	h.clock.advance(runnerCfg.RevealBeat)
+	tick()
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Errorf("phase after reveal beat = %q, want %q", got, want)
+	}
+}
+
+// TestRunner_ThrottlesScoringFailureLog pins that a scoring failure retried
+// every beat is logged when it starts, then at most once per log interval, and
+// logged afresh when a later failure starts after scoring recovered.
+func TestRunner_ThrottlesScoringFailureLog(t *testing.T) {
+	t.Parallel()
+
+	const failMsg = "runner failed to score question"
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true, true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	firstAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, firstAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	hooked := &hookStore{LiveSessionStore: h.store, failScores: 1000}
+	logs := newCaptureHandler()
+	r := h.runnerOverLogged(hooked, slog.New(logs))
+	tick := func() { ExportRunnerTick(ctx, r, h.clock.Now()) }
+	failLogs := func() int {
+		n := 0
+		for _, rec := range logs.snapshot() {
+			if rec.Message == failMsg {
+				n++
+			}
+		}
+
+		return n
+	}
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	for range 5 {
+		h.clock.advance(runnerCfg.BeatInterval)
+		tick()
+	}
+	if got, want := failLogs(), 1; got != want {
+		t.Errorf("failure logs within the interval = %d, want %d", got, want)
+	}
+	assertLog(t, logs, failMsg, slog.LevelWarn)
+
+	h.clock.advance(ExportScoreFailureLogInterval)
+	tick()
+	if got, want := failLogs(), 2; got != want {
+		t.Errorf("failure logs after the interval = %d, want %d", got, want)
+	}
+
+	hooked.mu.Lock()
+	hooked.failScores = 0
+	hooked.mu.Unlock()
+	tick()
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after recovered scoring = %q, want %q", got, want)
+	}
+	optNext := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	answerAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optNext, answerAt); err != nil {
+		t.Fatalf("second SubmitAnswer err = %v, want nil", err)
+	}
+	hooked.mu.Lock()
+	hooked.failScores = 1000
+	hooked.mu.Unlock()
+	next := h.reload(t)
+	h.clock.advance(next.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	if got, want := failLogs(), 3; got != want {
+		t.Errorf("failure logs after a new failure = %d, want %d", got, want)
+	}
+}
+
+// TestRunner_IdleCloseSkipsRoomThatMovedOn pins the idle-close phase guard
+// (#1336): a room the host started after the runner loaded its idle snapshot
+// is not closed by that stale snapshot.
+func TestRunner_IdleCloseSkipsRoomThatMovedOn(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.afterCountActive = func() {
+		if err := h.service.Start(ctx, h.code, 1); err != nil {
+			t.Errorf("Start err = %v, want nil", err)
+		}
+	}
+	ExportRunnerTick(ctx, h.runnerOver(hooked), h.clock.Now())
+
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Errorf("phase after stale idle close = %q, want %q (room left open)", got, want)
+	}
+}
+
+// TestRunner_KeepsPhaseClockOfRoomStartedMidTick pins that the end-of-tick
+// prune only drops rooms that were tracked before the live list was read: a
+// room started while the tick runs keeps its fresh phase clock.
+func TestRunner_KeepsPhaseClockOfRoomStartedMidTick(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	hooked := &hookStore{LiveSessionStore: h.store}
+	r := h.runnerOver(hooked)
+	h.service.SetAdvancer(r)
+
+	host, err := store.NewPlayerStore(h.db, slog.New(slog.DiscardHandler)).CreateAnonymousPlayer(ctx, "midtick-host")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	quizID := h.reload(t).QuizID
+
+	var fresh *Session
+	hooked.afterListLive = func() {
+		if fresh, err = h.service.CreateSession(ctx, quizID, host.ID, true); err != nil {
+			t.Errorf("CreateSession err = %v, want nil", err)
+
+			return
+		}
+		if err = h.service.Start(ctx, fresh.JoinCode, host.ID); err != nil {
+			t.Errorf("Start err = %v, want nil", err)
+		}
+	}
+	ExportRunnerTick(ctx, r, h.clock.Now())
+
+	if fresh == nil {
+		t.Fatal("room was not created mid-tick")
+	}
+	if !ExportRunnerHasPhaseClock(r, fresh.ID) {
+		t.Error("phase clock of the room started mid-tick was dropped, want it kept")
 	}
 }

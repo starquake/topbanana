@@ -469,6 +469,41 @@ func TestHostBigScreen_Authz(t *testing.T) {
 	})
 }
 
+// TestHostBigScreen_RosterHostCannotOpen pins that a host who joined another
+// host's room as a player is on the roster but still cannot open its big screen
+// (#1336): the big screen belongs to the room's host only.
+func TestHostBigScreen_RosterHostCannotOpen(t *testing.T) {
+	t.Parallel()
+
+	const otherEmail = "host-roster-other@example.test"
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"ADMIN_EMAILS": otherEmail})
+	baseURL := setup.BaseURL
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-roster")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "host-roster-host", "host-roster-pass-123")
+	code := createSession(ctx, t, host, baseURL, qz.ID)
+
+	other := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyViaLinkAndMint(ctx, t, other, baseURL, setup.DBURI, "host-roster-other", "host-roster-other-123")
+	joinResp := httpPostJSON(ctx, t, other, baseURL+"/api/sessions/"+code+"/join", "")
+	defer closeBody(t, joinResp.Body)
+	if got, want := joinResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("join status = %d, want %d", got, want)
+	}
+
+	status, _ := getHostBigScreenHTML(ctx, t, other, baseURL, code)
+	if got, want := status, http.StatusNotFound; got != want {
+		t.Errorf("roster host big screen status = %d, want %d", got, want)
+	}
+}
+
 // TestHostStart_BeginsSessionAndRedirects pins the host start happy path: the
 // owning host posts to /host/{code}/start, the session is marked started, and
 // the host is 303-redirected back to the lobby. A second start is idempotent

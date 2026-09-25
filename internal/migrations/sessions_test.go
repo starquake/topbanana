@@ -693,7 +693,8 @@ func TestSessionQuizNullableMigration_AllowsNullQuiz(t *testing.T) {
 	}
 	if _, err := db.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-withquiz-1', ?, 1, 'WQZ234')`,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase)
+		 VALUES ('sess-withquiz-1', ?, 1, 'WQZ234', 'finished')`,
 		seededQuizID,
 	); err != nil {
 		t.Errorf("insert quizzed session err = %v, want nil", err)
@@ -731,7 +732,8 @@ func TestSessionQuizNullableMigration_DownDropsQuizlessRooms(t *testing.T) {
 	}
 	if _, err := db.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-down-withquiz', ?, 1, 'DWQ234')`,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase)
+		 VALUES ('sess-down-withquiz', ?, 1, 'DWQ234', 'finished')`,
 		quizID,
 	); err != nil {
 		t.Fatalf("seed quizzed session err = %v, want nil", err)

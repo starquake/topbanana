@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -38,6 +39,10 @@ const (
 	// knob the solo game uses.
 	defaultQuestionReadBeat = 3 * time.Second
 )
+
+// scoreFailureLogInterval caps how often a persistent scoring failure is
+// logged, since the reveal retries it every beat.
+const scoreFailureLogInterval = 30 * time.Second
 
 // errNoQuiz guards the runner against driving a quiz-less room (#836). A room
 // created without a quiz stays in the empty lobby until the host arms one, so the
@@ -128,6 +133,12 @@ type Runner struct {
 	// beat-gated phase (round_intro or reveal), so the beat is measured from
 	// the transition rather than persisted.
 	phaseSince map[string]time.Time
+	// unscored marks sessions revealed while scoring their question failed,
+	// so the reveal retries it every tick and republishes once it lands.
+	unscored map[string]bool
+	// scoreFailLoggedAt records when a session's ongoing scoring failure was
+	// last logged.
+	scoreFailLoggedAt map[string]time.Time
 }
 
 // NewRunner builds a runner over the live-session store, quiz reader, tick
@@ -144,6 +155,9 @@ func NewRunner(
 		clock:      realClock{},
 		cfg:        cfg.withDefaults(),
 		phaseSince: make(map[string]time.Time),
+		unscored:   make(map[string]bool),
+
+		scoreFailLoggedAt: make(map[string]time.Time),
 	}
 }
 
@@ -201,9 +215,11 @@ func (r *Runner) Rearm(ctx context.Context, sessionID string) {
 	r.Begin(ctx, sessionID)
 }
 
-// tick scans every live session once and advances each. Exported to tests as
-// Tick via export_test.
+// tick scans every live session once and advances each, then drops the phase
+// clock of any room no longer live (e.g. one the host ended). Exported to tests
+// as Tick via export_test.
 func (r *Runner) tick(ctx context.Context, now time.Time) {
+	tracked := r.trackedSessions()
 	ids, err := r.store.ListLiveSessionIDs(ctx)
 	if err != nil {
 		r.logger.WarnContext(ctx, "runner failed to list live sessions", slog.Any("err", err))
@@ -213,6 +229,7 @@ func (r *Runner) tick(ctx context.Context, now time.Time) {
 	for _, id := range ids {
 		r.advance(ctx, id, now)
 	}
+	r.forgetEnded(tracked, ids)
 }
 
 // advance loads one session and applies the single transition (if any) due at
@@ -318,7 +335,9 @@ func (r *Runner) advanceRoundIntro(ctx context.Context, sess *Session, now time.
 
 // advanceQuestion closes the current question when every active player has
 // answered (early close) or the answer window has expired (timeout close),
-// scoring the picks and moving into the reveal phase.
+// moving into the reveal phase and scoring the picks. The reveal is written
+// first so the answer set is frozen before it is scored (#1334); a scoring
+// failure is retried before the reveal advances (#1335).
 func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Time) {
 	if sess.CurrentQuestionID == nil || sess.QuestionExpiresAt == nil {
 		return
@@ -329,7 +348,6 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 
-	r.scoreQuestion(ctx, sess)
 	applied, err := r.store.EnterReveal(ctx, sess.ID, sess.Phase, *sess.CurrentQuestionID)
 	if err != nil {
 		r.logger.WarnContext(
@@ -345,16 +363,31 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 	r.markPhase(sess.ID, now)
+	if !r.scoreQuestionLogged(ctx, sess, now) {
+		r.markUnscored(sess.ID)
+	}
 	r.publish(sess.JoinCode, PhaseReveal)
 }
 
-// advanceReveal moves to the next question once the reveal beat has elapsed,
-// or - when the revealed question was the last of its round - into the
-// between-rounds round_results screen. The final round skips round_results and
+// advanceReveal moves to the next question once the reveal beat has elapsed
+// and every pick on the revealed question is scored, or - when the revealed
+// question was the last of its round - into the between-rounds round_results
+// screen. The final round skips round_results and
 // finishes directly, so the game ends on a single final-standings screen rather
 // than showing "Scores so far" back-to-back with "Final scores".
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
+	if r.isUnscored(sess.ID) {
+		if !r.scoreQuestionLogged(ctx, sess, now) {
+			return
+		}
+		r.clearUnscored(sess.ID)
+		r.publish(sess.JoinCode, PhaseReveal)
+	}
 	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RevealBeat {
+		return
+	}
+	// Backstop for a restart that lost the unscored mark.
+	if !r.scoreQuestionLogged(ctx, sess, now) {
 		return
 	}
 
@@ -607,13 +640,14 @@ func (r *Runner) endEmptyGame(ctx context.Context, sess *Session) {
 	r.publish(sess.JoinCode, PhaseIntermission)
 }
 
-// finishTerminal closes the room for good: it persists the finished transition,
-// publishes, and drops the session's in-memory bookkeeping (its phase clock and,
-// since the room is now terminal, its publisher version entry). Reached only
-// when the room is actually closed - the idle auto-close swept it (host gone and
-// no players present) or the host explicitly ended the session.
+// finishTerminal closes an idle room for good: it persists the finished
+// transition, publishes, and drops the session's in-memory bookkeeping (its
+// phase clock and, since the room is now terminal, its publisher version
+// entry). The write is guarded on the loaded phase, so a room the host moved on
+// since the snapshot (e.g. started the next quiz) stays open.
 func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
-	if err := r.store.Finish(ctx, sess.ID); err != nil {
+	applied, err := r.store.FinishFrom(ctx, sess.ID, sess.Phase)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to finish session",
@@ -623,6 +657,9 @@ func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 
 		return
 	}
+	if !applied {
+		return
+	}
 	r.forget(sess.ID)
 	r.publish(sess.JoinCode, PhaseFinished)
 	// Evict the version entry only after the finished tick is published, so
@@ -630,34 +667,49 @@ func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 	r.forgetPublished(sess.JoinCode)
 }
 
-// scoreQuestion computes and writes the score for every pick on the current
-// question using the shared CalculateScore curve.
-func (r *Runner) scoreQuestion(ctx context.Context, sess *Session) {
-	if sess.CurrentQuestionID == nil || sess.QuestionStartedAt == nil || sess.QuestionExpiresAt == nil {
-		return
-	}
-	answers, err := r.store.ListAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
-	if err != nil {
-		r.logger.WarnContext(
-			ctx,
-			"runner failed to list answers for scoring",
-			slog.String(logSessionKey, sess.ID),
-			slog.Any("err", err),
-		)
-
-		return
-	}
-	for _, a := range answers {
-		score := r.scorer.ScoreAnswer(ctx, a.Correct, *sess.QuestionStartedAt, *sess.QuestionExpiresAt, a.AnsweredAt)
-		if err := r.store.SetAnswerScore(ctx, sess.ID, *sess.CurrentQuestionID, a.PlayerID, score); err != nil {
+// scoreQuestionLogged runs scoreQuestion, reporting whether every pick is now
+// scored. A failure is logged when it starts and then at most once per
+// scoreFailureLogInterval until scoring succeeds.
+func (r *Runner) scoreQuestionLogged(ctx context.Context, sess *Session, now time.Time) bool {
+	if err := r.scoreQuestion(ctx, sess); err != nil {
+		if r.shouldLogScoreFailure(sess.ID, now) {
 			r.logger.WarnContext(
 				ctx,
-				"runner failed to set answer score",
+				"runner failed to score question",
 				slog.String(logSessionKey, sess.ID),
 				slog.Any("err", err),
 			)
 		}
+
+		return false
 	}
+	r.clearScoreFailure(sess.ID)
+
+	return true
+}
+
+// scoreQuestion computes and writes the score for every not-yet-scored pick on
+// the current question using the shared CalculateScore curve. Already-scored
+// picks are skipped, so a retry after a partial failure only fills the gaps.
+func (r *Runner) scoreQuestion(ctx context.Context, sess *Session) error {
+	if sess.CurrentQuestionID == nil || sess.QuestionStartedAt == nil || sess.QuestionExpiresAt == nil {
+		return nil
+	}
+	answers, err := r.store.ListAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
+	if err != nil {
+		return fmt.Errorf("failed to list answers for scoring: %w", err)
+	}
+	for _, a := range answers {
+		if a.Score != nil {
+			continue
+		}
+		score := r.scorer.ScoreAnswer(ctx, a.Correct, *sess.QuestionStartedAt, *sess.QuestionExpiresAt, a.AnsweredAt)
+		if err = r.store.SetAnswerScore(ctx, sess.ID, *sess.CurrentQuestionID, a.PlayerID, score); err != nil {
+			return fmt.Errorf("failed to set answer score: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // allActiveAnswered reports whether every active player has answered the
@@ -777,6 +829,72 @@ func (r *Runner) forget(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.phaseSince, sessionID)
+	delete(r.unscored, sessionID)
+	delete(r.scoreFailLoggedAt, sessionID)
+}
+
+func (r *Runner) shouldLogScoreFailure(sessionID string, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	last, ok := r.scoreFailLoggedAt[sessionID]
+	if ok && now.Sub(last) < scoreFailureLogInterval {
+		return false
+	}
+	r.scoreFailLoggedAt[sessionID] = now
+
+	return true
+}
+
+func (r *Runner) clearScoreFailure(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.scoreFailLoggedAt, sessionID)
+}
+
+func (r *Runner) markUnscored(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unscored[sessionID] = true
+}
+
+func (r *Runner) clearUnscored(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.unscored, sessionID)
+}
+
+func (r *Runner) isUnscored(sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.unscored[sessionID]
+}
+
+// trackedSessions returns the ids the runner holds bookkeeping for.
+func (r *Runner) trackedSessions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return slices.Collect(maps.Keys(r.phaseSince))
+}
+
+// forgetEnded drops the bookkeeping of every tracked session missing from
+// live. Only ids tracked before live was listed are considered, so a room
+// created and started during the tick keeps its fresh phase clock.
+func (r *Runner) forgetEnded(tracked, live []string) {
+	liveSet := make(map[string]struct{}, len(live))
+	for _, id := range live {
+		liveSet[id] = struct{}{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range tracked {
+		if _, ok := liveSet[id]; !ok {
+			delete(r.phaseSince, id)
+			delete(r.unscored, id)
+			delete(r.scoreFailLoggedAt, id)
+		}
+	}
 }
 
 // questionPlan is the runner's flattened view of a quiz: its questions grouped

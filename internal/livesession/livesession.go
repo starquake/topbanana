@@ -44,6 +44,11 @@ var (
 	// the retry-exhaustion detail.
 	ErrJoinCodeUnavailable = errors.New("could not allocate a unique join code")
 
+	// ErrHostHasActiveRoom is returned by [Store.CreateSession] when the host
+	// already has an active (non-finished) room: a host has at most one (#1336).
+	// [Service.CreateSession] resolves it to the existing room.
+	ErrHostHasActiveRoom = errors.New("host already has an active room")
+
 	// ErrNotHost is returned by host-gated actions ([Service.Start]) when
 	// the caller is not the session's host. Handlers map it to 403.
 	ErrNotHost = errors.New("player is not the session host")
@@ -360,9 +365,12 @@ type Store interface {
 	// EnterRoundIntro.
 	EnterRoundResults(ctx context.Context, sessionID string, expected Phase) (bool, error)
 	// Finish ends the session terminally: marks it finished and clears the
-	// per-question runner columns. Used when the room is actually closed (idle
-	// auto-close, or an explicit host End session).
+	// per-question runner columns. Used when the host explicitly ends the room;
+	// the idle auto-close uses [Store.FinishFrom].
 	Finish(ctx context.Context, sessionID string) error
+	// FinishFrom is [Store.Finish] as an optimistic write against expected
+	// (see EnterRoundIntro), for the runner's idle close.
+	FinishFrom(ctx context.Context, sessionID string, expected Phase) (bool, error)
 	// Intermission ends a game without closing the room (#836): marks it
 	// intermission (the between-games screen) and clears the per-question runner
 	// columns, leaving the room alive so the host can arm the next quiz. When
@@ -381,7 +389,9 @@ type Store interface {
 	// running (mid-game) or the room is terminally finished.
 	RearmSession(ctx context.Context, sessionID string, quizID int64) error
 	// RecordAnswer records (or overwrites) a player's pick for the current
-	// session question. Idempotent on (session, question, player).
+	// session question. Idempotent on (session, question, player). Returns
+	// [ErrQuestionNotOpen] when the session is no longer on that question or
+	// the pick has already been scored.
 	RecordAnswer(
 		ctx context.Context,
 		sessionID string,
@@ -596,49 +606,17 @@ func hostableQuizErr(qz *quiz.Quiz, requesterID int64, isAdmin bool) error {
 // #1207, overriding the old owner-or-published rule). Returns
 // [quiz.ErrQuizNotFound] when the supplied quiz does not exist, [ErrNotLiveQuiz]
 // when it is a solo quiz, and [ErrQuizNotOwned] when a non-admin host did not
-// create it.
+// create it. A host has at most one active room (#1336): when one already
+// exists (e.g. a double-clicked "Host live") that room is returned unchanged.
 func (s *Service) CreateSession(
 	ctx context.Context,
 	quizID *int64,
 	hostPlayerID int64,
 	isAdmin bool,
 ) (*Session, error) {
-	if quizID != nil {
-		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get quiz for session: %w", err)
-		}
-		if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
-			return nil, gerr
-		}
-	}
+	sess, _, err := s.openOrReuseRoom(ctx, quizID, hostPlayerID, isAdmin)
 
-	code, err := s.allocateJoinCode(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	sess := &Session{
-		QuizID:       quizID,
-		HostPlayerID: hostPlayerID,
-		JoinCode:     code,
-		Phase:        PhaseLobby,
-	}
-	if err = s.store.CreateSession(ctx, sess); err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	attrs := []any{
-		slog.String(logSessionKey, sess.ID),
-		slog.String(logJoinCodeKey, sess.JoinCode),
-		slog.Int64(logHostKey, hostPlayerID),
-	}
-	if quizID != nil {
-		attrs = append(attrs, slog.Int64(logQuizKey, *quizID))
-	}
-	s.logger.InfoContext(ctx, "live session created", attrs...)
-
-	return sess, nil
+	return sess, err
 }
 
 // Join adds the player to the session identified by join code. The player is
@@ -871,9 +849,9 @@ func (s *Service) CancelStart(ctx context.Context, joinCode string, hostPlayerID
 // The pick is validated against the live question (the option must belong to
 // it and the answer window must be open) and stored without its correctness
 // being surfaced - the runner scores it at close. Returns [ErrSessionNotFound]
-// for an unknown code, [ErrNotParticipant] when the caller has not joined,
-// and [ErrQuestionNotOpen] when no question is currently accepting answers or
-// the option is not part of it.
+// for an unknown code, [ErrNotParticipant] when the caller is not on the
+// roster (the host included), and [ErrQuestionNotOpen] when no question is
+// currently accepting answers or the option is not part of it.
 func (s *Service) SubmitAnswer(
 	ctx context.Context, joinCode string, playerID, optionID int64, answeredAt time.Time,
 ) error {
@@ -881,7 +859,7 @@ func (s *Service) SubmitAnswer(
 	if err != nil {
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
-	if !s.isParticipant(sess, playerID) {
+	if !isRosterPlayer(sess, playerID) {
 		s.logger.InfoContext(ctx, "answer rejected: not a participant",
 			slog.String(logJoinCodeKey, sess.JoinCode),
 			slog.Int64(logPlayerKey, playerID))
@@ -916,6 +894,12 @@ func (s *Service) SubmitAnswer(
 	}
 
 	if err = s.store.RecordAnswer(ctx, sess.ID, *sess.CurrentQuestionID, playerID, optionID, answeredAt); err != nil {
+		if errors.Is(err, ErrQuestionNotOpen) {
+			s.logAnswerNotOpen(ctx, sess, playerID, "closed")
+
+			return ErrQuestionNotOpen
+		}
+
 		return fmt.Errorf("failed to record session answer: %w", err)
 	}
 
@@ -1061,6 +1045,75 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 	return nil
 }
 
+// openOrReuseRoom is [Service.CreateSession], also reporting whether the room was
+// newly opened (false when the host's existing active room was returned).
+func (s *Service) openOrReuseRoom(
+	ctx context.Context,
+	quizID *int64,
+	hostPlayerID int64,
+	isAdmin bool,
+) (*Session, bool, error) {
+	if quizID != nil {
+		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to get quiz for session: %w", err)
+		}
+		if gerr := hostableQuizErr(qz, hostPlayerID, isAdmin); gerr != nil {
+			return nil, false, gerr
+		}
+	}
+
+	code, err := s.allocateJoinCode(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	sess := &Session{
+		QuizID:       quizID,
+		HostPlayerID: hostPlayerID,
+		JoinCode:     code,
+		Phase:        PhaseLobby,
+	}
+	if err = s.store.CreateSession(ctx, sess); err != nil {
+		if errors.Is(err, ErrHostHasActiveRoom) {
+			active, aerr := s.existingRoomForHost(ctx, hostPlayerID)
+
+			return active, false, aerr
+		}
+
+		return nil, false, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	attrs := []any{
+		slog.String(logSessionKey, sess.ID),
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID),
+	}
+	if quizID != nil {
+		attrs = append(attrs, slog.Int64(logQuizKey, *quizID))
+	}
+	s.logger.InfoContext(ctx, "live session created", attrs...)
+
+	return sess, true, nil
+}
+
+// existingRoomForHost returns the host's active room after a create lost the
+// one-room-per-host race.
+func (s *Service) existingRoomForHost(ctx context.Context, hostPlayerID int64) (*Session, error) {
+	active, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)
+	if err != nil {
+		return nil, fmt.Errorf(errGetActiveSessionFmt, err)
+	}
+	if active == nil {
+		return nil, fmt.Errorf("failed to create session: %w", ErrHostHasActiveRoom)
+	}
+	s.logger.InfoContext(ctx, "live session create reused the host's active room",
+		slog.String(logJoinCodeKey, active.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID))
+
+	return active, nil
+}
+
 // lobbyQuiz loads the room's quiz for the session state, or (nil, nil) for an empty
 // room (no quiz picked yet, #836): the lobby renders the staging state and the
 // in-game / standings / round-intro populators are all no-ops in that phase.
@@ -1160,7 +1213,7 @@ func (s *Service) populateStandings(ctx context.Context, state *SessionState) er
 		}
 		state.Standings = rankStandings(standings)
 	case sess.Phase == PhaseIntermission, sess.Phase == PhaseFinished:
-		standings, err := s.finishedStandings(ctx, sess)
+		standings, err := s.finishedStandings(ctx, sess, state.Quiz)
 		if err != nil {
 			return err
 		}
@@ -1175,30 +1228,27 @@ func (s *Service) populateStandings(ctx context.Context, state *SessionState) er
 // finishedStandings returns the final standings ordered best-first by
 // cumulative total, with each player's last-round score overlaid onto
 // RoundScore so the finished bar graph can animate the last round's
-// contribution. When the quiz has no rounds the final standings are returned
-// unchanged (RoundScore 0).
-func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Standing, error) {
+// contribution. The last round is the last one the runner played, so an empty
+// round (never played live) is skipped. When no round was played the final
+// standings are returned unchanged (RoundScore 0).
+func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz.Quiz) ([]*Standing, error) {
 	standings, err := s.store.ListFinalStandings(ctx, sess.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list final standings for state: %w", err)
 	}
 	// A room shows final standings only after a game, so a quiz is always set
-	// here; guard the deref so a quiz-less room (which has no game to score)
-	// returns the bare standings rather than panicking.
-	if sess.QuizID == nil {
+	// here; a quiz-less room (which has no game to score) gets the bare
+	// standings.
+	if qz == nil {
 		return standings, nil
 	}
 
-	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
-	}
-	if len(rounds) == 0 {
+	played := newQuestionPlan(qz).rounds
+	if len(played) == 0 {
 		return standings, nil
 	}
 
-	lastRoundID := rounds[len(rounds)-1].ID
-	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, lastRoundID)
+	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, played[len(played)-1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to list last round standings for state: %w", err)
 	}
@@ -1282,9 +1332,11 @@ func rankStandings(standings []*Standing) []*Standing {
 
 // isParticipant reports whether playerID is the host or a roster player.
 func (*Service) isParticipant(sess *Session, playerID int64) bool {
-	if sess.HostPlayerID == playerID {
-		return true
-	}
+	return sess.HostPlayerID == playerID || isRosterPlayer(sess, playerID)
+}
+
+// isRosterPlayer reports whether playerID is on the session roster.
+func isRosterPlayer(sess *Session, playerID int64) bool {
 	for _, p := range sess.Players {
 		if p.PlayerID == playerID {
 			return true

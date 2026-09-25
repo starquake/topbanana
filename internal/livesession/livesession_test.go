@@ -189,6 +189,10 @@ func (*fakeStore) EnterRoundResults(context.Context, string, Phase) (bool, error
 
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
 
+func (*fakeStore) FinishFrom(context.Context, string, Phase) (bool, error) {
+	return false, errors.ErrUnsupported
+}
+
 func (*fakeStore) Intermission(context.Context, string, bool) error {
 	return errors.ErrUnsupported
 }
@@ -732,5 +736,128 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 	qz := seedRunnerQuizSlug(t, h.quizStore, "quizless-start-guard", [][]bool{{true}})
 	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID, false); err != nil {
 		t.Fatalf("StartQuiz after refused start err = %v, want nil (room must not be wedged)", err)
+	}
+}
+
+// TestService_CreateSession_ReturnsActiveRoom pins one active room per host
+// (#1336): a second create while the host's room is open returns that room,
+// and once it is ended the host can open a new one.
+func TestService_CreateSession_ReturnsActiveRoom(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	first, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	second, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("second CreateSession err = %v, want nil", err)
+	}
+	if got, want := second.ID, first.ID; got != want {
+		t.Errorf("second CreateSession id = %q, want the active room %q", got, want)
+	}
+
+	if err = h.service.EndSession(ctx, first.JoinCode, hostID); err != nil {
+		t.Fatalf("EndSession err = %v, want nil", err)
+	}
+	third, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("CreateSession after end err = %v, want nil", err)
+	}
+	if got, old := third.ID, first.ID; got == old {
+		t.Errorf("CreateSession after end id = %q, want a new room (not %q)", got, old)
+	}
+}
+
+// TestService_SubmitAnswer_HostRejected pins #1336: the host is not on the
+// roster, so they cannot record a live answer.
+func TestService_SubmitAnswer_HostRejected(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	err := h.service.SubmitAnswer(ctx, h.code, 1, optRight, *q.QuestionStartedAt)
+	if got, want := err, ErrNotParticipant; !errors.Is(got, want) {
+		t.Errorf("host SubmitAnswer err = %v, want %v", got, want)
+	}
+	if _, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, 1); ok {
+		t.Error("host pick recorded, want none")
+	}
+}
+
+// TestService_SubmitAnswer_RejectedWhenCloseWins pins #1334: a pick that passed
+// the snapshot checks but lands after the runner closed the question is
+// rejected as closed rather than stored unscored.
+func TestService_SubmitAnswer_RejectedWhenCloseWins(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.beforeRecordAnswer = func() {
+		h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+		h.tick(ctx)
+	}
+	service := NewService(hooked, h.quizzes, slog.New(slog.DiscardHandler))
+
+	err := service.SubmitAnswer(ctx, h.code, h.players[0], optRight, *q.QuestionExpiresAt)
+	if got, want := err, ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("SubmitAnswer after close err = %v, want %v", got, want)
+	}
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Errorf("phase = %q, want %q", got, want)
+	}
+	if _, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); ok {
+		t.Error("late pick recorded, want none")
+	}
+}
+
+// TestService_FinalStandingsSkipEmptyLastRound pins #1336: when the quiz's last
+// round has no questions (so is never played live), the final standings carry
+// the last played round's points instead of zero.
+func TestService_FinalStandingsSkipEmptyLastRound(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}, {}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	scorer := h.players[0]
+	optRight := correctOptionID(ctx, t, h.service, h.code, scorer)
+	if err := h.service.SubmitAnswer(ctx, h.code, scorer, optRight, *q.QuestionStartedAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	h.tick(ctx)
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after final reveal = %q, want %q", got, want)
+	}
+
+	state, err := h.service.GetSessionState(ctx, h.code, scorer)
+	if err != nil {
+		t.Fatalf("GetSessionState err = %v, want nil", err)
+	}
+	st := findRunnerStanding(t, state.Standings, scorer)
+	if got := st.TotalScore; got <= 0 {
+		t.Fatalf("scorer TotalScore = %d, want > 0", got)
+	}
+	if got, want := st.RoundScore, st.TotalScore; got != want {
+		t.Errorf("scorer final RoundScore = %d, want %d (the last played round)", got, want)
 	}
 }

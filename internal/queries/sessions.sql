@@ -202,7 +202,8 @@ WHERE id = sqlc.arg('id')
 -- Moves the session into the reveal phase, leaving the current question and
 -- its window in place so a reader still sees which question is being revealed.
 -- Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
--- pins the reveal to the question the runner scored.
+-- pins the reveal to the question the runner closed; it scores the picks after
+-- this write, once no more can land.
 UPDATE sessions
 SET phase = 'reveal'
 WHERE id = sqlc.arg('id')
@@ -219,6 +220,19 @@ SET phase               = 'finished',
     question_expires_at = NULL,
     finished_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
+
+-- name: SetSessionFinishedFromPhase :execresult
+-- The idle-close variant of SetSessionFinished: an optimistic write against the
+-- phase the runner loaded, so a stale snapshot cannot close a room the host
+-- has just moved on (see SetSessionRoundIntro).
+UPDATE sessions
+SET phase               = 'finished',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase');
 
 -- name: SetSessionIntermission :execresult
 -- Ends a game without closing the room (#836): marks it intermission (the
@@ -273,7 +287,7 @@ UPDATE session_players
 SET is_ready = 0
 WHERE session_id = ?;
 
--- name: UpsertSessionAnswer :exec
+-- name: UpsertSessionAnswer :execresult
 -- Records a player's pick for the current session question, tagged with the
 -- room's current game_seq (#836) so a re-run of the same quiz records a fresh
 -- pick per game rather than overwriting the previous game's. answered_at is the
@@ -281,16 +295,24 @@ WHERE session_id = ?;
 -- player_id, game_seq): a re-submit within the same game overwrites the option
 -- and timestamp rather than duplicating, so a double-tap before close is the
 -- last pick rather than an error. score stays NULL until the question closes.
+-- The write happens only while the session is still in the question phase on
+-- this question, and never replaces a scored pick, so a pick racing the close
+-- writes no row (#1334) and the store reports it as closed.
 INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at, game_seq)
-VALUES (sqlc.arg('session_id'),
-        sqlc.arg('question_id'),
-        sqlc.arg('player_id'),
-        sqlc.arg('option_id'),
-        sqlc.arg('answered_at'),
-        (SELECT game_seq FROM sessions WHERE id = sqlc.arg('session_id')))
+SELECT s.id,
+       s.current_question_id,
+       sqlc.arg('player_id'),
+       sqlc.arg('option_id'),
+       sqlc.arg('answered_at'),
+       s.game_seq
+FROM sessions s
+WHERE s.id = sqlc.arg('session_id')
+  AND s.phase = 'question'
+  AND s.current_question_id = sqlc.arg('question_id')
 ON CONFLICT (session_id, question_id, player_id, game_seq)
     DO UPDATE SET option_id   = excluded.option_id,
-                  answered_at = excluded.answered_at;
+                  answered_at = excluded.answered_at
+    WHERE session_answers.score IS NULL;
 
 -- name: CountSessionAnswersForQuestion :one
 -- Number of players who have picked for the given session question in the room's
