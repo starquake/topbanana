@@ -210,7 +210,7 @@ type OptionData struct {
 const (
 	maxOptions  = 4
 	maxFormSize = 1 << 20 // 1 MB
-	// maxImportFormSize fits a quiz at the question and text-length caps.
+	// maxImportFormSize fits realistic quizzes (about 100-600 KB urlencoded), not one at every cap.
 	maxImportFormSize = 5 << 20
 )
 
