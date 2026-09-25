@@ -33,6 +33,8 @@ export class GameApp {
         // question lands as one Alpine tick rather than going through a
         // visible "Loading question..." gap (#982).
         this.nextItemPromise = null;
+        // True while startGame is in flight so a double-tap can't bootstrap two games.
+        this.starting = false;
         // Current round-boundary item shown to the player (#444). Set
         // when /next returns type=round_boundary; cleared when the player
         // clicks Continue (markRoundSeen) before fetching the next item.
@@ -676,6 +678,16 @@ export class GameApp {
     }
 
     async startGame() {
+        if (this.starting) return;
+        this.starting = true;
+        try {
+            await this.runStartGame();
+        } finally {
+            this.starting = false;
+        }
+    }
+
+    async runStartGame() {
         // Synchronously first in the gesture, before any await (#1088): unlock the
         // context + keep-alive, then play the gesture-bound round-start sting that
         // unlocks iOS output. roundStartPlayed dedupes the first round intro.
@@ -798,7 +810,7 @@ export class GameApp {
             });
     }
 
-    async nextQuestion() {
+    clearAnswerTimers() {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
@@ -807,6 +819,10 @@ export class GameApp {
             clearInterval(this.revealTimer);
             this.revealTimer = null;
         }
+    }
+
+    async nextQuestion() {
+        this.clearAnswerTimers();
         this.clearRoundTimer();
         // Stop the prior clip before swapping items so it can't bleed over (#1088).
         this.audio.stopClip();
@@ -959,6 +975,7 @@ export class GameApp {
     // (issued before #247) should not stall on a reveal it never
     // had.
     startRevealCountdown() {
+        this.clearAnswerTimers();
         const startAt = new Date(this.question.startedAt).getTime();
         const revealStart = this.serverTime();
         if (revealStart >= startAt) {
@@ -1008,6 +1025,10 @@ export class GameApp {
     }
 
     startCountdown() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
         const start = new Date(this.question.startedAt).getTime();
         const end = new Date(this.question.expiredAt).getTime();
         const total = end - start;

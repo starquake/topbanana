@@ -270,7 +270,7 @@
                      start which, under row-reverse, is the visual right
                      edge — exactly the cluster we want. */}}
                 <div x-show="!finished && startStateResolved" class="flex flex-row-reverse flex-wrap items-center gap-3">
-                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">{{t "play.startGame"}}</button>
+                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError || starting">{{t "play.startGame"}}</button>
                     {{/* Share button for #176 — invitation form ("Play
                          this quiz: <title>"). Hidden while no quiz is
                          selected (e.g. the empty-quiz-list edge case)
