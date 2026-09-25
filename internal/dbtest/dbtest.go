@@ -200,3 +200,32 @@ func UnmigratedDSN(t *testing.T) string {
 	)
 }
 
+// QueryPlan returns the detail column of each EXPLAIN QUERY PLAN row for query.
+func QueryPlan(t *testing.T, db *sql.DB, query string) []string {
+	t.Helper()
+
+	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN %q err = %v", query, err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			t.Errorf("rows.Close err = %v", cerr)
+		}
+	}()
+
+	var plan []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err = rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan plan row err = %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatalf("plan rows err = %v", err)
+	}
+
+	return plan
+}
