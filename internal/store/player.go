@@ -646,6 +646,22 @@ func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, 
 	return nil
 }
 
+// BumpSessionVersion increments the player's session_version, invalidating
+// every session cookie issued before the call, and returns the new version.
+// Returns auth.ErrPlayerNotFound when no row matches.
+func (s *PlayerStore) BumpSessionVersion(ctx context.Context, playerID int64) (int64, error) {
+	version, err := s.q.BumpPlayerSessionVersion(ctx, playerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, auth.ErrPlayerNotFound
+		}
+
+		return 0, fmt.Errorf("failed to bump player session version: %w", err)
+	}
+
+	return version, nil
+}
+
 // SetPlayerPasswordHash overwrites the password_hash on the row identified
 // by email. Returns auth.ErrPlayerNotFound when no row matches; intended
 // for the cmd/server -reset-password operator tool, not the public auth flow.

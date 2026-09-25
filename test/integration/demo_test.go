@@ -173,6 +173,13 @@ func TestDemo_ProfileLockedInDemoMode(t *testing.T) {
 	if got, want := snap.StatusCode, http.StatusNotFound; got != want {
 		t.Errorf("GET /profile (demo mode) status = %d, want %d", got, want)
 	}
+
+	// The shared demo Host must not be able to sign every other visitor out.
+	resp := httpPostEmpty(ctx, t, authClient(t), srv.BaseURL+"/profile/sign-out-everywhere")
+	resp.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+		t.Errorf("POST /profile/sign-out-everywhere (demo mode) status = %d, want %d", got, want)
+	}
 }
 
 // TestDemo_ProfileAccessibleWhenDisabled asserts that GET /profile does not

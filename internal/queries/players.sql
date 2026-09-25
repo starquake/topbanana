@@ -588,3 +588,12 @@ UPDATE players
 SET password_hash = sqlc.arg('password_hash'),
     session_version = session_version + 1
 WHERE id = sqlc.arg('id');
+
+-- name: BumpPlayerSessionVersion :one
+-- Increments session_version so every cookie minted before the bump stops
+-- validating ("sign out everywhere"). Returns the new version so the caller
+-- can re-issue the current cookie.
+UPDATE players
+SET session_version = session_version + 1
+WHERE id = sqlc.arg('id')
+RETURNING session_version;
