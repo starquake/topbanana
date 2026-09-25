@@ -41,9 +41,10 @@ const (
 	// output is only MaxLongEdge px so a larger source is never needed.
 	MaxPixels = 50_000_000
 
-	// MaxDecodedBytes caps the decoded pixel buffer estimated from the header's
-	// colour model: a 16-bit png decodes at 8 bytes per pixel, so MaxPixels
-	// alone still allows a ~400 MB buffer from a small file.
+	// MaxDecodedBytes caps the peak decode memory estimated from the header:
+	// the decoded pixel buffer plus the decoder's working buffers. A 16-bit png
+	// decodes at 8 bytes per pixel, so MaxPixels alone still allows a ~400 MB
+	// buffer from a small file.
 	MaxDecodedBytes = 200 << 20
 
 	// maxConcurrentDecodes bounds how many uploads decode at once, so parallel
@@ -57,6 +58,10 @@ const (
 	rgba64PixelBytes = 8
 
 	progressiveCoefficientBytes = 4
+
+	grayComponents  = 1
+	ycbcrComponents = 3
+	cmykComponents  = 4
 
 	// MaxLongEdge caps the stored full image's long edge in pixels. The image
 	// is only ever downscaled to this; a smaller image passes through at its
@@ -228,12 +233,35 @@ func decodedPixelBytes(raw []byte, m color.Model, format string) int64 {
 		return rgbaPixelBytes
 	case format == "png" && m == color.Gray16Model:
 		return rgba64PixelBytes
-	case format == "jpeg" && jpegProgressive(raw):
-		// Progressive decode keeps an int32 coefficient per sample; a jpeg's pixel bytes equal its samples.
-		return perPixel + progressiveCoefficientBytes*perPixel
+	case format == "jpeg":
+		return jpegPixelBytes(raw, m)
 	default:
 		return perPixel
 	}
+}
+
+// jpegPixelBytes is image/jpeg's peak decode memory per pixel: a byte per
+// component sample, an int32 coefficient per sample when progressive, and an
+// RGBA-sized output when it converts CMYK, YCCK, or RGB samples.
+func jpegPixelBytes(raw []byte, m color.Model) int64 {
+	var components int64
+	switch m {
+	case color.GrayModel:
+		components = grayComponents
+	case color.CMYKModel:
+		components = cmykComponents
+	default:
+		components = ycbcrComponents
+	}
+	cost := components
+	if jpegProgressive(raw) {
+		cost += progressiveCoefficientBytes * components
+	}
+	if m == color.CMYKModel || m == color.RGBAModel {
+		cost += rgbaPixelBytes
+	}
+
+	return cost
 }
 
 // bytesPerPixel is the decoded buffer cost per pixel of the image type the
