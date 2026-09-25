@@ -1248,8 +1248,8 @@ func HandlePlayerClaimName(
 
 			return
 		}
-		// Only guests rename here; signed-in accounts, including the passwordless demo Host, use /profile (#1358).
-		if !current.IsAnonymous() {
+		// Mirrors the SQL role guard so the passwordless demo Host is refused up front (#1358).
+		if current.Role != auth.RolePlayer {
 			writeClaimNameError(w, r, logger,
 				http.StatusConflict, "already_claimed", "display name already set for this account")
 

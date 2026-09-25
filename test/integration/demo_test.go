@@ -72,7 +72,8 @@ func TestDemo_HostCannotRenameItself(t *testing.T) {
 		t.Fatalf("POST /demo/enter status = %d, want %d", got, want)
 	}
 
-	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, "x")
+	// An empty name would be a 400 past the handler guard, so the 409 proves the handler refused it.
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, "")
 	if got, want := status, http.StatusConflict; got != want {
 		t.Fatalf("PATCH /api/players/me status = %d, want %d (body=%q)", got, want, body)
 	}
