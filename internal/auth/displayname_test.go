@@ -49,6 +49,9 @@ func TestCleanDisplayName(t *testing.T) {
 		{name: "control character", input: "Ali\x07ce", wantErr: auth.ErrDisplayNameInvalid},
 		{name: "embedded newline", input: "Ali\nce", wantErr: auth.ErrDisplayNameInvalid},
 		{name: "invalid UTF-8", input: "Ali\xffce", wantErr: auth.ErrDisplayNameInvalid},
+		{name: "line separator", input: "Ali\u2028ce", wantErr: auth.ErrDisplayNameInvalid},
+		{name: "paragraph separator", input: "Ali\u2029ce", wantErr: auth.ErrDisplayNameInvalid},
+		{name: "trailing line separator is trimmed", input: "Alice\u2028", want: "Alice"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
