@@ -20,12 +20,13 @@ jobs:
 
       # Skip /tools direct requires: those versions have to be mirrored into
       # the Makefile + ci.yml by hand. Indirect bumps there are mirrored nowhere.
-      # Semver-major bumps and action bumps (some actions hold deploy secrets) wait for review.
+      # Only patch and minor bumps auto-merge; majors, unparseable versions and
+      # action bumps (some actions hold deploy secrets) wait for review.
       # Safe under the signed-commit ruleset: Dependabot signs its own rebases and GitHub signs the squash-merge.
       - name: Enable auto-merge
         if: >-
           (steps.meta.outputs.directory != '/tools' || !startsWith(steps.meta.outputs.dependency-type, 'direct')) &&
-          steps.meta.outputs.update-type != 'version-update:semver-major' &&
+          (steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor') &&
           steps.meta.outputs.package-ecosystem != 'github_actions'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
