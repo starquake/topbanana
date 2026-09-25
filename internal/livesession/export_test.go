@@ -41,3 +41,15 @@ func ExportHubHasVersion(h *Hub, code string) bool {
 func ExportRunnerTick(ctx context.Context, r *Runner, now time.Time) {
 	r.tick(ctx, now)
 }
+
+// ExportRunnerHasPhaseClock reports whether the runner still holds a phase
+// clock for the session, so a test can assert an ended room is forgotten.
+// Test-only.
+func ExportRunnerHasPhaseClock(r *Runner, sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, ok := r.phaseSince[sessionID]
+
+	return ok
+}
