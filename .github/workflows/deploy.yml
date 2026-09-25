@@ -158,6 +158,15 @@ jobs:
                 exit 1
               fi
             done
+            # The .env values are single-quoted, so a ' would break out of them.
+            for var in SESSION_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URL SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD SMTP_FROM SMTP_TLS BASE_URL REGISTRATION_ENABLED ADMIN_EMAILS IMAGE_NAME IMAGE_DIGEST; do
+              case "${!var}" in
+                *"'"*)
+                  echo "ERROR: $var contains a single quote, which the .env file cannot hold; refusing to deploy" >&2
+                  exit 1
+                  ;;
+              esac
+            done
             mkdir -p ~/topbanana-staging
             cd ~/topbanana-staging
             umask 077
@@ -345,6 +354,15 @@ jobs:
                 exit 1
               fi
             done
+            # The .env values are single-quoted, so a ' would break out of them.
+            for var in SESSION_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URL SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD SMTP_FROM SMTP_TLS BASE_URL REGISTRATION_ENABLED ADMIN_EMAILS IMAGE_NAME IMAGE_DIGEST; do
+              case "${!var}" in
+                *"'"*)
+                  echo "ERROR: $var contains a single quote, which the .env file cannot hold; refusing to deploy" >&2
+                  exit 1
+                  ;;
+              esac
+            done
             mkdir -p ~/topbanana-production
             cd ~/topbanana-production
             umask 077
@@ -522,6 +540,15 @@ jobs:
               echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
               exit 1
             fi
+            # The .env values are single-quoted, so a ' would break out of them.
+            for var in SESSION_KEY ADMIN_EMAILS IMAGE_NAME IMAGE_DIGEST; do
+              case "${!var}" in
+                *"'"*)
+                  echo "ERROR: $var contains a single quote, which the .env file cannot hold; refusing to deploy" >&2
+                  exit 1
+                  ;;
+              esac
+            done
             mkdir -p ~/topbanana-demo
             cd ~/topbanana-demo
             umask 077
