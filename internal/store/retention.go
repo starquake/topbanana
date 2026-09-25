@@ -56,9 +56,9 @@ func NewRetentionStore(conn *sql.DB, logger *slog.Logger) *RetentionStore {
 // days ago and every game row that references them (#626). The dependent
 // game_* rows are dropped in foreign-key order before the player rows;
 // game_seen_rounds cascades from games on delete, so it needs no explicit
-// pass. Guests holding a finished game are excluded by
-// ListStaleAnonymousPlayerIDs and kept regardless of age, so the sweep
-// never erases a leaderboard score; only finished-game-free cruft is pruned.
+// pass. ListStaleAnonymousPlayerIDs keeps guests holding a finished game
+// regardless of age, so the sweep never erases a leaderboard score, and keeps
+// guests with a hosted-room answer or a recent room visit (#1361).
 //
 // Work is committed in batches (one transaction per player chunk) rather than
 // a single mega-transaction: the SQLite write-lock is released between
