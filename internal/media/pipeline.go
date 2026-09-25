@@ -56,6 +56,8 @@ const (
 	rgbaPixelBytes   = 4
 	rgba64PixelBytes = 8
 
+	progressiveCoefficientBytes = 4
+
 	// MaxLongEdge caps the stored full image's long edge in pixels. The image
 	// is only ever downscaled to this; a smaller image passes through at its
 	// native size (never upscaled). Sized for the admin lightbox at typical
@@ -196,7 +198,7 @@ func acquireDecodeSlot(ctx context.Context) (func(), error) {
 // ErrImageTooLarge for an oversized declared area or decoded size and
 // ErrUnsupportedImage for undecodable bytes.
 func decodeGuarded(raw []byte) (image.Image, string, error) {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
 	}
@@ -204,7 +206,7 @@ func decodeGuarded(raw []byte) (image.Image, string, error) {
 		return nil, "", ErrImageTooLarge
 	}
 	area := int64(cfg.Width) * int64(cfg.Height)
-	if area > MaxPixels || area*bytesPerPixel(cfg.ColorModel) > MaxDecodedBytes {
+	if area > MaxPixels || area*decodedPixelBytes(raw, cfg.ColorModel, format) > MaxDecodedBytes {
 		return nil, "", ErrImageTooLarge
 	}
 
@@ -216,10 +218,27 @@ func decodeGuarded(raw []byte) (image.Image, string, error) {
 	return src, format, nil
 }
 
+// decodedPixelBytes is the worst-case decode memory per pixel for an image of
+// model m in format, as the stdlib decoders allocate it.
+func decodedPixelBytes(raw []byte, m color.Model, format string) int64 {
+	perPixel := bytesPerPixel(m)
+	switch {
+	case format == "png" && m == color.GrayModel:
+		// A tRNS chunk, which DecodeConfig does not read, promotes gray to NRGBA.
+		return rgbaPixelBytes
+	case format == "png" && m == color.Gray16Model:
+		return rgba64PixelBytes
+	case format == "jpeg" && jpegProgressive(raw):
+		// Progressive decode keeps an int32 coefficient per sample alongside the pixels.
+		return perPixel + progressiveCoefficientBytes*perPixel
+	default:
+		return perPixel
+	}
+}
+
 // bytesPerPixel is the decoded buffer cost per pixel of the image type the
 // stdlib decoders return for m; an unknown model assumes the 16-bit worst case.
 func bytesPerPixel(m color.Model) int64 {
-	// A Palette is a slice, so it must be matched before the == comparisons.
 	if _, ok := m.(color.Palette); ok {
 		return grayPixelBytes
 	}
