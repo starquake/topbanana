@@ -1597,6 +1597,7 @@ type hookStore struct {
 	beforeRecordAnswer func()
 	afterCountActive   func()
 	afterListLive      func()
+	afterGetActive     func()
 	// failScores is how many SetAnswerScore calls fail before one succeeds.
 	failScores int
 }
@@ -1629,6 +1630,13 @@ func (s *hookStore) ListLiveSessionIDs(ctx context.Context) ([]string, error) {
 	s.takeHook(&s.afterListLive)()
 
 	return ids, err
+}
+
+func (s *hookStore) GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*Session, error) {
+	sess, err := s.LiveSessionStore.GetActiveSessionForHost(ctx, hostPlayerID)
+	s.takeHook(&s.afterGetActive)()
+
+	return sess, err
 }
 
 func (s *hookStore) SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error {

@@ -599,6 +599,56 @@ func TestService_EndSessionForgetsBookkeeping(t *testing.T) {
 	}
 }
 
+// TestService_StartHosting_CreateRaceReusesRoom pins that when another request
+// opens the host's room between StartHosting's lookup and its create, the quiz
+// is armed in that room and the log names it as reused, not newly opened.
+func TestService_StartHosting_CreateRaceReusesRoom(t *testing.T) {
+	t.Parallel()
+
+	const hostID int64 = 1
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	quizID := *h.reload(t).QuizID
+	if err := h.service.EndSession(ctx, h.code, hostID); err != nil {
+		t.Fatalf("EndSession err = %v, want nil", err)
+	}
+
+	var raced *Session
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.afterGetActive = func() {
+		var err error
+		if raced, err = h.service.CreateSession(ctx, nil, hostID, false); err != nil {
+			t.Errorf("racing CreateSession err = %v, want nil", err)
+		}
+	}
+	logs := newCaptureHandler()
+	svc := NewService(hooked, h.quizzes, slog.New(logs))
+
+	sess, err := svc.StartHosting(ctx, quizID, hostID, false)
+	if err != nil {
+		t.Fatalf("StartHosting err = %v, want nil", err)
+	}
+	if raced == nil {
+		t.Fatal("racing room not created")
+	}
+	if got, want := sess.JoinCode, raced.JoinCode; got != want {
+		t.Errorf("StartHosting join code = %q, want the raced room %q", got, want)
+	}
+	assertNoLog(t, logs, "host started hosting: opened new room")
+	assertLog(t, logs, "host started hosting: reused active room", slog.LevelInfo)
+	armed, err := h.store.GetSessionByJoinCode(ctx, raced.JoinCode)
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if armed.QuizID == nil {
+		t.Fatal("raced room QuizID = nil, want the hosted quiz armed")
+	}
+	if got, want := *armed.QuizID, quizID; got != want {
+		t.Errorf("raced room QuizID = %d, want %d", got, want)
+	}
+}
+
 // TestService_EndSessionRejectsNonHost pins that only the host may end a room: a
 // non-host caller gets ErrNotHost and the room stays open.
 func TestService_EndSessionRejectsNonHost(t *testing.T) {
