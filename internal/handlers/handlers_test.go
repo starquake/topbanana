@@ -197,6 +197,25 @@ func TestIDFromSlugID(t *testing.T) {
 	})
 }
 
+func TestSlugFromSlugID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in, want string
+	}{
+		{"my-quiz-123", "my-quiz"},
+		{"quiz-1", "quiz"},
+		{"-5", ""},
+		{"no_separator", ""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		if got, want := SlugFromSlugID(tc.in), tc.want; got != want {
+			t.Errorf("SlugFromSlugID(%q) = %q, want %q", tc.in, got, want)
+		}
+	}
+}
+
 func TestParseIDFromSlugPath(t *testing.T) {
 	t.Parallel()
 

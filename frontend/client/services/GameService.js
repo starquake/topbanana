@@ -7,9 +7,9 @@ import { ApiError, jsonOrThrow } from './api.js';
 // short-circuit before jsonOrThrow so callers keep the existing
 // null return signal.
 export class GameService {
-    // startGame creates a game for the quiz; preview=true requests an owner preview that the server keeps off the leaderboard (#1192).
-    async startGame(quizId, preview = false) {
-        const body = { quizId: parseInt(quizId) };
+    // startGame creates a game for the quiz; slug comes from the quiz's link and is required for an unlisted quiz, and preview=true requests an owner preview that the server keeps off the leaderboard (#1192).
+    async startGame(quizId, slug, preview = false) {
+        const body = { quizId: parseInt(quizId), slug };
         if (preview) body.preview = true;
         const response = await fetch('/api/games', {
             method: 'POST',
