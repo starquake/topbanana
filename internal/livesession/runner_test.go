@@ -1592,11 +1592,11 @@ type hookStore struct {
 	*store.LiveSessionStore
 
 	mu sync.Mutex
-	// beforeEnterReveal / beforeRecordAnswer / afterCountActive each run once,
-	// on the first matching call.
+	// The before/after hooks each run once, on the first matching call.
 	beforeEnterReveal  func()
 	beforeRecordAnswer func()
 	afterCountActive   func()
+	afterListLive      func()
 	// failScores is how many SetAnswerScore calls fail before one succeeds.
 	failScores int
 }
@@ -1622,6 +1622,13 @@ func (s *hookStore) CountActive(ctx context.Context, sessionID string, since tim
 	s.takeHook(&s.afterCountActive)()
 
 	return n, err
+}
+
+func (s *hookStore) ListLiveSessionIDs(ctx context.Context) ([]string, error) {
+	ids, err := s.LiveSessionStore.ListLiveSessionIDs(ctx)
+	s.takeHook(&s.afterListLive)()
+
+	return ids, err
 }
 
 func (s *hookStore) SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error {
@@ -1819,5 +1826,45 @@ func TestRunner_IdleCloseSkipsRoomThatMovedOn(t *testing.T) {
 
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
 		t.Errorf("phase after stale idle close = %q, want %q (room left open)", got, want)
+	}
+}
+
+// TestRunner_KeepsPhaseClockOfRoomStartedMidTick pins that the end-of-tick
+// prune only drops rooms that were tracked before the live list was read: a
+// room started while the tick runs keeps its fresh phase clock.
+func TestRunner_KeepsPhaseClockOfRoomStartedMidTick(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	hooked := &hookStore{LiveSessionStore: h.store}
+	r := h.runnerOver(hooked)
+	h.service.SetAdvancer(r)
+
+	host, err := store.NewPlayerStore(h.db, slog.New(slog.DiscardHandler)).CreateAnonymousPlayer(ctx, "midtick-host")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	quizID := h.reload(t).QuizID
+
+	var fresh *Session
+	hooked.afterListLive = func() {
+		if fresh, err = h.service.CreateSession(ctx, quizID, host.ID, true); err != nil {
+			t.Errorf("CreateSession err = %v, want nil", err)
+
+			return
+		}
+		if err = h.service.Start(ctx, fresh.JoinCode, host.ID); err != nil {
+			t.Errorf("Start err = %v, want nil", err)
+		}
+	}
+	ExportRunnerTick(ctx, r, h.clock.Now())
+
+	if fresh == nil {
+		t.Fatal("room was not created mid-tick")
+	}
+	if !ExportRunnerHasPhaseClock(r, fresh.ID) {
+		t.Error("phase clock of the room started mid-tick was dropped, want it kept")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -209,6 +210,7 @@ func (r *Runner) Rearm(ctx context.Context, sessionID string) {
 // clock of any room no longer live (e.g. one the host ended). Exported to tests
 // as Tick via export_test.
 func (r *Runner) tick(ctx context.Context, now time.Time) {
+	tracked := r.trackedSessions()
 	ids, err := r.store.ListLiveSessionIDs(ctx)
 	if err != nil {
 		r.logger.WarnContext(ctx, "runner failed to list live sessions", slog.Any("err", err))
@@ -218,7 +220,7 @@ func (r *Runner) tick(ctx context.Context, now time.Time) {
 	for _, id := range ids {
 		r.advance(ctx, id, now)
 	}
-	r.forgetAllExcept(ids)
+	r.forgetEnded(tracked, ids)
 }
 
 // advance loads one session and applies the single transition (if any) due at
@@ -836,13 +838,28 @@ func (r *Runner) isUnscored(sessionID string) bool {
 	return r.unscored[sessionID]
 }
 
-// forgetAllExcept drops the phase clock of every session not in live.
-func (r *Runner) forgetAllExcept(live []string) {
+// trackedSessions returns the ids the runner holds bookkeeping for.
+func (r *Runner) trackedSessions() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id := range r.phaseSince {
-		if !slices.Contains(live, id) {
+
+	return slices.Collect(maps.Keys(r.phaseSince))
+}
+
+// forgetEnded drops the bookkeeping of every tracked session missing from
+// live. Only ids tracked before live was listed are considered, so a room
+// created and started during the tick keeps its fresh phase clock.
+func (r *Runner) forgetEnded(tracked, live []string) {
+	liveSet := make(map[string]struct{}, len(live))
+	for _, id := range live {
+		liveSet[id] = struct{}{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range tracked {
+		if _, ok := liveSet[id]; !ok {
 			delete(r.phaseSince, id)
+			delete(r.unscored, id)
 		}
 	}
 }
