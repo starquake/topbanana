@@ -1130,27 +1130,88 @@ func TestHandleQuizImportArchive_QuizMediaLimit(t *testing.T) {
 	}
 }
 
+// audioManifest returns a flat manifest whose questions reference the given
+// sound files in order, one question per file.
+func audioManifest(files ...string) []byte {
+	questions := make([]string, 0, len(files))
+	for i, f := range files {
+		questions = append(questions, fmt.Sprintf(
+			`{"text": "Q%d", "audio": {"file": %q, "mime": "audio/mpeg"}, "options": [{"text": "a", "correct": true}]}`,
+			i+1, f,
+		))
+	}
+
+	return []byte(`{"formatVersion": 1, "title": "Audio Quiz", "description": "d", "questions": [` +
+		strings.Join(questions, ",") + `]}`)
+}
+
 // TestImportQuizArchive_QuizMediaLimit pins the same ceiling on the HTTP-free
-// restore path as the ErrArchiveTooManyMedia sentinel.
+// restore path as the ErrArchiveTooManyMedia sentinel, for images and sounds.
 func TestImportQuizArchive_QuizMediaLimit(t *testing.T) {
 	t.Parallel()
 
-	env := newAdminEnv(t)
-	archiveBytes := buildZip(t, map[string][]byte{
-		"quiz.json":   imageManifest("media/1.png", "media/2.png"),
-		"media/1.png": tinyPNG(t),
-		"media/2.png": tinyPNG(t),
-	})
-
-	_, err := ImportQuizArchive(
-		t.Context(), env.logger, env.quizzes, newMediaServiceOverTemp(t, env),
-		openZipReader(t, archiveBytes), testAdminID,
-		NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax, 1),
-	)
-	if got, want := err, ErrArchiveTooManyMedia; !errors.Is(got, want) {
-		t.Errorf("err = %v, want %v", got, want)
+	tests := []struct {
+		name     string
+		manifest []byte
+		wantErr  error
+	}{
+		{
+			name:     "images over the limit",
+			manifest: imageManifest("media/1.png", "media/2.png"),
+			wantErr:  ErrArchiveTooManyMedia,
+		},
+		{
+			name:     "sounds over the limit",
+			manifest: audioManifest("media/1.mp3", "media/2.mp3"),
+			wantErr:  ErrArchiveTooManyMedia,
+		},
+		{
+			name:     "reused sound counts once",
+			manifest: audioManifest("media/1.mp3", "media/1.mp3"),
+		},
 	}
-	assertNoQuiz(t, env)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := newAdminEnv(t)
+			archiveBytes := buildZip(t, map[string][]byte{
+				"quiz.json":   tt.manifest,
+				"media/1.png": tinyPNG(t),
+				"media/2.png": tinyPNG(t),
+				"media/1.mp3": tinyMP3(),
+				"media/2.mp3": tinyMP3(),
+			})
+
+			qz, err := ImportQuizArchive(
+				t.Context(), env.logger, env.quizzes, newMediaServiceOverTemp(t, env),
+				openZipReader(t, archiveBytes), testAdminID,
+				NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax, 1),
+			)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ImportQuizArchive err = %v, want nil", err)
+				}
+				items, listErr := env.media.ListMediaByQuiz(t.Context(), qz.ID)
+				if listErr != nil {
+					t.Fatalf("ListMediaByQuiz err = %v, want nil", listErr)
+				}
+				if got, want := len(items), 1; got != want {
+					t.Errorf("media rows = %d, want %d", got, want)
+				}
+
+				return
+			}
+			if got, want := err, tt.wantErr; !errors.Is(got, want) {
+				t.Errorf("err = %v, want %v", got, want)
+			}
+			assertNoQuiz(t, env)
+			if got, want := len(allMediaRows(t, env)), 0; got != want {
+				t.Errorf("media rows = %d, want %d", got, want)
+			}
+		})
+	}
 }
 
 // TestHandleQuizImportArchive_MediaRejected pins that a media file the media
