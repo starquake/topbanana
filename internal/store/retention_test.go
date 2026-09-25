@@ -157,7 +157,7 @@ func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 	}
 
 	retention := NewRetentionStore(conn, slog.Default())
-	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}); err != nil {
+	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}, AnonymousRetentionDays); err != nil {
 		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
 	}
 
@@ -210,6 +210,46 @@ func TestSweepStaleAnonymousPlayers_KeepsHostedRoomGuests(t *testing.T) {
 	}
 	if got, want := playerExists(ctx, t, conn, goneID), false; got != want {
 		t.Errorf("room guest last seen outside the window exists = %v, want %v", got, want)
+	}
+}
+
+// TestSweepPlayerBatch_SparesGuestWhoJoinedARoomLate: guests snapshotted as
+// stale who join a room or answer in one before their batch runs are kept,
+// while a still-stale guest in the same batch is swept.
+func TestSweepPlayerBatch_SparesGuestWhoJoinedARoomLate(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	hostID := insertSignedInPlayer(ctx, t, conn, "late-host", seedRecent)
+	q := seedQuiz(ctx, t, conn, "late-quiz", seedOld, hostID)
+	sessionID := insertSession(ctx, t, conn, "s-late", q.quizID, hostID, "LATE1")
+
+	staleID := insertAnonPlayer(ctx, t, conn, "late-stale", seedOld)
+	joinedID := insertAnonPlayer(ctx, t, conn, "late-joined", seedOld)
+	answeredID := insertAnonPlayer(ctx, t, conn, "late-answered", seedOld)
+
+	// Both join after the snapshot, before the batch runs.
+	insertSessionPlayer(ctx, t, conn, sessionID, joinedID, seedRecent)
+	insertSessionPlayer(ctx, t, conn, sessionID, answeredID, seedOld)
+	insertSessionAnswer(ctx, t, conn, sessionID, q.q1, answeredID, q.opt1)
+
+	retention := NewRetentionStore(conn, slog.Default())
+	// Several ids so a days parameter aliased onto a slice id would misfilter.
+	batch := []int64{staleID, joinedID, answeredID}
+	if err := retention.SweepPlayerBatchForTest(ctx, batch, AnonymousRetentionDays); err != nil {
+		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, staleID), false; got != want {
+		t.Errorf("stale guest exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, joinedID), true; got != want {
+		t.Errorf("guest who joined a room late exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, answeredID), true; got != want {
+		t.Errorf("guest who answered in a room late exists = %v, want %v", got, want)
 	}
 }
 
