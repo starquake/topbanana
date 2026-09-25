@@ -358,7 +358,7 @@ $(TAILWIND_BIN):
 	    https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
 	@echo "$(TAILWIND_SHA256_$(TAILWIND_ASSET))  $@.download" | $(SHA256SUM) -c - >/dev/null || \
 	    { echo "ERROR: $(TAILWIND_ASSET) does not match its pinned SHA-256"; rm -f $@.download; exit 1; }
-	mv $@.download $@
+	@mv $@.download $@
 	chmod +x $@
 	@echo $(TAILWIND_VERSION) > $@.version
 
