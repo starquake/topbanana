@@ -40,7 +40,7 @@ type Stores struct {
 	// InvitePlayers is the narrow create+verify+read slice the
 	// accept-invite flow uses; backed by the same PlayerStore instance.
 	InvitePlayers auth.InvitePlayerStore
-	// SessionRevoker bumps session_version for sign out everywhere; backed by
+	// SessionRevoker bumps session_version for sign out other devices; backed by
 	// the same PlayerStore instance.
 	SessionRevoker auth.SessionRevoker
 	Home           home.Store

@@ -176,10 +176,10 @@ func TestDemo_ProfileLockedInDemoMode(t *testing.T) {
 	}
 
 	// The shared demo Host must not be able to sign every other visitor out.
-	resp := httpPostEmpty(ctx, t, authClient(t), srv.BaseURL+"/profile/sign-out-everywhere")
+	resp := httpPostEmpty(ctx, t, authClient(t), srv.BaseURL+"/profile/sign-out-other-devices")
 	resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
-		t.Errorf("POST /profile/sign-out-everywhere (demo mode) status = %d, want %d", got, want)
+		t.Errorf("POST /profile/sign-out-other-devices (demo mode) status = %d, want %d", got, want)
 	}
 }
 

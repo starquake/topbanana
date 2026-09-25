@@ -462,8 +462,8 @@ func addProfileRoutes(
 		),
 	)
 	mux.Handle(
-		"POST /profile/sign-out-everywhere",
-		csrfMW(requireAuthn(profile.HandleSignOutEverywhere(logger, stores.SessionRevoker, sessions, profileFlash))),
+		"POST /profile/sign-out-other-devices",
+		csrfMW(requireAuthn(profile.HandleSignOutOtherDevices(logger, stores.SessionRevoker, sessions, profileFlash))),
 	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
 	mux.Handle(
