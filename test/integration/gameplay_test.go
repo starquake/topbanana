@@ -221,9 +221,10 @@ func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Clien
 // needs. Context is intentionally returned separately from the struct (passed
 // out of setupIntegration as the first return value) to avoid containedctx.
 type integrationSetup struct {
-	BaseURL string
-	DBURI   string
-	Stores  *store.Stores
+	BaseURL  string
+	DBURI    string
+	Stores   *store.Stores
+	Shutdown func() error
 }
 
 // setupIntegration is a gameplay-flavoured wrapper around startServer that
@@ -267,9 +268,10 @@ func setupIntegrationWithEnv(
 	})
 
 	return ctx, integrationSetup{
-		BaseURL: srv.BaseURL,
-		DBURI:   srv.DBURI,
-		Stores:  store.New(db, slog.Default()),
+		BaseURL:  srv.BaseURL,
+		DBURI:    srv.DBURI,
+		Stores:   store.New(db, slog.Default()),
+		Shutdown: srv.Shutdown,
 	}
 }
 

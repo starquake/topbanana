@@ -13,6 +13,7 @@ import (
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/request"
 )
 
 // HandleSessionCreate opens a hosted room. Host-authed: the caller must hold
@@ -915,7 +916,8 @@ func HandleSessionEvents(
 	heartbeatInterval = clampHeartbeat(heartbeatInterval, DefaultSessionEventHeartbeatInterval)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		ctx, cancel := request.StreamContext(r.Context())
+		defer cancel()
 		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)

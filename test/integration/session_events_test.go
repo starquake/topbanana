@@ -327,3 +327,37 @@ func TestSessionEvents_HeartbeatOnIdleStream(t *testing.T) {
 		t.Errorf("got 0 heartbeat (`:` ...) lines in %v, want at least 1", window)
 	}
 }
+
+// TestSessionEvents_ShutdownEndsOpenStream pins #1351 for the session event
+// stream: an open host or player stream ends as shutdown begins, so Run
+// returns promptly and without error.
+func TestSessionEvents_ShutdownEndsOpenStream(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "events-shutdown")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, setup.BaseURL, setup.DBURI, "events-sd-host", "events-sd-pass-123")
+	code := createSession(ctx, t, host, setup.BaseURL, qz.ID)
+
+	// Outlives the server's shutdown budget, so only the server can end it in time.
+	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer streamCancel()
+	stream := openSessionEventStream(streamCtx, t, host, setup.BaseURL, code)
+	if got, want := stream.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("events status = %d, want %d", got, want)
+	}
+	readSessionTick(t, stream.Scanner)
+
+	start := time.Now()
+	if err := setup.Shutdown(); err != nil {
+		t.Fatalf("Shutdown err = %v, want nil", err)
+	}
+	if got, want := time.Since(start), 3*time.Second; got >= want {
+		t.Errorf("Shutdown took %v with an open stream, want under %v", got, want)
+	}
+}
