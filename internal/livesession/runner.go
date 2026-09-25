@@ -318,7 +318,8 @@ func (r *Runner) advanceRoundIntro(ctx context.Context, sess *Session, now time.
 
 // advanceQuestion closes the current question when every active player has
 // answered (early close) or the answer window has expired (timeout close),
-// scoring the picks and moving into the reveal phase.
+// moving into the reveal phase and scoring the picks. The reveal is written
+// first so the answer set is frozen before it is scored (#1334).
 func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Time) {
 	if sess.CurrentQuestionID == nil || sess.QuestionExpiresAt == nil {
 		return
@@ -329,7 +330,6 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 
-	r.scoreQuestion(ctx, sess)
 	applied, err := r.store.EnterReveal(ctx, sess.ID, sess.Phase, *sess.CurrentQuestionID)
 	if err != nil {
 		r.logger.WarnContext(
@@ -345,6 +345,7 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 	r.markPhase(sess.ID, now)
+	r.scoreQuestion(ctx, sess)
 	r.publish(sess.JoinCode, PhaseReveal)
 }
 

@@ -473,19 +473,25 @@ func (s *LiveSessionStore) GetSessionPlayerScore(
 // the answer's timestamp. An answer is proof of liveness, so a player who just
 // picked must count as active even without a held SSE heartbeat; running both
 // writes in one transaction keeps the answer and the liveness bump from being
-// partially applied (see #712).
+// partially applied (see #712). Returns [livesession.ErrQuestionNotOpen] when
+// the session has left the question (or the pick is already scored), so a pick
+// racing the close is rejected rather than stored unscored (#1334).
 func (s *LiveSessionStore) RecordAnswer(
 	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
 ) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		if uerr := q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
-			SessionID:  sessionID,
-			QuestionID: questionID,
+		res, uerr := q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
 			PlayerID:   playerID,
 			OptionID:   optionID,
 			AnsweredAt: answeredAt,
-		}); uerr != nil {
+			SessionID:  sessionID,
+			QuestionID: sql.NullInt64{Int64: questionID, Valid: true},
+		})
+		if uerr != nil {
 			return fmt.Errorf("failed to record session answer: %w", uerr)
+		}
+		if database.MustRowsAffected(res) == 0 {
+			return livesession.ErrQuestionNotOpen
 		}
 
 		if rerr := q.RefreshSessionPlayerLastSeenAt(ctx, db.RefreshSessionPlayerLastSeenAtParams{

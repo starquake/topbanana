@@ -45,6 +45,7 @@ type runnerHarness struct {
 	runner  *Runner
 	clock   *fakeClock
 	store   *store.LiveSessionStore
+	quizzes *store.QuizStore
 	hub     *Hub
 	db      *sql.DB
 	code    string
@@ -123,6 +124,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 		runner:  runner,
 		clock:   clock,
 		store:   sessionStore,
+		quizzes: quizStore,
 		hub:     hub,
 		db:      db,
 		code:    sess.JoinCode,
@@ -1580,5 +1582,125 @@ func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
 	}
 	if got, notWant := *sess.QuizID, game2.ID; got == notWant {
 		t.Errorf("QuizID after rejected re-arm = %d, want it unchanged from the original quiz", got)
+	}
+}
+
+// hookStore wraps the real store to inject the interleavings a real store
+// cannot produce on demand: work that lands between a read and the next write.
+type hookStore struct {
+	*store.LiveSessionStore
+
+	mu sync.Mutex
+	// beforeEnterReveal / beforeRecordAnswer each run once, on the first
+	// matching call.
+	beforeEnterReveal  func()
+	beforeRecordAnswer func()
+}
+
+func (s *hookStore) EnterReveal(ctx context.Context, sessionID string, expected Phase, questionID int64) (bool, error) {
+	s.takeHook(&s.beforeEnterReveal)()
+
+	return s.LiveSessionStore.EnterReveal(ctx, sessionID, expected, questionID)
+}
+
+func (s *hookStore) RecordAnswer(
+	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
+) error {
+	s.takeHook(&s.beforeRecordAnswer)()
+
+	return s.LiveSessionStore.RecordAnswer(ctx, sessionID, questionID, playerID, optionID, answeredAt)
+}
+
+func (s *hookStore) takeHook(hook *func()) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn := *hook
+	*hook = nil
+	if fn == nil {
+		return func() {}
+	}
+
+	return fn
+}
+
+// runnerOver builds a second runner sharing the harness clock, hub, and quiz
+// store but reading and writing through st.
+func (h *runnerHarness) runnerOver(st Store) *Runner {
+	logger := slog.New(slog.DiscardHandler)
+	r := NewRunner(st, h.quizzes, h.hub, game.NewService(nil, h.quizzes, logger), logger, runnerCfg)
+	r.SetClock(h.clock)
+
+	return r
+}
+
+// openFirstQuestion starts the harness game and ticks it into its first
+// question, returning the question-phase session.
+func (h *runnerHarness) openFirstQuestion(t *testing.T) *Session {
+	t.Helper()
+	if err := h.service.Start(t.Context(), h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(t.Context())
+	sess := h.reload(t)
+	if got, want := sess.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	return sess
+}
+
+// answerScore returns the recorded score of playerID's pick on questionID, and
+// whether a pick exists at all.
+func (h *runnerHarness) answerScore(t *testing.T, sessionID string, questionID, playerID int64) (*int, bool) {
+	t.Helper()
+	answers, err := h.store.ListAnswers(t.Context(), sessionID, questionID)
+	if err != nil {
+		t.Fatalf("ListAnswers err = %v, want nil", err)
+	}
+	for _, a := range answers {
+		if a.PlayerID == playerID {
+			return a.Score, true
+		}
+	}
+
+	return nil, false
+}
+
+// TestRunner_ScoresAnswerLandingJustBeforeClose pins #1334: a pick that commits
+// after the runner loaded the question but before the close is still scored,
+// because the reveal is written before the answers are listed.
+func TestRunner_ScoresAnswerLandingJustBeforeClose(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.beforeEnterReveal = func() {
+		if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, *q.QuestionExpiresAt); err != nil {
+			t.Errorf("SubmitAnswer at the deadline err = %v, want nil", err)
+		}
+	}
+	r := h.runnerOver(hooked)
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	ExportRunnerTick(ctx, r, h.clock.Now())
+
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after timeout = %q, want %q", got, want)
+	}
+	score, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0])
+	if !ok {
+		t.Fatal("deadline pick missing, want it recorded")
+	}
+	if score == nil {
+		t.Fatal("deadline pick score = nil, want it scored at close")
+	}
+	if got, want := *score, scoreAt(q, *q.QuestionExpiresAt); got != want {
+		t.Errorf("deadline pick score = %d, want %d", got, want)
 	}
 }
