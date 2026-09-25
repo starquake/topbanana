@@ -94,6 +94,65 @@ func TestProfileEmail_HappyPathSwapsAndStaysSignedIn(t *testing.T) {
 	}
 }
 
+// TestProfileEmail_PasswordResetRevokesPendingChange pins #1329's first
+// scenario: someone with a phished password starts an email change, the owner
+// resets the password, and the pending link no longer moves the account nor
+// revives the stale cookie.
+func TestProfileEmail_PasswordResetRevokesPendingChange(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	attacker := authClient(t)
+	registerVerifyAndSignIn(ctx, t, attacker, srv.BaseURL, srv.DBURI, "email-change-reset", "correct-battery-13")
+
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, "email-change-reset")
+	if err != nil {
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
+	}
+	pendingRaw, pendingHash, err := auth.GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if cerr := stores.VerifyTokens.CreateVerifyToken(
+		ctx, pendingHash, player.ID, time.Now().Add(time.Hour), "attacker@evil.test",
+	); cerr != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+	}
+
+	resetRaw, resetHash, err := auth.GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken err = %v, want nil", err)
+	}
+	if cerr := stores.ResetTokens.CreateResetToken(ctx, resetHash, player.ID, time.Now().Add(time.Hour)); cerr != nil {
+		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
+	}
+	if _, cerr := stores.ResetTokens.ConsumeResetToken(ctx, auth.HashResetToken(resetRaw), "owner-hash"); cerr != nil {
+		t.Fatalf("ConsumeResetToken err = %v, want nil", cerr)
+	}
+
+	resp := confirmVerifyLinkWithClient(ctx, t, srv.BaseURL, pendingRaw, attacker)
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := resp.StatusCode, http.StatusGone; got != want {
+		t.Errorf("verify-email status = %d, want %d (pending link revoked)", got, want)
+	}
+	assertNoLiveSession(t, resp)
+
+	after, err := stores.Players.GetPlayerByID(ctx, player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := after.Email, "email-change-reset@example.test"; got != want {
+		t.Errorf("email = %q, want %q (account must not move)", got, want)
+	}
+	if got, want := profileGetStatus(ctx, t, attacker, srv.BaseURL), http.StatusSeeOther; got != want {
+		t.Errorf("attacker profile GET = %d, want %d (stale cookie stays dead)", got, want)
+	}
+}
+
 // TestProfileEmail_MalformedRejected covers the validation gate: a
 // new email that fails LooksLikeEmail re-renders the page with the
 // error banner and never mints a token.
