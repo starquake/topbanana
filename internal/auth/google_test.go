@@ -73,7 +73,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_NewUnapprovedBlockedAndNotified(t
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, true, approval,
+		rec, req, ps, session.New([]byte("k"), false), target, nil, true, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -125,7 +125,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_RepeatUnapprovedBlockedNoMail(t *
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, false, approval,
+		rec, req, ps, session.New([]byte("k"), false), target, nil, false, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -193,7 +193,7 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), player, firstReg, approval,
+		rec, req, ps, session.New([]byte("k"), false), player, &anon.ID, firstReg, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -204,6 +204,9 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	}
 	if hasSessionCookie(rec) {
 		t.Error("blocked guest claim set a session cookie, want none")
+	}
+	if !clearsSessionCookie(rec) {
+		t.Error("blocked guest claim kept the guest cookie, want it cleared (it points at the held row)")
 	}
 	if err := tracker.Wait(t.Context()); err != nil {
 		t.Fatalf("tracker.Wait err = %v, want nil", err)
@@ -222,6 +225,44 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	}
 	if !toAdmin {
 		t.Error("no approval-request notice sent to the admin")
+	}
+}
+
+// clearsSessionCookie reports whether rec deleted the topbanana_session cookie.
+func clearsSessionCookie(rec *httptest.ResponseRecorder) bool {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "topbanana_session" && c.MaxAge < 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestFinalizeGoogleSignIn_ApprovalRequired_KeepsUnrelatedGuestCookie pins that
+// a blocked sign-in leaves a guest cookie for a different row alone, so the
+// guest's games stay reachable.
+func TestFinalizeGoogleSignIn_ApprovalRequired_KeepsUnrelatedGuestCookie(t *testing.T) {
+	t.Parallel()
+
+	ps, target := seedOAuthApprovalPlayers(t)
+	guest, err := ps.CreateAnonymousPlayer(t.Context(), "other-guest")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	approval := GoogleApprovalDeps{LoginApprovalRequired: true, Tasks: bgtasks.New()}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, ps, session.New([]byte("k"), false), target, &guest.ID, false, approval,
+	)
+
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if clearsSessionCookie(rec) {
+		t.Error("blocked sign-in cleared an unrelated guest cookie, want it kept")
 	}
 }
 
@@ -249,7 +290,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_ApprovedSignsIn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), approved, false, approval,
+		rec, req, ps, session.New([]byte("k"), false), approved, nil, false, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -450,6 +491,40 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail(t *testin
 	// The password was set before anyone proved the mailbox (#1328).
 	if got, want := healed.PasswordHash, ""; got != want {
 		t.Errorf("PasswordHash = %q, want %q (unproven password dropped on heal)", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_ExistingIdentity_OtherEmailNotStamped pins that
+// the heal only trusts Google for the address Google attested: a row whose
+// email was changed to something else keeps it unverified and keeps its
+// password.
+func TestLinkOrCreateGooglePlayer_ExistingIdentity_OtherEmailNotStamped(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	players := store.NewPlayerStore(db, discardLogger())
+	row, err := players.CreatePlayer(t.Context(), "moved", "typo@example.test", "h", RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if _, err = db.ExecContext(t.Context(),
+		"INSERT INTO player_identities (player_id, provider, subject) VALUES (?, ?, ?)",
+		row.ID, ProviderGoogle, "google-sub-moved",
+	); err != nil {
+		t.Fatalf("seed identity insert err = %v, want nil", err)
+	}
+
+	got, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), players, "google-sub-moved", "real@example.test", nil, true,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got.EmailVerifiedAt != nil {
+		t.Error("EmailVerifiedAt set, want nil (Google did not attest this address)")
+	}
+	if got, want := got.PasswordHash, "h"; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -327,8 +328,9 @@ func finalizeGoogleSignIn(
 		}
 		deps.logger.InfoContext(r.Context(), "google sign-in blocked: account not approved",
 			slog.Int64(logPlayerKey, current.ID))
-		// The pre-sign-in cookie may point at this very row (a claimed guest).
-		deps.sessions.Clear(w)
+		if sessionPlayerID != nil && *sessionPlayerID == current.ID {
+			deps.sessions.Clear(w)
+		}
 		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
 
 		return
@@ -499,10 +501,10 @@ func linkOrCreateGooglePlayer(
 		// row was linked but a transient failure prevented the
 		// email_verified_at stamp, every subsequent login otherwise
 		// short-circuits here and the player is stranded on the
-		// verify-email gate. Google attests the address on every
-		// callback that reaches us, so stamping here is safe and
-		// idempotent. See #471.
-		if email != "" && existing.EmailVerifiedAt == nil {
+		// verify-email gate. Google attests only the address it sent, so
+		// the stamp is safe only when the row still carries that address.
+		// See #471.
+		if email != "" && existing.EmailVerifiedAt == nil && strings.EqualFold(existing.Email, email) {
 			marked, markErr := identities.MarkPlayerEmailVerifiedByOAuth(ctx, existing.ID)
 			if markErr != nil {
 				return nil, false, fmt.Errorf("mark email verified on existing identity: %w", markErr)
@@ -589,9 +591,7 @@ func claimAnonymousSessionPlayer(
 
 		return nil, ErrPlayerNotFound
 	case errors.Is(err, ErrIdentityAlreadyLinked):
-		// Lost a race with a concurrent callback that already linked
-		// this (provider, subject) onto a different row; the claim was
-		// rolled back. Return the canonical OAuth-linked row instead.
+		// A concurrent callback linked the identity elsewhere and the claim rolled back.
 		refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 		if refetchErr != nil {
 			return nil, fmt.Errorf("refetch after link race: %w", refetchErr)
@@ -658,11 +658,7 @@ func createGooglePlayer(
 		if !errors.Is(createErr, ErrIdentityAlreadyLinked) {
 			return nil, fmt.Errorf("create player from oauth: %w", createErr)
 		}
-		// Symmetric race recovery to claimAnonymousSessionPlayer and
-		// linkExistingPlayerByEmail: a concurrent callback for the same
-		// (provider, subject) linked the identity onto a different row
-		// between our identity-miss and our create, which rolled back.
-		// Return that row so the session points at the canonical player.
+		// A concurrent callback linked the identity elsewhere and the create rolled back.
 		refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 		if refetchErr != nil {
 			return nil, fmt.Errorf("refetch after create race: %w", refetchErr)
