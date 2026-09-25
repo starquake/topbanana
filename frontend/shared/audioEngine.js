@@ -153,17 +153,17 @@ export function createAudioEngine(view) {
         const howl = effects[name];
         if (!howl) { callback(); return; }
         const token = sequenceToken;
-        // Whichever of end / stop fires first removes both, so the unfired one
-        // does not pile up on the shared Howl across questions.
-        const done = () => {
-            howl.off('end', done);
-            howl.off('stop', done);
-            if (token === sequenceToken) callback();
-        };
         try {
-            howl.on('end', done);
-            howl.on('stop', done);
-            howl.play();
+            const id = howl.play();
+            // Scoped to this play's sound id; whichever of end / stop fires first
+            // removes both, so the unfired one does not pile up on the shared Howl.
+            const done = () => {
+                howl.off('end', done, id);
+                howl.off('stop', done, id);
+                if (token === sequenceToken) callback();
+            };
+            howl.once('end', done, id);
+            howl.once('stop', done, id);
         } catch {
             callback();
         }
