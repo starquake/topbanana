@@ -42,8 +42,9 @@ func BaseURL(r *http.Request) string {
 }
 
 // resolve picks configured when set; otherwise it builds the URL from the
-// request, taking the first hop of X-Forwarded-Proto / X-Forwarded-Host only
-// from a trusted proxy.
+// request, taking X-Forwarded-Proto / X-Forwarded-Host only from a trusted
+// proxy and only its own (rightmost) hop, since a proxy that appends leaves any
+// client-sent value first.
 func resolve(r *http.Request, configured string, trustedCIDRs []*net.IPNet) string {
 	if configured != "" {
 		return configured
@@ -54,10 +55,10 @@ func resolve(r *http.Request, configured string, trustedCIDRs []*net.IPNet) stri
 	}
 	host := r.Host
 	if request.FromTrustedProxy(r, trustedCIDRs) {
-		if proto := firstHeaderValue(r, "X-Forwarded-Proto"); proto != "" {
+		if proto := lastHeaderValue(r, "X-Forwarded-Proto"); proto != "" {
 			scheme = proto
 		}
-		if fwdHost := firstHeaderValue(r, "X-Forwarded-Host"); fwdHost != "" {
+		if fwdHost := lastHeaderValue(r, "X-Forwarded-Host"); fwdHost != "" {
 			host = fwdHost
 		}
 	}
@@ -65,16 +66,12 @@ func resolve(r *http.Request, configured string, trustedCIDRs []*net.IPNet) stri
 	return scheme + "://" + host
 }
 
-// firstHeaderValue returns the first comma-separated value of the named
-// header, trimmed of surrounding whitespace. Empty when the header is
-// absent or empty.
-func firstHeaderValue(r *http.Request, name string) string {
-	raw := r.Header.Get(name)
-	if raw == "" {
-		return ""
-	}
-	if i := strings.IndexByte(raw, ','); i >= 0 {
-		raw = raw[:i]
+// lastHeaderValue returns the last comma-separated value across every line of
+// the named header, trimmed. Empty when the header is absent or empty.
+func lastHeaderValue(r *http.Request, name string) string {
+	raw := strings.Join(r.Header.Values(name), ",")
+	if i := strings.LastIndexByte(raw, ','); i >= 0 {
+		raw = raw[i+1:]
 	}
 
 	return strings.TrimSpace(raw)

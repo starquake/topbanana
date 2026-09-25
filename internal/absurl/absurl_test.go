@@ -59,11 +59,11 @@ func TestBaseURL(t *testing.T) {
 			want:    "https://quiz.example",
 		},
 		{
-			name: "trusted proxy chain uses first hop values", middleware: true,
+			name: "trusted proxy that appends keeps its own hop, not the client's", middleware: true,
 			remoteAddr: trustedPeer, host: "internal:8080",
 			headers: map[string]string{
-				"X-Forwarded-Proto": "https, http",
-				"X-Forwarded-Host":  "  quiz.example  , internal.lb",
+				"X-Forwarded-Proto": "http, https",
+				"X-Forwarded-Host":  "attacker.example,  quiz.example  ",
 			},
 			want: "https://quiz.example",
 		},
