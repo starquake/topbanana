@@ -13,10 +13,11 @@ on:
   workflow_dispatch:
 
 # Cancel the older run when a new push lands on the same branch / PR.
-# Saves runner minutes on fixup pushes (#202).
+# Saves runner minutes on fixup pushes (#202). The nightly run queues
+# instead, so it never cancels a merge's run on main.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 env:
   REGISTRY: ghcr.io
@@ -99,11 +100,14 @@ jobs:
     - name: JS bundle drift check
       run: make js-check
 
+    - name: sqlc vet
+      run: make sql-lint
+
     # Catch drift between internal/queries/ and the generated
-    # internal/db/ layer. `sqlc vet` (in the lint job) only lints
-    # the queries; it does not re-run generate, so a query edited or
-    # deleted without regenerating leaves stale code in internal/db/
-    # that ships unnoticed. Regenerate here and fail on any diff.
+    # internal/db/ layer. `sqlc vet` only lints the queries; it does not
+    # re-run generate, so a query edited or deleted without regenerating
+    # leaves stale code in internal/db/ that ships unnoticed. Regenerate
+    # here and fail on any diff.
     - name: sqlc drift check
       run: make sqlc-check
 
@@ -116,9 +120,8 @@ jobs:
     - name: ASCII source check
       run: make lint-ascii
 
-    # `make test-coverage` runs the full suite with -tags=integration,
-    # so a separate integration step would just duplicate the work.
-    # Dropped here as part of #202.
+    # `make test-coverage` runs the full suite without -short, integration
+    # tests included, so a separate integration step would duplicate it (#202).
     - name: Run Tests with Coverage
       run: make test-coverage
 
@@ -149,10 +152,6 @@ jobs:
     # DB; `go run ./cmd/server/ -check` then opens it, applies any
     # pending migrations, and exits — the exact code path a real
     # deploy hits before binding the listener.
-    #
-    # Wired as a non-required check first so a flake doesn't gate PRs
-    # while the new step beds in; promote to required-checks once it's
-    # been stable across a release cycle.
     - name: Smoke against seeded DB
       run: |
         make seed-dev
