@@ -11,9 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
@@ -1270,21 +1268,12 @@ func HandlePlayerClaimName(
 
 			return
 		}
-		trimmed := strings.TrimSpace(req.DisplayName)
-		if trimmed == "" {
-			http.Error(w, "display name is required", http.StatusBadRequest)
-
-			return
-		}
-		if utf8.RuneCountInString(trimmed) > auth.MaxDisplayNameLength {
-			writeClaimNameError(w, r, logger,
-				http.StatusBadRequest, "display_name_too_long",
-				fmt.Sprintf("display name must be at most %d characters", auth.MaxDisplayNameLength))
-
+		cleaned, ok := cleanClaimName(w, r, logger, req.DisplayName)
+		if !ok {
 			return
 		}
 
-		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, req.DisplayName)
+		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, cleaned)
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrDisplayNameTaken):
@@ -1324,6 +1313,27 @@ func HandlePlayerClaimName(
 			return
 		}
 	})
+}
+
+// cleanClaimName runs [auth.CleanDisplayName] on a claim-name request and
+// writes the 400 for a rejected name. ok is false once a response is written.
+func cleanClaimName(w http.ResponseWriter, r *http.Request, logger *slog.Logger, raw string) (string, bool) {
+	cleaned, err := auth.CleanDisplayName(raw)
+	switch {
+	case err == nil:
+		return cleaned, true
+	case errors.Is(err, auth.ErrDisplayNameEmpty):
+		http.Error(w, "display name is required", http.StatusBadRequest)
+	case errors.Is(err, auth.ErrDisplayNameTooLong):
+		writeClaimNameError(w, r, logger,
+			http.StatusBadRequest, "display_name_too_long",
+			fmt.Sprintf("display name must be at most %d characters", auth.MaxDisplayNameLength))
+	default:
+		writeClaimNameError(w, r, logger,
+			http.StatusBadRequest, "display_name_invalid", "display name contains characters that are not allowed")
+	}
+
+	return "", false
 }
 
 // HandleGameResults returns the results of a game based on its ID.

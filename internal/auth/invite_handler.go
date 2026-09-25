@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/locale"
@@ -149,7 +150,7 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 			return
 		}
 
-		displayName := r.PostFormValue("display_name")
+		displayName := strings.TrimSpace(r.PostFormValue("display_name"))
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
 		if msg, ok := validateAcceptInviteInput(loc, displayName, password, confirm); !ok {
@@ -261,13 +262,13 @@ func acceptInvite(
 	http.Redirect(w, r, landingPathFor(refreshed.Role), http.StatusSeeOther)
 }
 
-// validateAcceptInviteInput pins a non-empty displayName plus the same
+// validateAcceptInviteInput pins a valid displayName (see [CleanDisplayName]) plus the same
 // password length + confirm-match rules the register/reset forms use.
 // Returns the user-facing banner text (localized for loc) and false when
 // rejected.
 func validateAcceptInviteInput(loc, displayName, password, confirm string) (string, bool) {
-	if displayName == "" {
-		return locale.Translate(loc, "validation.displayNameRequired"), false
+	if _, err := CleanDisplayName(displayName); err != nil {
+		return DisplayNameErrorMessage(loc, err), false
 	}
 	if len(password) < MinPasswordLength {
 		return locale.TranslateCount(loc, "validation.passwordTooShort", MinPasswordLength), false

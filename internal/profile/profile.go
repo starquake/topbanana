@@ -33,6 +33,9 @@ import (
 // internal/auth/handler.go.
 const maxFormBodySize = 16 * 1024
 
+// logPlayerIDKey is the structured-log attribute key for the acting player.
+const logPlayerIDKey = "player_id"
+
 // pageData feeds profile.gohtml. Title flows into the auth layout's
 // <title>. DisplayName is the value pre-filled into the input. Message
 // surfaces server-side validation errors (taken display name, empty
@@ -142,14 +145,17 @@ func HandleProfileDisplayName(
 		}
 
 		raw := r.PostFormValue("display_name")
-		cleaned := strings.TrimSpace(raw)
 
 		// The return target rides the POST as a hidden field so the
 		// back link survives a re-render; re-validate it on the way in
 		// rather than trusting the submitted value.
 		next := adminNextPath(r.PostFormValue("next"))
 
-		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
+		cleaned, err := auth.CleanDisplayName(raw)
+		var updated *auth.Player
+		if err == nil {
+			updated, err = players.RenamePlayer(r.Context(), player.ID, cleaned)
+		}
 		if err != nil {
 			renderRenameError(renderer, logger, w, r, renameAttempt{
 				playerID:           player.ID,
@@ -219,7 +225,7 @@ func renderRenameError(
 	switch {
 	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
-			slog.Int64("player_id", a.playerID))
+			slog.Int64(logPlayerIDKey, a.playerID))
 		renderer.render(w, r, http.StatusBadRequest, pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.currentDisplayName,
@@ -228,9 +234,20 @@ func renderRenameError(
 			BackLabel:   backLabel,
 			Next:        a.next,
 		})
+	case errors.Is(err, auth.ErrDisplayNameTooLong), errors.Is(err, auth.ErrDisplayNameInvalid):
+		logger.InfoContext(r.Context(), "profile rename rejected: invalid name",
+			slog.Int64(logPlayerIDKey, a.playerID))
+		renderer.render(w, r, http.StatusBadRequest, pageData{
+			Title:       locale.Translate(loc, "profile.heading"),
+			DisplayName: a.currentDisplayName,
+			Message:     auth.DisplayNameErrorMessage(loc, err),
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        a.next,
+		})
 	case errors.Is(err, auth.ErrDisplayNameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
-			slog.Int64("player_id", a.playerID), slog.String("attempted", a.attempted))
+			slog.Int64(logPlayerIDKey, a.playerID), slog.String("attempted", a.attempted))
 		renderer.render(w, r, http.StatusConflict, pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.attempted,
@@ -241,7 +258,7 @@ func renderRenameError(
 		})
 	default:
 		logger.ErrorContext(r.Context(), "profile rename failed",
-			slog.Int64("player_id", a.playerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, a.playerID), slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

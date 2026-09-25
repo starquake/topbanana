@@ -98,6 +98,35 @@ func TestClaimName_TooLongRejected(t *testing.T) {
 	}
 }
 
+// TestClaimName_InvalidCharactersRejected pins that the claim-name endpoint
+// rejects a name with a bidi override with a 400 and the display_name_invalid
+// code. The PATCH itself mints the guest row.
+func TestClaimName_InvalidCharactersRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, srv.BaseURL, "\u202eecilA")
+	if got, want := status, http.StatusBadRequest; got != want {
+		t.Fatalf("PATCH status = %d, want %d (body=%q)", got, want, body)
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode body err = %v (raw=%q)", err, body)
+	}
+	if got, want := payload.Code, "display_name_invalid"; got != want {
+		t.Errorf("body.code = %q, want %q (raw=%q)", got, want, body)
+	}
+}
+
 // patchPlayerDisplayNameWithBody is patchPlayerDisplayName (in anonymous_test.go)
 // but also returns the response body so the caller can assert on the
 // structured error JSON introduced for #289.

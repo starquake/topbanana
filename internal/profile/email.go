@@ -141,7 +141,7 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		loc := locale.Resolve(r)
 		if player.PasswordHash == "" {
 			logger.InfoContext(r.Context(), "profile email change blocked: account has no password",
-				slog.Int64("player_id", player.ID))
+				slog.Int64(logPlayerIDKey, player.ID))
 			deps.Flash.SetError(w, locale.Translate(loc, "profileEmail.providerManaged"), 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
@@ -159,7 +159,7 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		current := r.PostFormValue("current_password")
 		if auth.CheckPassword(player.PasswordHash, current) != nil {
 			logger.InfoContext(r.Context(), "profile email change rejected: current password incorrect",
-				slog.Int64("player_id", player.ID))
+				slog.Int64(logPlayerIDKey, player.ID))
 			deps.Flash.SetError(w, locale.Translate(loc, "profile.currentPasswordIncorrect"), 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
@@ -228,7 +228,7 @@ func dispatchEmailChangeIfFree(
 		// Address is free - fall through to dispatch.
 	default:
 		logger.WarnContext(ctx, "profile email change lookup failed",
-			slog.Int64("player_id", playerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, playerID), slog.Any("err", err))
 
 		return
 	}
@@ -241,7 +241,7 @@ func dispatchEmailChangeIfFree(
 			newEmail, newEmail, loc, playerID, time.Now().UTC(),
 		); sendErr != nil {
 			logger.WarnContext(sendCtx, "profile email change dispatch failed",
-				slog.Int64("player_id", playerID), slog.Any("err", sendErr))
+				slog.Int64(logPlayerIDKey, playerID), slog.Any("err", sendErr))
 		}
 		notifyOldAddressOfChange(sendCtx, logger, deps.Sender, playerID, oldEmail, newEmail, loc)
 	})
@@ -268,6 +268,6 @@ func notifyOldAddressOfChange(
 	}
 	if err := sender.Send(ctx, msg); err != nil {
 		logger.WarnContext(ctx, "profile email change notice to old address failed",
-			slog.Int64("player_id", playerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, playerID), slog.Any("err", err))
 	}
 }

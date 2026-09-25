@@ -956,10 +956,15 @@ type registerInput struct {
 // the display name optional; email is the credential identifier.
 func validateRegisterInput(loc, displayName, email, password, passwordConfirm string) registerInput {
 	cleanedDisplayName := strings.TrimSpace(displayName)
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if cleanedDisplayName == "" {
 		cleanedDisplayName = GeneratePetname()
+	} else if _, err := CleanDisplayName(cleanedDisplayName); err != nil {
+		return registerInput{
+			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
+			ErrMsg: DisplayNameErrorMessage(loc, err), OK: false,
+		}
 	}
-	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
 			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,

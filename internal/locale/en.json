@@ -155,6 +155,8 @@
   "validation.passwordTooLong": "Password must be at most {n} characters.",
   "validation.passwordsNoMatch": "Passwords do not match.",
   "validation.displayNameRequired": "Pick a display name.",
+  "validation.displayNameTooLong": "Display name must be at most {n} characters.",
+  "validation.displayNameInvalid": "Display name contains characters that are not allowed.",
 
   "login.rateLimited": "Too many attempts. Try again in a moment.",
   "login.invalidCredentials": "Invalid email or password.",
@@ -265,6 +267,7 @@
   "claim.enterName": "Please enter a name.",
   "claim.saveError": "Couldn't save your name. Try again later.",
   "claim.nameTaken": "That name is taken.",
+  "claim.nameInvalid": "That name is too long or has characters that are not allowed.",
   "claim.alreadyNamed": "This account already has a name.",
 
   "join.heading": "Join a game",

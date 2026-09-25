@@ -493,6 +493,39 @@ func TestAdminPlayerMgmt_SetDisplayName(t *testing.T) {
 	}
 }
 
+// TestAdminPlayerMgmt_SetDisplayNameRejectsInvalid pins that the admin rename
+// runs the shared display-name validator and leaves the name unchanged.
+func TestAdminPlayerMgmt_SetDisplayNameRejectsInvalid(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "badname-admin", "badname-admin-pass-123")
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "badname-target", "badname-target-pass-123")
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "badname-target")
+	detailURL := srv.BaseURL + "/admin/players/" + intToString(target)
+
+	res := postAdminAction(
+		ctx, t, adminClient, srv.BaseURL, detailURL+"/display-name",
+		url.Values{"display_name": {strings.Repeat("a", 51)}},
+	)
+	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("set-displayName status = %d, want %d", got, want)
+	}
+
+	detail := getOK(ctx, t, adminClient, detailURL)
+	if got, want := detail, "Display name must be at most 50 characters."; !strings.Contains(got, want) {
+		t.Errorf("detail body should contain %q; body=%.300q", want, got)
+	}
+	if got, want := lookupPlayerID(ctx, t, srv.DBURI, "badname-target"), target; got != want {
+		t.Errorf("player id by old name = %d, want %d (name must be unchanged)", got, want)
+	}
+}
+
 // TestAdminPlayerMgmt_SetPassword drives the #535 password endpoint from a
 // super admin: the reset 303s back to the detail page, the audit trail
 // records "Password set", and the target can then log in with the new
