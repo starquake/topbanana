@@ -387,6 +387,91 @@ func TestRunner_FullFlow(t *testing.T) {
 	}
 }
 
+// TestRunner_PlaysRoundsInRoundPositionOrder pins #1338: once the host drags
+// the second round above the first, the live session plays it first, as solo
+// play and the editor do, even though its question has the higher position.
+func TestRunner_PlaysRoundsInRoundPositionOrder(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}, {true}})
+	ctx := t.Context()
+
+	quizStore := store.NewQuizStore(h.db, slog.New(slog.DiscardHandler))
+	quizID := *h.reload(t).QuizID
+	before, err := quizStore.ListRoundsByQuiz(ctx, quizID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(before), 2; got != want {
+		t.Fatalf("len(rounds) = %d, want %d", got, want)
+	}
+	first, second := before[1], before[0]
+	if err = quizStore.MoveRoundToPosition(ctx, quizID, first.ID, 1); err != nil {
+		t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+	}
+	qz, err := quizStore.GetQuiz(ctx, quizID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+	questionOf := func(roundID int64) int64 {
+		t.Helper()
+		for _, q := range qz.Questions {
+			if q.RoundID == roundID {
+				return q.ID
+			}
+		}
+		t.Fatalf("no question in round %d", roundID)
+
+		return 0
+	}
+
+	if err = h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	for _, want := range []int64{first.ID, second.ID} {
+		intro := h.reload(t)
+		if got, wantPhase := intro.Phase, PhaseRoundIntro; got != wantPhase {
+			t.Fatalf("phase = %q, want %q", got, wantPhase)
+		}
+		if got := *intro.CurrentRoundID; got != want {
+			t.Errorf("round_intro CurrentRoundID = %d, want %d", got, want)
+		}
+
+		h.clock.advance(runnerCfg.RoundIntroBeat)
+		h.tick(ctx)
+		question := h.reload(t)
+		if got, wantQ := *question.CurrentQuestionID, questionOf(want); got != wantQ {
+			t.Errorf("CurrentQuestionID = %d, want %d (round %d's question)", got, wantQ, want)
+		}
+
+		// Timeout close -> reveal -> round_results -> next round's intro.
+		h.clock.advance(11 * time.Second)
+		h.tick(ctx)
+		h.clock.advance(runnerCfg.RevealBeat)
+		h.tick(ctx)
+		h.clock.advance(runnerCfg.RoundResultsBeat)
+		h.tick(ctx)
+	}
+}
+
+func TestNewQuestionPlan_RoundOrder(t *testing.T) {
+	t.Parallel()
+
+	rounds := []*quiz.Round{{ID: 20}, {ID: 30}, {ID: 10}}
+	qz := &quiz.Quiz{Questions: []*quiz.Question{
+		{ID: 1, RoundID: 10, Position: 1},
+		{ID: 2, RoundID: 99, Position: 2},
+		{ID: 3, RoundID: 20, Position: 3},
+	}}
+
+	// Round 30 has no questions and is skipped (#803); round 99 is not in the
+	// round list, so it plays last rather than being dropped.
+	if got, want := ExportQuestionPlanRounds(qz, rounds), []int64{20, 10, 99}; !slices.Equal(got, want) {
+		t.Errorf("plan rounds = %v, want %v", got, want)
+	}
+}
+
 // TestRunner_FinalRoundSkipsRoundResults pins that the last round transitions
 // from its closing reveal straight to intermission, never showing the
 // between-rounds round_results screen, so the game ends on a single
