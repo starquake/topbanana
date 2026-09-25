@@ -60,6 +60,23 @@ type quizForm struct {
 // Valid checks every form-level rule on the wrapped quiz, its
 // questions, and its options. An empty map means the form is valid.
 func (f *quizForm) Valid(ctx context.Context) map[string]string {
+	problems := f.validMetadata()
+	q := f.quiz
+	if len(q.Questions) > maxQuestionsPerQuiz {
+		problems["questions"] = fmt.Sprintf("A quiz may have at most %d questions", maxQuestionsPerQuiz)
+	}
+	if len(q.Rounds) > maxRoundsPerQuiz {
+		problems["rounds"] = fmt.Sprintf("A quiz may have at most %d rounds", maxRoundsPerQuiz)
+	}
+	addQuestionProblems(ctx, problems, q.Questions)
+	addRoundProblems(ctx, problems, q.Rounds)
+
+	return problems
+}
+
+// validMetadata checks only the quiz's own fields, for the details form, which
+// does not edit the stored questions and rounds and so must not re-judge them.
+func (f *quizForm) validMetadata() map[string]string {
 	problems := make(map[string]string)
 	q := f.quiz
 	textField{"title", "Title", q.Title, "Title is required", maxTitleLength}.check(problems)
@@ -67,12 +84,6 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	textField{
 		"description", "Description", q.Description, "Description is required", maxDescriptionLength,
 	}.check(problems)
-	if len(q.Questions) > maxQuestionsPerQuiz {
-		problems["questions"] = fmt.Sprintf("A quiz may have at most %d questions", maxQuestionsPerQuiz)
-	}
-	if len(q.Rounds) > maxRoundsPerQuiz {
-		problems["rounds"] = fmt.Sprintf("A quiz may have at most %d rounds", maxRoundsPerQuiz)
-	}
 	// Only flag the time-limit range when the caller actually set a
 	// value; a zero TimeLimitSeconds means "unset" (the store layer
 	// rewrites it to DefaultTimeLimitSeconds before INSERT), so we
@@ -101,8 +112,6 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	if q.Language != "" && !quiz.IsValidLanguage(q.Language) {
 		problems["language"] = "Language must be one of: en, nl"
 	}
-	addQuestionProblems(ctx, problems, q.Questions)
-	addRoundProblems(ctx, problems, q.Rounds)
 
 	return problems
 }
