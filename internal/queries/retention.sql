@@ -13,7 +13,9 @@
 -- guest with a finished game is kept regardless of age so the sweep never
 -- erases a leaderboard score (#626); "finished" is every question of the
 -- quiz issued as a game_question, the same finisher predicate the
--- leaderboard uses.
+-- leaderboard uses. A guest who plays hosted rooms is kept too: any
+-- session_answers row, or a session_players last_seen_at inside the window,
+-- so a regular room player is not swept, nor a guest mid-game.
 SELECT p.id
 FROM players p
 WHERE p.role = 'player'
@@ -29,6 +31,13 @@ WHERE p.role = 'player'
           AND (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
           AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
               (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+  )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
+  AND NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
   );
 
 -- name: FilterAnonymousPlayerIDs :many
