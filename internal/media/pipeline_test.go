@@ -506,3 +506,59 @@ func TestProcess_WaitsForDecodeSlot(t *testing.T) {
 		t.Errorf("Process err = %v, want nil", err)
 	}
 }
+
+// TestPreshrink pins that a source more than twice the target long edge is
+// halved until it is at most twice the target, and a smaller one is untouched.
+func TestPreshrink(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		w, h, target  int
+		wantW, wantH  int
+		wantUnchanged bool
+	}{
+		"wide":         {5000, 100, 1200, 1250, 25, false},
+		"tall":         {100, 5000, 1200, 25, 1250, false},
+		"square":       {3000, 3000, 1200, 1500, 1500, false},
+		"thumb target": {3000, 3000, 480, 750, 750, false},
+		"within twice": {2400, 1000, 1200, 2400, 1000, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := image.NewGray(image.Rect(0, 0, tc.w, tc.h))
+			got := ExportPreshrink(src, tc.target)
+			if gotW, gotH := got.Bounds().Dx(), got.Bounds().Dy(); gotW != tc.wantW || gotH != tc.wantH {
+				t.Errorf("preshrink(%dx%d, %d) = %dx%d, want %dx%d",
+					tc.w, tc.h, tc.target, gotW, gotH, tc.wantW, tc.wantH)
+			}
+			if got, want := got == image.Image(src), tc.wantUnchanged; got != want {
+				t.Errorf("preshrink returned the source = %t, want %t", got, want)
+			}
+		})
+	}
+}
+
+// TestPreshrinkAveragesBlocks pins that each halving averages 2x2 blocks: a
+// one-pixel checkerboard halves to flat mid-grey rather than aliasing.
+func TestPreshrinkAveragesBlocks(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 4 * MaxLongEdge, 2
+	src := image.NewGray(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			src.SetGray(x, y, color.Gray{Y: uint8(255 * ((x + y) % 2))})
+		}
+	}
+
+	got := ExportPreshrink(src, MaxLongEdge)
+	bounds := got.Bounds()
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		r, _, _, _ := got.At(x, bounds.Min.Y).RGBA()
+		if got := r >> 8; got < 126 || got > 129 {
+			t.Fatalf("pixel %d red = %d, want about 128 (2x2 average)", x, got)
+		}
+	}
+}

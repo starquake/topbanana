@@ -51,3 +51,6 @@ var ExportJPEGSegments = jpegSegments
 // ExportJPEGProgressive re-exports the unexported progressive-frame check for
 // tests.
 var ExportJPEGProgressive = jpegProgressive
+
+// ExportPreshrink re-exports the unexported pre-resize halving step for tests.
+var ExportPreshrink = preshrink
