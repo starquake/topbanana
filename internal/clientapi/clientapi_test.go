@@ -1,10 +1,12 @@
 package clientapi_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,7 +82,9 @@ func TestHandleCreateGame(t *testing.T) {
 		t.Parallel()
 
 		env := newTestEnv(t)
-		handler := HandleCreateGame(env.logger, env.service)
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		handler := HandleCreateGame(logger, env.service)
 
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost, "/api/games",
@@ -91,6 +95,10 @@ func TestHandleCreateGame(t *testing.T) {
 
 		if got, want := rec.Code, http.StatusBadRequest; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
+		}
+		// Malformed client input is not an operator alert (#369).
+		if got := logs.String(); got != "" {
+			t.Errorf("log output = %q, want none at WARN or above", got)
 		}
 	})
 
@@ -152,6 +160,9 @@ func TestHandleCreateGame(t *testing.T) {
 
 		if got, want := rec.Code, http.StatusCreated; got != want {
 			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
+		}
+		if got := rec.Header().Get("Location"); got != "" {
+			t.Errorf("Location = %q, want none (no route serves a game by id)", got)
 		}
 
 		// The created game must belong to the player on the context: a
@@ -1403,6 +1414,34 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestHandlePlayerClaimName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("malformed body is a 400 logged below warn", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "claim-bad-json")
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		handler := HandlePlayerClaimName(logger, env.players, env.service)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodPatch, "/api/players/me",
+			strings.NewReader("{bad json}"),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+		if got := logs.String(); got != "" {
+			t.Errorf("log output = %q, want none at WARN or above", got)
 		}
 	})
 }

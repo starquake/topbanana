@@ -152,3 +152,22 @@ func TestSecurityHeaders_HSTSInProduction(t *testing.T) {
 		})
 	}
 }
+
+// TestPlayerAPI_NoStore pins that per-player JSON responses are never cached:
+// they carry the caller's identity and a guest's first one sets a session cookie.
+func TestPlayerAPI_NoStore(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	for _, path := range []string{"/api/players/me", "/api/quizzes", "/api/quizzes/nope-999999/leaderboard"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			resp := httpGet(ctx, t, newAnonClient(t), srv.BaseURL+path)
+			defer closeBody(t, resp.Body)
+			if got, want := resp.Header.Get("Cache-Control"), "no-store"; got != want {
+				t.Errorf("GET %s Cache-Control = %q, want %q", path, got, want)
+			}
+		})
+	}
+}

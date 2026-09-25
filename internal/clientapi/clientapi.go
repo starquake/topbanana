@@ -135,48 +135,52 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	})
 }
 
-// canReadQuiz applies the #103 visibility gate. Public and unlisted are
-// reachable by anyone (unlisted requires guessing the slug+ID, which is
-// out of scope for this ticket); private requires an authenticated
-// player. Returns false when the caller is not authorised, in which
-// case the response has already been written as a 404 so the gate is
-// indistinguishable from a genuinely missing quiz.
-func canReadQuiz(w http.ResponseWriter, r *http.Request, visibility string) bool {
-	if visibility != quiz.VisibilityPrivate {
+// canReadQuiz reports whether the request's player may read qz on the play
+// surface: the creator and admins always; anyone else needs a published solo
+// quiz, an account for a private one, and the quiz's own slug for an unlisted one.
+func canReadQuiz(r *http.Request, qz *quiz.Quiz, slug string) bool {
+	p, ok := auth.PlayerFromContext(r.Context())
+	if ok && (p.IsAdmin() || p.ID == qz.CreatedByPlayerID) {
 		return true
 	}
-	p, ok := auth.PlayerFromContext(r.Context())
-	if !ok || p.IsAnonymous() {
-		http.NotFound(w, r)
-
+	if !qz.Published || qz.Mode == quiz.ModeLive {
 		return false
 	}
-
-	return true
+	switch qz.Visibility {
+	case quiz.VisibilityPrivate:
+		return ok && !p.IsAnonymous()
+	case quiz.VisibilityUnlisted:
+		return slug == qz.Slug
+	default:
+		return true
+	}
 }
 
-// gateQuizRead reads the quiz's visibility by ID via the game service's
-// quiz store proxy and applies canReadQuiz so the leaderboard,
-// leaderboard-stream, my-game, and create-game handlers can reject access
-// without duplicating the load + check + 404 dance. It reads only the
-// visibility column, not the full questions/options tree.
+// gateQuizRead loads the quiz and applies canReadQuiz, answering a missing and
+// an unreadable quiz with the same opaque 404 (#1207).
 func gateQuizRead(
 	w http.ResponseWriter, r *http.Request,
-	logger *slog.Logger, service *game.Service, quizID int64,
-) bool {
-	visibility, err := service.GetQuizVisibility(r.Context(), quizID)
+	logger *slog.Logger, service *game.Service, quizID int64, slug string,
+) (*quiz.Quiz, bool) {
+	qz, err := service.GetQuizMeta(r.Context(), quizID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) {
 			http.NotFound(w, r)
 
-			return false
+			return nil, false
 		}
-		writeInternalError(w, r, logger, "error retrieving quiz for visibility gate", err)
+		writeInternalError(w, r, logger, "error retrieving quiz for read gate", err)
 
-		return false
+		return nil, false
 	}
 
-	return canReadQuiz(w, r, visibility)
+	if !canReadQuiz(r, qz, slug) {
+		http.NotFound(w, r)
+
+		return nil, false
+	}
+
+	return qz, true
 }
 
 // gatePreviewOwner returns the loaded quiz for the creator or an admin so the
@@ -333,27 +337,16 @@ func HandleQuizMeta(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		qz, err := service.GetQuizMeta(ctx, quizID)
-		if err != nil {
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			writeInternalError(w, r, logger, "error retrieving quiz metadata", err)
-
+		qz, ok := gateQuizRead(w, r, logger, service, quizID, handlers.SlugFromSlugID(r.PathValue("slugID")))
+		if !ok {
 			return
 		}
 
-		// Draft and live quizzes are not solo-deep-link playable; 404 keeps
-		// them indistinguishable from a missing quiz (#1192/#677).
+		// The creator passes the read gate, but a draft or live quiz is still
+		// not solo-deep-link playable, so it 404s for them too (#1192/#677).
 		if !qz.Published || qz.Mode == quiz.ModeLive {
 			http.NotFound(w, r)
 
-			return
-		}
-
-		if !canReadQuiz(w, r, qz.Visibility) {
 			return
 		}
 
@@ -393,7 +386,7 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
-		if !gateQuizRead(w, r, logger, service, quizID) {
+		if _, ok = gateQuizRead(w, r, logger, service, quizID, handlers.SlugFromSlugID(r.PathValue("slugID"))); !ok {
 			return
 		}
 
@@ -523,7 +516,7 @@ func HandleQuizLeaderboardStream(
 			return
 		}
 
-		if !gateQuizRead(w, r, logger, service, quizID) {
+		if _, ok = gateQuizRead(w, r, logger, service, quizID, handlers.SlugFromSlugID(r.PathValue("slugID"))); !ok {
 			return
 		}
 
@@ -633,7 +626,8 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 // Returns the ID of the created game.
 // Returns 201 if the game was created successfully.
 // Returns 400 if the request body is invalid.
-// Returns 404 if the quiz does not exist.
+// Returns 404 if the quiz does not exist or the player may not read it (see
+// canReadQuiz; an unlisted quiz needs its slug in the body).
 // Returns 409 if the player already has a game for the quiz (in-progress or
 // completed); the client should call GET /api/quizzes/{slugID}/my-game to
 // resolve.
@@ -641,6 +635,8 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	type createGameRequest struct {
 		QuizID int64 `json:"quizId"`
+		// Slug is the quiz's slug from the shared link; required for an unlisted quiz.
+		Slug string `json:"slug"`
 		// Preview requests an owner preview game that stays off the leaderboard (#1192).
 		Preview bool `json:"preview"`
 	}
@@ -655,7 +651,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		var req createGameRequest
 		req, err = handlers.DecodeJSON[createGameRequest](w, r)
 		if err != nil {
-			logger.ErrorContext(ctx, "error decoding createGameRequest", slog.Any("err", err))
+			logger.InfoContext(ctx, "error decoding createGameRequest", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -671,7 +667,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		if !gateQuizRead(w, r, logger, service, req.QuizID) {
+		if _, ok = gateQuizRead(w, r, logger, service, req.QuizID, req.Slug); !ok {
 			return
 		}
 
@@ -692,7 +688,6 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		}
 		res := createGameResponse{ID: g.ID}
 
-		w.Header().Set("Location", fmt.Sprintf("/play/game/%v", g.ID))
 		err = handlers.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding createGameResponse", slog.Any("err", err))
@@ -735,7 +730,7 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 			return
 		}
 
-		if !gateQuizRead(w, r, logger, service, quizID) {
+		if _, ok = gateQuizRead(w, r, logger, service, quizID, handlers.SlugFromSlugID(r.PathValue("slugID"))); !ok {
 			return
 		}
 
@@ -1258,7 +1253,7 @@ func HandlePlayerClaimName(
 
 		req, err := handlers.DecodeJSON[claimNameRequest](w, r)
 		if err != nil {
-			logger.ErrorContext(ctx, "error decoding claimNameRequest", slog.Any("err", err))
+			logger.InfoContext(ctx, "error decoding claimNameRequest", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return

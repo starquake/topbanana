@@ -51,3 +51,25 @@ for (const visibility of ['private', 'unlisted'] as const) {
     await expect(page.getByTestId('leaderboard-section')).toBeVisible();
   });
 }
+
+// #1332 - an unlisted quiz is readable only through its own slug, so the
+// client must send that slug when it starts a game. An anonymous visitor who is
+// not the quiz's owner opens the shared link and gets the first question.
+test('anonymous visitor starts an unlisted quiz from its shared link', async ({ page, browserName, baseURL }) => {
+  const title = `E2E unlisted start ${browserName} ${Date.now()}`;
+  await seedQuiz(page, title, QUIZ_QUESTIONS, { publish: false });
+  setQuizVisibility(title, 'unlisted');
+  publishQuiz(title);
+  const playPath = await deepLinkPathFor(page, title);
+
+  const anonContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+  try {
+    const anon = await anonContext.newPage();
+    await anon.goto(playPath);
+    await expect(anon.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+    await anon.getByRole('button', { name: 'Start Game' }).click();
+    await expect(anon.locator('progress.progress-reveal')).toBeVisible();
+  } finally {
+    await anonContext.close();
+  }
+});
