@@ -338,9 +338,7 @@ func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	return nil
 }
 
-// UpdateQuiz updates the quiz's own row only. qz.Questions is ignored, so a
-// save built from a stale snapshot cannot overwrite or delete questions edited
-// elsewhere in the meantime.
+// UpdateQuiz updates the quiz's own row only, so a stale qz.Questions cannot clobber questions.
 func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	if err := execUpdateQuiz(ctx, s.q, qz); err != nil {
 		return fmt.Errorf("failed to update quiz: %w", err)

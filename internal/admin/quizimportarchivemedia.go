@@ -287,9 +287,7 @@ func fillQuizFromArchiveRounds(qz *quiz.Quiz, rounds []quizArchiveRound) ([]ques
 	return plan, nil
 }
 
-// checkArchiveMediaCount rejects a plan that references more unique images or
-// sounds than the per-quiz ceiling; a zero limit disables the check. The quiz is
-// new, so the plan is its whole library.
+// checkArchiveMediaCount rejects a plan with more unique images or sounds than limit (zero disables).
 func checkArchiveMediaCount(plan []questionMediaPlan, limit int) error {
 	if limit <= 0 {
 		return nil
