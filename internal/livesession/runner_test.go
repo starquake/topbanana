@@ -429,7 +429,7 @@ func TestRunner_PlaysRoundsInRoundPositionOrder(t *testing.T) {
 	if err = h.service.Start(ctx, h.code, 1); err != nil {
 		t.Fatalf("Start err = %v, want nil", err)
 	}
-	for _, want := range []int64{first.ID, second.ID} {
+	for i, want := range []int64{first.ID, second.ID} {
 		intro := h.reload(t)
 		if got, wantPhase := intro.Phase, PhaseRoundIntro; got != wantPhase {
 			t.Fatalf("phase = %q, want %q", got, wantPhase)
@@ -443,6 +443,15 @@ func TestRunner_PlaysRoundsInRoundPositionOrder(t *testing.T) {
 		question := h.reload(t)
 		if got, wantQ := *question.CurrentQuestionID, questionOf(want); got != wantQ {
 			t.Errorf("CurrentQuestionID = %d, want %d (round %d's question)", got, wantQ, want)
+		}
+		// The state's question order drives the "Round N" header.
+		state, serr := h.service.GetSessionState(ctx, h.code, 1)
+		if serr != nil {
+			t.Fatalf("GetSessionState err = %v, want nil", serr)
+		}
+		progress := quiz.QuestionRoundProgress(state.Quiz.Questions, *question.CurrentQuestionID)
+		if got, wantN := progress.RoundNumber, i+1; got != wantN {
+			t.Errorf("RoundNumber = %d, want %d", got, wantN)
 		}
 
 		// Timeout close -> reveal -> round_results -> next round's intro.

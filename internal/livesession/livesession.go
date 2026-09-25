@@ -1061,9 +1061,10 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 	return nil
 }
 
-// lobbyQuiz loads the room's quiz for the session state, or (nil, nil) for an empty
-// room (no quiz picked yet, #836): the lobby renders the staging state and the
-// in-game / standings / round-intro populators are all no-ops in that phase.
+// lobbyQuiz loads the room's quiz for the session state, with its questions in
+// play order, or (nil, nil) for an empty room (no quiz picked yet, #836): the
+// lobby renders the staging state and the in-game / standings / round-intro
+// populators are all no-ops in that phase.
 //
 //nolint:nilnil // (nil, nil) is the deliberate "no quiz yet" result for an empty room.
 func (s *Service) lobbyQuiz(ctx context.Context, sess *Session) (*quiz.Quiz, error) {
@@ -1074,6 +1075,11 @@ func (s *Service) lobbyQuiz(ctx context.Context, sess *Session) (*quiz.Quiz, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz for session state: %w", err)
 	}
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rounds for session state: %w", err)
+	}
+	qz.Questions = quiz.InPlayOrder(qz.Questions, rounds)
 
 	return qz, nil
 }

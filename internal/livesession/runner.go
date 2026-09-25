@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -797,38 +796,19 @@ type questionPlan struct {
 	questionsByRnd map[int64][]*quiz.Question
 }
 
-// newQuestionPlan projects a loaded quiz into a questionPlan. Rounds play in
-// the given (round position) order, the same order solo play walks, and
-// questions play in position order within their round (#1338). Questions
-// whose round is not in rounds (a defensive case) play last so none is
-// dropped.
+// newQuestionPlan groups the quiz's questions by round in [quiz.InPlayOrder].
 //
-// A round with no questions never appears and its intro is never shown in a
-// live session. This is intentional (#803): a live round with nothing to ask
-// would be a dead beat, unlike the solo path which can show an empty round's
-// intro.
+// The plan is derived from questions, so a round with no questions never
+// appears and its intro is never shown in a live session. This is intentional
+// (#803): a live round with nothing to ask would be a dead beat, unlike the
+// solo path which can show an empty round's intro.
 func newQuestionPlan(qz *quiz.Quiz, rounds []*quiz.Round) questionPlan {
 	plan := questionPlan{questionsByRnd: make(map[int64][]*quiz.Question)}
-	questions := append([]*quiz.Question(nil), qz.Questions...)
-	slices.SortStableFunc(questions, func(a, b *quiz.Question) int {
-		return a.Position - b.Position
-	})
-	for _, q := range questions {
-		plan.questionsByRnd[q.RoundID] = append(plan.questionsByRnd[q.RoundID], q)
-	}
-
-	known := make(map[int64]struct{}, len(rounds))
-	for _, rnd := range rounds {
-		known[rnd.ID] = struct{}{}
-		if len(plan.questionsByRnd[rnd.ID]) > 0 {
-			plan.rounds = append(plan.rounds, rnd.ID)
-		}
-	}
-	for _, q := range questions {
-		if _, ok := known[q.RoundID]; !ok {
-			known[q.RoundID] = struct{}{}
+	for _, q := range quiz.InPlayOrder(qz.Questions, rounds) {
+		if _, ok := plan.questionsByRnd[q.RoundID]; !ok {
 			plan.rounds = append(plan.rounds, q.RoundID)
 		}
+		plan.questionsByRnd[q.RoundID] = append(plan.questionsByRnd[q.RoundID], q)
 	}
 
 	return plan
