@@ -769,8 +769,8 @@ func TestService_CreateSession_ReturnsActiveRoom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession after end err = %v, want nil", err)
 	}
-	if third.ID == first.ID {
-		t.Errorf("CreateSession after end id = %q, want a new room", third.ID)
+	if got, old := third.ID, first.ID; got == old {
+		t.Errorf("CreateSession after end id = %q, want a new room (not %q)", got, old)
 	}
 }
 
@@ -854,8 +854,8 @@ func TestService_FinalStandingsSkipEmptyLastRound(t *testing.T) {
 		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	st := findRunnerStanding(t, state.Standings, scorer)
-	if st.TotalScore <= 0 {
-		t.Fatalf("scorer TotalScore = %d, want > 0", st.TotalScore)
+	if got := st.TotalScore; got <= 0 {
+		t.Fatalf("scorer TotalScore = %d, want > 0", got)
 	}
 	if got, want := st.RoundScore, st.TotalScore; got != want {
 		t.Errorf("scorer final RoundScore = %d, want %d (the last played round)", got, want)

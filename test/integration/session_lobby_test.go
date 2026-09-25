@@ -378,8 +378,8 @@ func TestSessionLobby_JoinCodesAreUnique(t *testing.T) {
 		setPlayerRole(ctx, t, setup.DBURI, name, "admin")
 		codes = append(codes, createSession(ctx, t, host, baseURL, qz.ID))
 	}
-	if codes[0] == codes[1] {
-		t.Errorf("two sessions share join code %q, want distinct", codes[0])
+	if got, other := codes[1], codes[0]; got == other {
+		t.Errorf("second session join code = %q, want distinct from %q", got, other)
 	}
 }
 
