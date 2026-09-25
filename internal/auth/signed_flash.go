@@ -53,15 +53,22 @@ type SignedFlash struct {
 // /verify-email so /forgot-password cannot read its banner, and vice
 // versa.
 func NewSignedFlash(sessionKey []byte, secureCookies bool, cookieName, cookiePath string) *SignedFlash {
-	h := hmac.New(sha256.New, sessionKey)
-	_, _ = h.Write([]byte(signedFlashDerivationLabel))
-
 	return &SignedFlash{
-		key:           h.Sum(nil),
+		key:           DeriveSigningKey(sessionKey, signedFlashDerivationLabel),
 		secureCookies: secureCookies,
 		cookieName:    cookieName,
 		cookiePath:    cookiePath,
 	}
+}
+
+// DeriveSigningKey returns an HMAC-SHA256 subkey of sessionKey for the purpose
+// named by label, so a MAC minted for one cookie never verifies as another.
+func DeriveSigningKey(sessionKey []byte, label string) []byte {
+	h := hmac.New(sha256.New, sessionKey)
+	// hash.Hash.Write never returns an error.
+	_, _ = h.Write([]byte(label))
+
+	return h.Sum(nil)
 }
 
 // SetNotice stashes a success banner for the next GET on the cookie's path.
