@@ -55,6 +55,46 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   await expect(page).toHaveURL(/\/client\/?$/);
 });
 
+// A name the server rejects as invalid (here a bidi override) keeps the modal
+// open with the invalid-name message, not the "enter a name" one.
+test('claim modal shows the invalid-name message for a rejected name', async ({ page }) => {
+  await page.goto('/client/');
+
+  await page.getByRole('button', { name: 'Set your name' }).click();
+  const modal = page.locator('[role="dialog"]');
+  await expect(modal).toBeVisible();
+
+  await modal.locator('input#claim-name-modal').fill('‮ecilA');
+  await modal.getByRole('button', { name: 'Save' }).click();
+
+  await expect(modal.getByText('That name is too long or has characters that are not allowed.')).toBeVisible();
+  await expect(modal).toBeVisible();
+});
+
+// A rate-limited rename (429) keeps the modal open with the save-error message.
+test('claim modal shows the save-error message when the rename is rate limited', async ({ page }) => {
+  await page.route('**/api/players/me', (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    return route.fulfill({
+      status: 429,
+      headers: { 'Retry-After': '30' },
+      contentType: 'text/plain',
+      body: 'too many requests\n',
+    });
+  });
+  await page.goto('/client/');
+
+  await page.getByRole('button', { name: 'Set your name' }).click();
+  const modal = page.locator('[role="dialog"]');
+  await expect(modal).toBeVisible();
+
+  await modal.locator('input#claim-name-modal').fill('Rate-Limited');
+  await modal.getByRole('button', { name: 'Save' }).click();
+
+  await expect(modal.getByText("Couldn't save your name. Try again later.")).toBeVisible();
+  await expect(modal).toBeVisible();
+});
+
 // Tests 3 and 4 seed a quiz as the shared admin via the JSON importer,
 // then play it anonymously after clearing the admin cookie. The other
 // claim tests in this file stay fully anonymous (no admin storageState).
