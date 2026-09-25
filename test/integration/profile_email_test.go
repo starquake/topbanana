@@ -16,7 +16,7 @@ import (
 
 // TestProfileEmail_HappyPathSwapsAndStaysSignedIn covers the full
 // in-session email-change loop (#497): the signed-in visitor types a
-// new address, POST /profile/email flashes a confirmation, GET
+// new address, POST /profile/email flashes a confirmation, confirming
 // /verify-email with the resulting token swaps players.email and
 // re-stamps email_verified_at, and the visitor's existing cookie
 // keeps working because the consumer refreshed it with the new
@@ -42,7 +42,7 @@ func TestProfileEmail_HappyPathSwapsAndStaysSignedIn(t *testing.T) {
 	}
 
 	// Pull the freshly minted token straight out of the DB so we can
-	// hit GET /verify-email exactly the way the user's mail client
+	// confirm the /verify-email link exactly the way the user
 	// would. The raw token is not recoverable from the hash-only row
 	// in production, but a test that drives the store directly can
 	// generate its own pair - we instead read the row order and look
@@ -68,7 +68,7 @@ func TestProfileEmail_HappyPathSwapsAndStaysSignedIn(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	resp := getVerifyEmailWithClient(ctx, t, srv.BaseURL, raw, client)
+	resp := confirmVerifyLinkWithClient(ctx, t, srv.BaseURL, raw, client)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("verify-email status = %d, want %d", got, want)
@@ -212,7 +212,7 @@ func TestProfileEmail_RegisterFlowStillVerifies(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	resp := getVerifyEmail(ctx, t, srv.BaseURL, raw)
+	resp := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -266,7 +266,7 @@ func TestProfileEmail_OldSessionInvalidatedAfterSwap(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	resp := getVerifyEmailWithClient(ctx, t, srv.BaseURL, raw, primary)
+	resp := confirmVerifyLinkWithClient(ctx, t, srv.BaseURL, raw, primary)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("verify-email status = %d, want %d", got, want)
@@ -470,26 +470,4 @@ func freshClientSharingSession(t *testing.T, src *http.Client, baseURL string) *
 			return http.ErrUseLastResponse
 		},
 	}
-}
-
-// getVerifyEmailWithClient is the cookied variant of
-// getVerifyEmail in verify_email_test.go. The email-change flow has
-// to drive the consume side from the SAME client that initiated the
-// change so the session-refresh assertion is meaningful.
-func getVerifyEmailWithClient(
-	ctx context.Context, t *testing.T, baseURL, raw string, client *http.Client,
-) *http.Response {
-	t.Helper()
-
-	target := baseURL + "/verify-email?" + url.Values{"token": {raw}}.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("client.Do err = %v, want nil", err)
-	}
-
-	return resp
 }

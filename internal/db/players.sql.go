@@ -359,7 +359,7 @@ type CreateEmailVerifyTokenParams struct {
 
 // Stores the sha256 hash of a freshly minted verify-email token. The raw
 // token only exists on the way out the door in the email; a DB leak should
-// not be replayable against GET /verify-email.
+// not be replayable against POST /verify-email.
 //
 // pending_email is NULL for the register-time path and the resend variant;
 // the in-session email-change path (#497) sets it to the new address the

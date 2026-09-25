@@ -20,7 +20,7 @@ import (
 )
 
 // TestVerifyEmail_RoundtripHappyPath covers the end-to-end happy path:
-// generate + persist a token via the store, hit GET /verify-email with
+// generate + persist a token via the store, confirm /verify-email with
 // the raw token, observe the 200 + flashes-no-banner response, and
 // confirm the player's email_verified_at column got stamped.
 //
@@ -53,7 +53,7 @@ func TestVerifyEmail_RoundtripHappyPath(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	resp := getVerifyEmail(ctx, t, srv.BaseURL, raw)
+	resp := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -65,6 +65,58 @@ func TestVerifyEmail_RoundtripHappyPath(t *testing.T) {
 	}
 	if got := refreshed.EmailVerifiedAt; got == nil {
 		t.Error("EmailVerifiedAt = nil after verify, want stamped")
+	}
+}
+
+// TestVerifyEmail_ScannerGetDoesNotVerify pins #1328: following the link, as a
+// mail scanner does, renders the confirm page and leaves the address
+// unverified; only the confirm POST verifies it.
+func TestVerifyEmail_ScannerGetDoesNotVerify(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // test cleanup.
+
+	player, err := stores.Players.CreatePlayer(
+		ctx, "verify-scan", "verify-scan@example.test", "h", "player",
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	raw, hash, err := auth.GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(time.Hour), ""); cerr != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+	}
+
+	scan := httpGet(ctx, t, authClient(t), srv.BaseURL+"/verify-email?"+url.Values{"token": {raw}}.Encode())
+	defer closeBody(t, scan.Body)
+	if got, want := scan.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("scanner GET status = %d, want %d", got, want)
+	}
+	scanned, err := stores.Players.GetPlayerByID(ctx, player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if scanned.EmailVerifiedAt != nil {
+		t.Fatal("EmailVerifiedAt stamped by a GET, want nil until the confirm POST")
+	}
+
+	confirm := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
+	defer closeBody(t, confirm.Body)
+	if got, want := confirm.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("confirm status = %d, want %d", got, want)
+	}
+	confirmed, err := stores.Players.GetPlayerByID(ctx, player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if confirmed.EmailVerifiedAt == nil {
+		t.Error("EmailVerifiedAt = nil after the confirm POST, want stamped")
 	}
 }
 
@@ -94,13 +146,13 @@ func TestVerifyEmail_DuplicateClickReadsAsAlreadyUsed(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	first := getVerifyEmail(ctx, t, srv.BaseURL, raw)
+	first := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
 	first.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := first.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("first status = %d, want %d", got, want)
 	}
 
-	second := getVerifyEmail(ctx, t, srv.BaseURL, raw)
+	second := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
 	defer second.Body.Close() //nolint:errcheck // cleanup.
 	body, err := io.ReadAll(second.Body)
 	if err != nil {
@@ -123,7 +175,7 @@ func TestVerifyEmail_InvalidToken(t *testing.T) {
 
 	ctx, srv := startServer(t, nil)
 
-	resp := getVerifyEmail(ctx, t, srv.BaseURL, "not-a-real-token")
+	resp := confirmVerifyLink(ctx, t, srv.BaseURL, "not-a-real-token")
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusGone; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -161,7 +213,7 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
-	resp := getVerifyEmail(ctx, t, srv.BaseURL, raw)
+	resp := confirmVerifyLink(ctx, t, srv.BaseURL, raw)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := resp.StatusCode, http.StatusGone; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -178,7 +230,7 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 
 // TestVerifyEmail_MismatchedSessionClears pins the #472 shared-device
 // fix: when the session cookie belongs to a different player than the
-// token owner, GET /verify-email must clear the session and render a
+// token owner, POST /verify-email must clear the session and render a
 // neutral landing target rather than send the operator to someone
 // else's role landing.
 func TestVerifyEmail_MismatchedSessionClears(t *testing.T) {
@@ -213,15 +265,7 @@ func TestVerifyEmail_MismatchedSessionClears(t *testing.T) {
 	}
 
 	// Hit /verify-email with userA's session cookie attached.
-	target := srv.BaseURL + "/verify-email?" + url.Values{"token": {raw}}.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	resp, err := clientA.Do(req)
-	if err != nil {
-		t.Fatalf("client.Do err = %v, want nil", err)
-	}
+	resp := confirmVerifyLinkWithClient(ctx, t, srv.BaseURL, raw, clientA)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -292,10 +336,10 @@ func openStores(t *testing.T, dbURI string) (*sql.DB, *store.Stores) {
 	return dbConn, store.New(dbConn, slog.Default())
 }
 
-// getVerifyEmail issues a single GET /verify-email?token=<raw> with a
+// confirmVerifyLink opens the verify link and submits its confirm form with a
 // fresh client (no cookies, no redirect following) so test cases stay
 // independent.
-func getVerifyEmail(ctx context.Context, t *testing.T, baseURL, raw string) *http.Response {
+func confirmVerifyLink(ctx context.Context, t *testing.T, baseURL, raw string) *http.Response {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -307,11 +351,27 @@ func getVerifyEmail(ctx context.Context, t *testing.T, baseURL, raw string) *htt
 			return http.ErrUseLastResponse
 		},
 	}
-	target := baseURL + "/verify-email?" + url.Values{"token": {raw}}.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+
+	return confirmVerifyLinkWithClient(ctx, t, baseURL, raw, client)
+}
+
+// confirmVerifyLinkWithClient takes the two steps a person takes from the
+// verify email: GET the link, then POST its confirm form. Only the POST
+// consumes the token (#1328).
+func confirmVerifyLinkWithClient(
+	ctx context.Context, t *testing.T, baseURL, raw string, client *http.Client,
+) *http.Response {
+	t.Helper()
+
+	csrfToken := fetchCSRFToken(ctx, t, client, baseURL+"/verify-email?"+url.Values{"token": {raw}}.Encode())
+	form := url.Values{"csrf_token": {csrfToken}, "token": {raw}}
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/verify-email", strings.NewReader(form.Encode()),
+	)
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)
 	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("client.Do err = %v, want nil", err)

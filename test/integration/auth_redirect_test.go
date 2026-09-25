@@ -302,7 +302,7 @@ func registerVerifyAndMint(
 }
 
 // registerVerifyViaLinkAndMint is registerVerifyAndMint's
-// real-verify-flow variant: it proves the email through GET /verify-email
+// real-verify-flow variant: it proves the email through the /verify-email link
 // (verifyPlayerEmailViaLink) instead of a direct DB stamp, so the
 // verify-time ADMIN_EMAILS promotion (#785) actually fires. Use it when
 // the account must end up an admin via the allowlist rather than the
@@ -318,7 +318,7 @@ func registerVerifyViaLinkAndMint(
 }
 
 // verifyPlayerEmailViaLink proves the named player's email through the
-// real GET /verify-email endpoint rather than a direct DB stamp. Mints a
+// real /verify-email confirm flow rather than a direct DB stamp. Mints a
 // verify token, consumes it over HTTP, and asserts the 200. Use this
 // (not verifyPlayerEmail) when the test depends on the verify-time side
 // effects the endpoint applies - notably the ADMIN_EMAILS promotion
@@ -343,7 +343,7 @@ func verifyPlayerEmailViaLink(
 		t.Fatalf("verifyPlayerEmailViaLink CreateVerifyToken err = %v, want nil", err)
 	}
 
-	resp := httpGet(ctx, t, authClient(t), baseURL+"/verify-email?"+url.Values{"token": {raw}}.Encode())
+	resp := confirmVerifyLink(ctx, t, baseURL, raw)
 	defer closeBody(t, resp.Body)
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("verifyPlayerEmailViaLink verify status = %d, want %d", got, want)

@@ -168,6 +168,9 @@
   "resetPassword.linkTitle": "Reset link",
 
   "verifyEmail.title": "Verify email",
+  "verifyEmail.confirmHeading": "Confirm your email",
+  "verifyEmail.confirmMessage": "Select the button below to confirm this email address.",
+  "verifyEmail.confirmButton": "Confirm email",
   "verifyEmail.missingHeading": "Link is missing",
   "verifyEmail.missingMessage": "This verification link is missing its token. Use the link from the email exactly as it was sent.",
   "verifyEmail.verifiedHeading": "Email verified",

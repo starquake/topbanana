@@ -70,22 +70,47 @@ type RoleSetter interface {
 // verifyEmailPageData is the payload the verify-email page renders.
 // ShowContinue gates the "Continue" CTA: the success and already-used
 // branches show it (pointing at the role landing), the invalid-token
-// branch does not.
+// branch does not. A non-empty ConfirmToken renders the confirm form
+// that posts the token back.
 type verifyEmailPageData struct {
 	Title        string
 	Heading      string
 	Message      string
 	ShowContinue bool
 	ContinueHref string
+	ConfirmToken string
 }
 
-// HandleVerifyEmail returns the handler for GET /verify-email?token=...
-// It atomically consumes the token, stamps email_verified_at on the
-// owning player, and renders a short success / already-verified /
-// invalid page. The handler does NOT require an authenticated session:
-// the link arrives in an inbox the user already controls, and email
-// clients prefetching the link cannot keep the user from completing
-// verification in a fresh browser window.
+// HandleVerifyEmailConfirm returns the handler for GET /verify-email?token=...
+// It renders a page with a button that posts the token to POST /verify-email
+// and consumes nothing itself, so a mail scanner that follows the link cannot
+// verify the address on the recipient's behalf (#1328).
+func HandleVerifyEmailConfirm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc := locale.Resolve(r)
+		raw := r.URL.Query().Get("token")
+		if raw == "" {
+			renderMissingVerifyToken(w, r, renderer)
+
+			return
+		}
+		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
+			Title:        locale.Translate(loc, "verifyEmail.title"),
+			Heading:      locale.Translate(loc, "verifyEmail.confirmHeading"),
+			Message:      locale.Translate(loc, "verifyEmail.confirmMessage"),
+			ConfirmToken: raw,
+		})
+	})
+}
+
+// HandleVerifyEmail returns the handler for POST /verify-email, submitted
+// from the confirm page. It atomically consumes the token, stamps
+// email_verified_at on the owning player, and renders a short success /
+// already-verified / invalid page. The handler does NOT require an
+// authenticated session: the link arrives in an inbox the user already
+// controls, and the user may complete verification in a fresh browser window.
 //
 // deps.AdminEmails is the ADMIN_EMAILS allowlist; on a fresh verify the
 // handler stamps the admin role when the now-proven address matches an
@@ -102,7 +127,8 @@ type verifyEmailPageData struct {
 // confirmation either way. The store-level
 // session_version bump on an email swap invalidates every other live
 // cookie for the account; the current request's cookie is refreshed
-// inline so the visitor stays signed in on this tab.
+// inline so the visitor stays signed in on this tab, but only when it was
+// still live before the consume (#1329).
 func HandleVerifyEmail(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
@@ -111,16 +137,18 @@ func HandleVerifyEmail(
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw := r.URL.Query().Get("token")
+		raw := r.PostFormValue("token")
 		if raw == "" {
-			loc := locale.Resolve(r)
-			renderer.Render(w, r, http.StatusBadRequest, verifyEmailPageData{
-				Title:   locale.Translate(loc, "verifyEmail.title"),
-				Heading: locale.Translate(loc, "verifyEmail.missingHeading"),
-				Message: locale.Translate(loc, "verifyEmail.missingMessage"),
-			})
+			renderMissingVerifyToken(w, r, renderer)
 
 			return
+		}
+
+		// Read before the consume: an email swap bumps session_version, so
+		// afterwards a stale cookie and a live one look alike.
+		live, liveErr := loadSessionPlayer(r, deps.Players, deps.Sessions)
+		if liveErr != nil {
+			live = nil
 		}
 
 		ownerID, err := deps.Tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
@@ -135,10 +163,22 @@ func HandleVerifyEmail(
 			logger:   logger,
 			players:  deps.Players,
 			sessions: deps.Sessions,
+			live:     live,
 			landing:  landing,
 			ownerID:  ownerID,
 			err:      err,
 		})
+	})
+}
+
+// renderMissingVerifyToken renders the 400 page for a verify request that
+// carries no token.
+func renderMissingVerifyToken(w http.ResponseWriter, r *http.Request, renderer *render.Renderer) {
+	loc := locale.Resolve(r)
+	renderer.Render(w, r, http.StatusBadRequest, verifyEmailPageData{
+		Title:   locale.Translate(loc, "verifyEmail.title"),
+		Heading: locale.Translate(loc, "verifyEmail.missingHeading"),
+		Message: locale.Translate(loc, "verifyEmail.missingMessage"),
 	})
 }
 
@@ -330,9 +370,12 @@ type verifyOutcome struct {
 	logger   *slog.Logger
 	players  PlayerStore
 	sessions *session.Manager
-	landing  string
-	ownerID  int64
-	err      error
+	// live is the session player as it stood before the consume; nil when the
+	// request carried no live session.
+	live    *Player
+	landing string
+	ownerID int64
+	err     error
 }
 
 // renderVerifyOutcome maps the consume result onto the rendered page.
@@ -351,7 +394,7 @@ func renderVerifyOutcome(
 	loc := locale.Resolve(r)
 	switch {
 	case out.err == nil:
-		refreshSessionAfterVerify(w, r, out.logger, out.players, out.sessions, out.ownerID)
+		refreshSessionAfterVerify(w, r, out)
 		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
 			Title:        locale.Translate(loc, "verifyEmail.verifiedHeading"),
 			Heading:      locale.Translate(loc, "verifyEmail.verifiedHeading"),
@@ -403,42 +446,33 @@ func renderVerifyOutcome(
 }
 
 // refreshSessionAfterVerify rewrites the session cookie for the
-// current request when the session belongs to the player whose token
-// just consumed. Only meaningful for the email-change variant (which
-// bumps session_version inside the consume transaction); for the
-// register-time variant the version is unchanged and the rewrite is
-// a no-op. The mismatch / signed-out cases are already handled by
-// postVerifyLanding, which clears or ignores the cookie before this
-// helper runs.
+// current request when the session was live before the consume and
+// belongs to the player whose token just consumed. Only meaningful for
+// the email-change variant (which bumps session_version inside the
+// consume transaction); for the register-time variant the version is
+// unchanged and the rewrite is a no-op. A cookie that was already stale
+// (say, revoked by a password reset) is never re-minted, so a verify
+// click cannot revive it (#1329). The mismatch / signed-out cases are
+// already handled by postVerifyLanding, which clears or ignores the
+// cookie before this helper runs.
 //
 // A lookup failure on the post-consume read leaves the stale cookie
 // in place; the user will be bounced to /login on their next request
 // because session_version no longer matches. Logged at WARN so an
 // operator notices repeated occurrences (a hot DB hiccup or, worse,
 // a row that vanished mid-flow).
-func refreshSessionAfterVerify(
-	w http.ResponseWriter,
-	r *http.Request,
-	logger *slog.Logger,
-	players PlayerStore,
-	sessions *session.Manager,
-	ownerID int64,
-) {
-	if ownerID == 0 {
+func refreshSessionAfterVerify(w http.ResponseWriter, r *http.Request, out verifyOutcome) {
+	if out.ownerID == 0 || out.live == nil || out.live.ID != out.ownerID {
 		return
 	}
-	id, ok := sessions.PlayerID(r)
-	if !ok || id != ownerID {
-		return
-	}
-	p, err := players.GetPlayerByID(r.Context(), ownerID)
+	p, err := out.players.GetPlayerByID(r.Context(), out.ownerID)
 	if err != nil {
-		logger.WarnContext(r.Context(), "post-verify session refresh: player lookup failed",
-			slog.Int64(logPlayerIDKey, ownerID), slog.Any("err", err))
+		out.logger.WarnContext(r.Context(), "post-verify session refresh: player lookup failed",
+			slog.Int64(logPlayerIDKey, out.ownerID), slog.Any("err", err))
 
 		return
 	}
-	sessions.Set(w, p.ID, p.SessionVersion)
+	out.sessions.Set(w, p.ID, p.SessionVersion)
 }
 
 // postVerifyLanding picks the Continue link target. Prefers the

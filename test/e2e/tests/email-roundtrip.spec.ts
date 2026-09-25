@@ -16,7 +16,7 @@ import { waitForEmailLink } from './mailpit';
 // integration suite (TestResetPassword_HappyPath) and the invite link
 // round-trip lives in invite-roundtrip.spec.ts.
 
-test('verify-email link signs the account in once followed', async ({ page, browserName }) => {
+test('verify-email link signs the account in once confirmed', async ({ page, browserName }) => {
   const displayName = `e2e-verify-rt-${browserName}`;
   const email = `${displayName}@example.test`;
 
@@ -25,8 +25,12 @@ test('verify-email link signs the account in once followed', async ({ page, brow
   await registerForPending(page, displayName);
 
   // Read the verification link mailpit caught and follow it in the browser.
+  // The link opens a confirm page; only the button press verifies, so a mail
+  // scanner that fetches the link cannot.
   const link = await waitForEmailLink(email, '/verify-email?token=');
   await page.goto(link);
+  await expect(page.getByRole('heading', { name: 'Confirm your email' })).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm email' }).click();
   await expect(page.getByRole('heading', { name: 'Email verified' })).toBeVisible();
 
   // The account can now sign in and hold a session (the navbar Log out

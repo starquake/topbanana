@@ -168,6 +168,9 @@
   "resetPassword.linkTitle": "Resetlink",
 
   "verifyEmail.title": "E-mailadres bevestigen",
+  "verifyEmail.confirmHeading": "Bevestig je e-mailadres",
+  "verifyEmail.confirmMessage": "Klik op de knop hieronder om dit e-mailadres te bevestigen.",
+  "verifyEmail.confirmButton": "E-mailadres bevestigen",
   "verifyEmail.missingHeading": "Link ontbreekt",
   "verifyEmail.missingMessage": "Deze verificatielink mist de token. Gebruik de link uit de e-mail precies zoals die is verzonden.",
   "verifyEmail.verifiedHeading": "E-mailadres bevestigd",
