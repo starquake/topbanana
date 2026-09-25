@@ -52,11 +52,14 @@ var ErrArchiveMediaMissing = errors.New("archive references a media file it does
 
 // ErrArchiveInvalidQuiz is returned by [ImportQuizArchive] when an archive's
 // manifest decodes but the quiz it describes is invalid: either structurally
-// (neither or both of questions / rounds, a round with no title or no questions)
+// (neither or both of questions / rounds, a round with no title, no questions at all)
 // or because it fails the same form-level validation the paste / upload import
 // runs (empty title or slug, empty description, an out-of-range time limit, a
 // question with no options). The wrapped error carries the specific problem.
 var ErrArchiveInvalidQuiz = errors.New("archive is not a valid quiz")
+
+// errArchiveNoQuestions is returned when an archive's rounds are all empty.
+var errArchiveNoQuestions = errors.New("at least one question is required")
 
 // MediaImporter is the slice of the media service the archive importer needs:
 // restore an image / audio file from bytes (the pipeline validates and

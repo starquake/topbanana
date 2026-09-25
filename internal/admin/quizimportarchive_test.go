@@ -4,13 +4,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -957,4 +960,98 @@ func buildZip(t *testing.T, files map[string][]byte) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+// TestImportQuizArchive_EmptyRoundRoundTrip pins that a quiz with an unfilled
+// round exports and imports back with the same round/question structure (#1362).
+func TestImportQuizArchive_EmptyRoundRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	exportEnv := newAdminEnv(t)
+	src := roundedQuiz()
+	src.Rounds = []*quiz.Round{src.Rounds[0], {Title: "Not yet filled"}, src.Rounds[1]}
+	src = exportEnv.seedQuiz(t, src)
+
+	var buf bytes.Buffer
+	if err := WriteQuizArchive(
+		t.Context(), &buf, exportEnv.quizzes, newMediaServiceOverTemp(t, exportEnv), src.ID,
+	); err != nil {
+		t.Fatalf("WriteQuizArchive err = %v, want nil", err)
+	}
+
+	env := newAdminEnv(t)
+	created, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, newMediaServiceOverTemp(t, env),
+		openZipReader(t, buf.Bytes()), testAdminID, defaultImportLimits(),
+	)
+	if err != nil {
+		t.Fatalf("ImportQuizArchive err = %v, want nil", err)
+	}
+
+	if got, want := quizShape(t, env, created.ID), quizShape(t, exportEnv, src.ID); !slices.Equal(got, want) {
+		t.Errorf("imported structure = %q, want %q", got, want)
+	}
+}
+
+// TestImportQuizArchive_AllRoundsEmptyRejected pins that an archive whose
+// rounds carry no questions at all is still rejected: there is nothing to play.
+func TestImportQuizArchive_AllRoundsEmptyRejected(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	archiveBytes := buildZip(t, map[string][]byte{"quiz.json": []byte(`{
+		"formatVersion": 1, "title": "T", "description": "d",
+		"rounds": [{"title": "One"}, {"title": "Two", "questions": []}]
+	}`)})
+
+	_, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, newMediaServiceOverTemp(t, env),
+		openZipReader(t, archiveBytes), testAdminID, defaultImportLimits(),
+	)
+	if got, want := err, ErrArchiveInvalidQuiz; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+	if got, want := err.Error(), "at least one question is required"; !strings.Contains(got, want) {
+		t.Errorf("err.Error() = %q, should contain %q", got, want)
+	}
+	assertNoQuiz(t, env)
+}
+
+// quizShape flattens a persisted quiz into one line per round: the round's
+// title, summary, boundary override, and its questions' text with options in
+// position order.
+func quizShape(t *testing.T, env *adminEnv, quizID int64) []string {
+	t.Helper()
+
+	qz, err := env.quizzes.GetQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+	rounds, err := env.quizzes.ListRoundsByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+
+	shape := make([]string, 0, len(rounds))
+	for _, rnd := range rounds {
+		boundary := "inherit"
+		if rnd.BoundaryDurationSeconds != nil {
+			boundary = strconv.Itoa(*rnd.BoundaryDurationSeconds)
+		}
+		var line strings.Builder
+		fmt.Fprintf(&line, "%s|%s|%s:", rnd.Title, rnd.Summary, boundary)
+		for _, q := range qz.Questions {
+			if q.RoundID != rnd.ID {
+				continue
+			}
+			fmt.Fprintf(&line, " %s[", q.Text)
+			for _, o := range q.Options {
+				fmt.Fprintf(&line, "%s=%t,", o.Text, o.Correct)
+			}
+			line.WriteString("]")
+		}
+		shape = append(shape, line.String())
+	}
+
+	return shape
 }
