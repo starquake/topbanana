@@ -3,7 +3,10 @@ package admin
 import (
 	"context"
 	"fmt"
+	"strings"
 	"unicode/utf8"
+
+	"github.com/gosimple/slug"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -23,6 +26,24 @@ const (
 // tooLong reports whether s is longer than limit runes.
 func tooLong(s string, limit int) bool {
 	return utf8.RuneCountInString(s) > limit
+}
+
+// titleSlug derives a quiz slug from title, cut at a word boundary to
+// maxSlugLength because transliteration can make it far longer than the title.
+func titleSlug(title string) string {
+	s := slug.Make(title)
+	if len(s) <= maxSlugLength {
+		return s
+	}
+	// slug.Make output is ASCII, so byte offsets are character offsets.
+	cut := s[:maxSlugLength+1]
+	if i := strings.LastIndexByte(cut, '-'); i > 0 {
+		cut = cut[:i]
+	} else {
+		cut = cut[:maxSlugLength]
+	}
+
+	return strings.TrimRight(cut, "-")
 }
 
 // lengthProblem is the problem message for a field over its length cap.
@@ -80,7 +101,9 @@ func (f *quizForm) validMetadata() map[string]string {
 	problems := make(map[string]string)
 	q := f.quiz
 	textField{"title", "Title", q.Title, "Title is required", maxTitleLength}.check(problems)
-	textField{"slug", "Slug", q.Slug, "Slug is required", maxSlugLength}.check(problems)
+	if q.Slug == "" {
+		problems["slug"] = "Slug is required"
+	}
 	textField{
 		"description", "Description", q.Description, "Description is required", maxDescriptionLength,
 	}.check(problems)

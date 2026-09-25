@@ -2,6 +2,10 @@ package admin_test
 
 import (
 	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -341,5 +345,45 @@ func TestStripCodeFences(t *testing.T) {
 				t.Errorf("StripCodeFences(%q) = %q, want %q", tt.in, got, want)
 			}
 		})
+	}
+}
+
+// TestHandleQuizImportSave_LongTransliteratedTitle pins that the JSON import
+// truncates a title-derived slug that transliteration pushed past the slug cap.
+func TestHandleQuizImportSave_LongTransliteratedTitle(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	payload, err := json.Marshal(admin.QuizImportPayload{
+		Title:       strings.Repeat("\u53cc", 45),
+		Description: "d",
+		Questions: []admin.QuizImportQuestionPayload{
+			{Text: "Q1", Options: []admin.QuizImportOptionPayload{{Text: "a", Correct: true}, {Text: "b"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal err = %v, want nil", err)
+	}
+	form := url.Values{"mode": {"solo"}, "json": {string(payload)}}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/admin/quizzes/import", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	admin.HandleQuizImportSave(slog.New(slog.DiscardHandler), nil, env.quizzes).ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%s)", got, want, rr.Body.String())
+	}
+	quizzes, err := env.quizzes.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListQuizzes err = %v, want nil", err)
+	}
+	if got, want := len(quizzes), 1; got != want {
+		t.Fatalf("len(quizzes) = %d, want %d", got, want)
+	}
+	if got := quizzes[0].Slug; got == "" || len(got) > admin.MaxSlugLength {
+		t.Errorf("stored slug = %q (len %d), want non-empty and <= %d", got, len(got), admin.MaxSlugLength)
 	}
 }
