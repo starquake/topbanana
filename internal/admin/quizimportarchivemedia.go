@@ -252,7 +252,8 @@ func fillQuizFromArchiveQuestions(qz *quiz.Quiz, questions []quizArchiveQuestion
 // fillQuizFromArchiveRounds maps authored manifest rounds onto qz.Rounds and
 // mirrors every question onto qz.Questions with a quiz-wide 1..N position, the
 // same shape fillQuizFromRounds builds for the paste import. It collects the
-// media plan as it goes.
+// media plan as it goes. Unlike the paste import, a round may be empty (the
+// exporter writes unfilled rounds too), but the quiz as a whole may not.
 func fillQuizFromArchiveRounds(qz *quiz.Quiz, rounds []quizArchiveRound) ([]questionMediaPlan, error) {
 	qz.Rounds = make([]*quiz.Round, 0, len(rounds))
 	var plan []questionMediaPlan
@@ -261,10 +262,6 @@ func fillQuizFromArchiveRounds(qz *quiz.Quiz, rounds []quizArchiveRound) ([]ques
 		if rIn.Title == "" {
 			return nil, fmt.Errorf("round %d: %w", i+1, errImportRoundTitleRequired)
 		}
-		if len(rIn.Questions) == 0 {
-			return nil, fmt.Errorf("round %q: %w", rIn.Title, errImportRoundNoQuestions)
-		}
-
 		round := &quiz.Round{
 			Position:                i,
 			Title:                   rIn.Title,
@@ -282,6 +279,9 @@ func fillQuizFromArchiveRounds(qz *quiz.Quiz, rounds []quizArchiveRound) ([]ques
 			}
 		}
 		qz.Rounds = append(qz.Rounds, round)
+	}
+	if pos == 0 {
+		return nil, errArchiveNoQuestions
 	}
 
 	return plan, nil
