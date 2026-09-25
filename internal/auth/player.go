@@ -123,6 +123,15 @@ func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role != RolePlayer
 }
 
+// isHeldForApproval reports whether LOGIN_APPROVAL_REQUIRED keeps this account
+// signed out: it carries credentials, is not an admin, and is not approved.
+// An anonymous guest row carries no credentials, so it is never held.
+func (p *Player) isHeldForApproval() bool {
+	credentialled := p.PasswordHash != "" || p.Email != ""
+
+	return credentialled && !p.IsAdmin() && !p.IsApproved()
+}
+
 // AnonymousGameMigrator carries an anonymous visitor's game data onto
 // the account they just signed into. Implemented by store.GameStore;
 // defined here so the auth package can call into it without importing

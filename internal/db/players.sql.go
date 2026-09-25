@@ -89,7 +89,8 @@ SET display_name = ?1,
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
     END,
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -128,6 +129,9 @@ type ClaimPlayerParams struct {
 // path: the row now represents a player who picked their own name, so it
 // must look identical to a CreatePlayerWithCredentials row to downstream
 // callers.
+//
+// session_version is bumped so the anonymous cookie that pointed at this row
+// stops resolving once it carries credentials (#1327).
 func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayer,
 		arg.DisplayName,
@@ -183,7 +187,8 @@ SET email = ?1,
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
-    END
+    END,
+    session_version = session_version + 1
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -215,6 +220,9 @@ type ClaimPlayerForOAuthParams struct {
 // and matches no rows; the wrapper maps that to ErrPlayerNotFound
 // so the handler can fall through to the create path with the same
 // petname-collision retry it uses for cookieless visitors.
+//
+// session_version is bumped so the anonymous cookie that pointed at this row
+// stops resolving once it carries an email (#1327).
 func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAuthParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayerForOAuth, arg.Email, arg.ID)
 	var i Player

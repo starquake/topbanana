@@ -109,6 +109,9 @@ RETURNING *;
 -- path: the row now represents a player who picked their own name, so it
 -- must look identical to a CreatePlayerWithCredentials row to downstream
 -- callers.
+--
+-- session_version is bumped so the anonymous cookie that pointed at this row
+-- stops resolving once it carries credentials (#1327).
 UPDATE players
 SET display_name = sqlc.arg('display_name'),
     password_hash = sqlc.arg('password_hash'),
@@ -143,7 +146,8 @@ SET display_name = sqlc.arg('display_name'),
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
     END,
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -276,6 +280,9 @@ VALUES (?, ?, ?);
 -- and matches no rows; the wrapper maps that to ErrPlayerNotFound
 -- so the handler can fall through to the create path with the same
 -- petname-collision retry it uses for cookieless visitors.
+--
+-- session_version is bumped so the anonymous cookie that pointed at this row
+-- stops resolving once it carries an email (#1327).
 UPDATE players
 SET email = sqlc.arg('email'),
     email_verified_at = CURRENT_TIMESTAMP,
@@ -305,7 +312,8 @@ SET email = sqlc.arg('email'),
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
-    END
+    END,
+    session_version = session_version + 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
   AND players.email IS NULL

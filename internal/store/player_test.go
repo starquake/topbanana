@@ -1739,6 +1739,58 @@ func TestPlayerStore_ListAdminEmails(t *testing.T) {
 	}
 }
 
+// TestPlayerStore_ClaimPlayer_BumpsSessionVersion pins #1327: the anonymous
+// cookie that pointed at the row must stop resolving once the row is claimed.
+func TestPlayerStore_ClaimPlayer_BumpsSessionVersion(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim-bump")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayer(t.Context(), anon.ID, "claimer", "claimer@example.test", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("ClaimPlayer err = %v, want nil", err)
+	}
+	if got, want := claimed.SessionVersion, anon.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_ClaimPlayerForOAuth_BumpsVersionAndLinks pins #1327 and
+// #1330: the OAuth claim invalidates the anonymous cookie and links the
+// identity in the same call.
+func TestPlayerStore_ClaimPlayerForOAuth_BumpsVersionAndLinks(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-oauth-bump")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "bump@example.test", "google", "sub-bump")
+	if err != nil {
+		t.Fatalf("ClaimPlayerForOAuth err = %v, want nil", err)
+	}
+	if got, want := claimed.SessionVersion, anon.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+	linked, err := ps.GetPlayerByProviderSubject(t.Context(), "google", "sub-bump")
+	if err != nil {
+		t.Fatalf("GetPlayerByProviderSubject err = %v, want nil", err)
+	}
+	if got, want := linked.ID, anon.ID; got != want {
+		t.Errorf("linked.ID = %d, want %d", got, want)
+	}
+}
+
 // TestPlayerStore_ClaimPlayerForOAuth_LinkConflictRollsBack pins that a claim
 // whose identity is already linked elsewhere leaves the anonymous row untouched.
 func TestPlayerStore_ClaimPlayerForOAuth_LinkConflictRollsBack(t *testing.T) {

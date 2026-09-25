@@ -38,7 +38,8 @@ func addRoutes(
 	cfg *config.Config,
 	mail Mail,
 ) {
-	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
+	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies()).
+		WithLoginApprovalRequired(cfg.LoginApprovalRequired)
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
 	emailDeps := adminEmailDeps{
