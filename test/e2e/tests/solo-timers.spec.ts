@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 import { test, expect, Route, Request } from './fixtures';
 import {
   seedQuiz,
@@ -100,21 +102,55 @@ test('double-clicking Start creates one game and fetches one question', async ({
   expect(nextCount).toBe(1);
 });
 
-// Once the question-show sting finishes, no end/stop listener stays on its shared Howl (#1344).
-test('the question-show sting leaves no stale end/stop listeners', async ({ page, browserName }) => {
-  test.setTimeout(45_000);
-
-  const quizTitle = `E2E 1344 sting ${browserName} ${Date.now()}`;
-  await seedQuiz(page, quizTitle);
-  await page.context().clearCookies();
-  await startQuizAsAnonymous(page, quizTitle);
-  await expect(page.getByText(QUIZ_QUESTIONS[0].text)).toBeVisible({ timeout: 10_000 });
-
-  await expect.poll(() => page.evaluate(() => {
-    type HowlLike = { _src: string | string[]; _onend: unknown[]; _onstop: unknown[]; playing: () => boolean };
+// stingListenerCount reports the end + stop listeners on the shared
+// question-show Howl, or -1 before the Howl exists.
+function stingListenerCount(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    type HowlLike = { _src: string | string[]; _onend: unknown[]; _onstop: unknown[] };
     const howler = (window as unknown as { Howler?: { _howls: HowlLike[] } }).Howler;
     const sting = howler?._howls.find((h) => String(h._src).includes('question-show'));
-    if (!sting || sting.playing()) return -1;
-    return sting._onend.length + sting._onstop.length;
-  }), { timeout: 10_000 }).toBe(0);
+    return sting ? sting._onend.length + sting._onstop.length : -1;
+  });
+}
+
+// emitStingEvent fires end or stop for the sting's played sound the way Howler
+// does; stop() itself is only queued on a Howl that is unloaded or play-locked.
+async function emitStingEvent(page: Page, event: 'end' | 'stop'): Promise<void> {
+  await page.evaluate((name) => {
+    type HowlLike = {
+      _src: string | string[];
+      _onstop: { id?: number }[];
+      _sounds: { _id: number }[];
+      _emit: (event: string, id?: number) => unknown;
+    };
+    const howler = (window as unknown as { Howler: { _howls: HowlLike[] } }).Howler;
+    const sting = howler._howls.find((h) => String(h._src).includes('question-show'));
+    if (!sting) throw new Error('question-show Howl not found');
+    const id = sting._onstop.find((l) => l.id)?.id ?? sting._sounds.at(-1)?._id;
+    sting._emit(name, id);
+  }, event);
+}
+
+// Once the question-show sting ends or is stopped, no end/stop listener stays
+// on its shared Howl (#1344). The sting file is blocked so it never plays
+// through on its own and the spec drives each event itself.
+test.describe('question-show sting listeners', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  for (const event of ['stop', 'end'] as const) {
+    test(`a sting ${event} leaves no stale end/stop listeners`, async ({ page, browserName }) => {
+      test.setTimeout(45_000);
+
+      const quizTitle = `E2E 1344 sting ${event} ${browserName} ${Date.now()}`;
+      await seedQuiz(page, quizTitle);
+      await page.context().clearCookies();
+      await page.route('**/static/audio/sfx/question-show.mp3', (route: Route) => route.abort());
+      await startQuizAsAnonymous(page, quizTitle);
+      await expect(page.getByText(QUIZ_QUESTIONS[0].text)).toBeVisible({ timeout: 10_000 });
+
+      await expect.poll(() => stingListenerCount(page), { timeout: 10_000 }).toBe(2);
+      await emitStingEvent(page, event);
+      await expect.poll(() => stingListenerCount(page), { timeout: 5_000 }).toBe(0);
+    });
+  }
 });
