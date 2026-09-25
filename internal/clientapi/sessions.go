@@ -53,6 +53,12 @@ func HandleSessionCreate(service *livesession.Service) http.Handler {
 
 			return
 		}
+		// Same verified-email gate as POST /host; a JSON caller gets a 403, not the interstitial redirect.
+		if player.EmailVerificationPending() {
+			http.Error(w, "email not verified", http.StatusForbidden)
+
+			return
+		}
 
 		req, err := handlers.DecodeJSON[createRequest](w, r)
 		if err != nil {
