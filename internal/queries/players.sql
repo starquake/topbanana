@@ -488,6 +488,13 @@ RETURNING player_id, pending_email;
 DELETE FROM email_verify_tokens
 WHERE expires_at <= sqlc.arg('now');
 
+-- name: DeleteLiveEmailVerifyTokensForPlayer :exec
+-- Revokes every unconsumed verify link for the player after a credential
+-- change, so a link mailed before the change cannot be used after it (#1329).
+DELETE FROM email_verify_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL;
+
 -- name: CreatePasswordResetToken :exec
 -- Stores the sha256 hash of a freshly minted reset-password token. The
 -- raw token only exists on the way out the door in the email; a DB leak
@@ -525,6 +532,13 @@ RETURNING player_id;
 -- timezone.
 DELETE FROM password_reset_tokens
 WHERE expires_at <= sqlc.arg('now');
+
+-- name: DeleteLivePasswordResetTokensForPlayer :exec
+-- Revokes every unconsumed reset link for the player after a credential
+-- change, so a link mailed before the change cannot be used after it (#1329).
+DELETE FROM password_reset_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL;
 
 -- name: SetPlayerRole :execrows
 -- Sets the role on the row identified by id, from the caller (#538), so one

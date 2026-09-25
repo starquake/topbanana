@@ -2018,3 +2018,137 @@ func TestPlayerStore_MarkPlayerEmailVerifiedByOAuth(t *testing.T) {
 		t.Errorf("missing row err = %v, want %v", got, want)
 	}
 }
+
+// seedLiveCredentialTokens mints one live verify token and one live reset
+// token for the player and returns their hashes.
+func seedLiveCredentialTokens(t *testing.T, ps *PlayerStore, playerID int64) (verifyHash, resetHash string) {
+	t.Helper()
+
+	_, verifyHash, err := auth.GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if cerr := ps.CreateVerifyToken(t.Context(), verifyHash, playerID, time.Now().Add(time.Hour), ""); cerr != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+	}
+	_, resetHash, err = auth.GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken err = %v, want nil", err)
+	}
+	if cerr := ps.CreateResetToken(t.Context(), resetHash, playerID, time.Now().Add(time.Hour)); cerr != nil {
+		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
+	}
+
+	return verifyHash, resetHash
+}
+
+// assertCredentialTokensRevoked fails when either token still consumes.
+func assertCredentialTokensRevoked(t *testing.T, ps *PlayerStore, verifyHash, resetHash string) {
+	t.Helper()
+
+	if _, err := ps.ConsumeVerifyToken(t.Context(), verifyHash); !errors.Is(err, auth.ErrVerifyTokenInvalid) {
+		t.Errorf("ConsumeVerifyToken err = %v, want %v", err, auth.ErrVerifyTokenInvalid)
+	}
+	if _, err := ps.ConsumeResetToken(
+		t.Context(),
+		resetHash,
+		"attacker-hash",
+	); !errors.Is(
+		err,
+		auth.ErrResetTokenInvalid,
+	) {
+		t.Errorf("ConsumeResetToken err = %v, want %v", err, auth.ErrResetTokenInvalid)
+	}
+}
+
+// TestPlayerStore_CredentialChangesRevokeLiveTokens pins #1329: every credential
+// change revokes the verify and reset links mailed before it.
+func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		change func(t *testing.T, ps *PlayerStore, playerID int64)
+	}{
+		{
+			name: "change password",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if err := ps.ChangePlayerPassword(t.Context(), playerID, "new-hash"); err != nil {
+					t.Fatalf("ChangePlayerPassword err = %v, want nil", err)
+				}
+			},
+		},
+		{
+			name: "set email",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if err := ps.SetPlayerEmail(t.Context(), playerID, "moved@example.test"); err != nil {
+					t.Fatalf("SetPlayerEmail err = %v, want nil", err)
+				}
+			},
+		},
+		{
+			name: "consume reset token",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				raw, hash, err := auth.GenerateResetToken()
+				if err != nil {
+					t.Fatalf("GenerateResetToken err = %v, want nil", err)
+				}
+				if err := ps.CreateResetToken(t.Context(), hash, playerID, time.Now().Add(time.Hour)); err != nil {
+					t.Fatalf("CreateResetToken err = %v, want nil", err)
+				}
+				if _, err := ps.ConsumeResetToken(t.Context(), auth.HashResetToken(raw), "new-hash"); err != nil {
+					t.Fatalf("ConsumeResetToken err = %v, want nil", err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbtest.Open(t)
+			ps := NewPlayerStore(db, slog.Default())
+			p, err := ps.CreatePlayer(t.Context(), "tokens", "tokens@example.test", "old-hash", auth.RolePlayer)
+			if err != nil {
+				t.Fatalf("CreatePlayer err = %v, want nil", err)
+			}
+			verifyHash, resetHash := seedLiveCredentialTokens(t, ps, p.ID)
+
+			tt.change(t, ps, p.ID)
+
+			assertCredentialTokensRevoked(t, ps, verifyHash, resetHash)
+		})
+	}
+}
+
+// TestPlayerStore_CredentialChangesKeepOtherPlayersTokens pins that revocation
+// is scoped to the changed player.
+func TestPlayerStore_CredentialChangesKeepOtherPlayersTokens(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+	changed, err := ps.CreatePlayer(t.Context(), "changed", "changed@example.test", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	bystander, err := ps.CreatePlayer(t.Context(), "bystander", "bystander@example.test", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	verifyHash, resetHash := seedLiveCredentialTokens(t, ps, bystander.ID)
+
+	if err := ps.ChangePlayerPassword(t.Context(), changed.ID, "new-hash"); err != nil {
+		t.Fatalf("ChangePlayerPassword err = %v, want nil", err)
+	}
+
+	if _, err := ps.ConsumeVerifyToken(t.Context(), verifyHash); err != nil {
+		t.Errorf("bystander ConsumeVerifyToken err = %v, want nil", err)
+	}
+	if _, err := ps.ConsumeResetToken(t.Context(), resetHash, "h2"); err != nil {
+		t.Errorf("bystander ConsumeResetToken err = %v, want nil", err)
+	}
+}

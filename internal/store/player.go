@@ -661,7 +661,8 @@ func (s *PlayerStore) LookupResetToken(ctx context.Context, tokenHash string) (i
 }
 
 // ConsumeResetToken atomically marks the reset row consumed, rotates
-// password_hash, and bumps session_version - all in one transaction
+// password_hash, bumps session_version, and revokes the player's other live
+// verify and reset links - all in one transaction
 // so a crash mid-flow cannot leave a player with a consumed token but
 // an old password, nor a new password with old sessions still live.
 // Returns the player id on success, auth.ErrResetTokenInvalid when no
@@ -696,7 +697,7 @@ func (s *PlayerStore) ConsumeResetToken(
 		}
 		playerID = id
 
-		return nil
+		return revokeLiveCredentialTokens(ctx, q, id)
 	})
 	if err != nil {
 		if errors.Is(err, auth.ErrResetTokenInvalid) {
@@ -720,22 +721,43 @@ func (s *PlayerStore) DeleteExpiredResetTokens(ctx context.Context) error {
 	return nil
 }
 
-// ChangePlayerPassword atomically rotates password_hash and bumps
-// session_version on the row identified by id. Shares the
-// ResetPlayerPassword query with the forgot-password flow: both paths
-// want the same "new hash + invalidate other cookies" semantics, only
-// the auth proof differs (token vs current password verified by the
-// caller). Returns auth.ErrPlayerNotFound when no row matches the id.
+// ChangePlayerPassword atomically rotates password_hash, bumps
+// session_version, and revokes every live verify and reset link on the row
+// identified by id. Shares the ResetPlayerPassword query with the
+// forgot-password flow: both paths want the same "new hash + invalidate other
+// cookies" semantics, only the auth proof differs (token vs current password
+// verified by the caller). Returns auth.ErrPlayerNotFound when no row matches
+// the id.
 func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error {
-	rows, err := s.q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
-		ID:           playerID,
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		rows, err := q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
+			ID:           playerID,
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to change player password: %w", err)
+		}
+		if rows == 0 {
+			return auth.ErrPlayerNotFound
+		}
+
+		return revokeLiveCredentialTokens(ctx, q, playerID)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to change player password: %w", err)
+		return fmt.Errorf("change player password: %w", err)
 	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+
+	return nil
+}
+
+// revokeLiveCredentialTokens deletes the player's unconsumed verify and reset
+// tokens on q, so a link mailed before a credential change stops working (#1329).
+func revokeLiveCredentialTokens(ctx context.Context, q *db.Queries, playerID int64) error {
+	if err := q.DeleteLiveEmailVerifyTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke verify tokens: %w", err)
+	}
+	if err := q.DeleteLivePasswordResetTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke reset tokens: %w", err)
 	}
 
 	return nil
@@ -995,28 +1017,36 @@ func (s *PlayerStore) ListAdminEmails(ctx context.Context) ([]string, error) {
 	return emails, nil
 }
 
-// SetPlayerEmail rewrites players.email on the row identified by id and
-// clears email_verified_at so the changed address must be re-proven. Used
-// by the admin "Set / overwrite email" action (#450); the admin then marks
-// the account verified or triggers a resend if the new address should be
-// treated as proven. Returns auth.ErrEmailTaken on a UNIQUE collision and
-// auth.ErrPlayerNotFound when no row matches.
+// SetPlayerEmail rewrites players.email on the row identified by id, clears
+// email_verified_at so the changed address must be re-proven, and revokes every
+// live verify and reset link mailed to the old address. Used by the admin
+// "Set / overwrite email" action (#450); the admin then marks the account
+// verified or triggers a resend if the new address should be treated as proven.
+// Returns auth.ErrEmailTaken on a UNIQUE collision and auth.ErrPlayerNotFound
+// when no row matches.
 func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email string) error {
 	cleaned := strings.ToLower(strings.TrimSpace(email))
-	rows, err := s.q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
-		Email: sql.NullString{String: cleaned, Valid: cleaned != ""},
-		ID:    playerID,
-	})
-	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return auth.ErrEmailTaken
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		rows, err := q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
+			Email: sql.NullString{String: cleaned, Valid: cleaned != ""},
+			ID:    playerID,
+		})
+		if err != nil {
+			var sqliteErr *sqlite.Error
+			if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+				return auth.ErrEmailTaken
+			}
+
+			return fmt.Errorf("failed to set player email: %w", err)
+		}
+		if rows == 0 {
+			return auth.ErrPlayerNotFound
 		}
 
-		return fmt.Errorf("failed to set player email: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return revokeLiveCredentialTokens(ctx, q, playerID)
+	})
+	if err != nil {
+		return fmt.Errorf("set player email: %w", err)
 	}
 
 	return nil

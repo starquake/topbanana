@@ -597,6 +597,32 @@ func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time
 	return err
 }
 
+const deleteLiveEmailVerifyTokensForPlayer = `-- name: DeleteLiveEmailVerifyTokensForPlayer :exec
+DELETE FROM email_verify_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+`
+
+// Revokes every unconsumed verify link for the player after a credential
+// change, so a link mailed before the change cannot be used after it (#1329).
+func (q *Queries) DeleteLiveEmailVerifyTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLiveEmailVerifyTokensForPlayer, playerID)
+	return err
+}
+
+const deleteLivePasswordResetTokensForPlayer = `-- name: DeleteLivePasswordResetTokensForPlayer :exec
+DELETE FROM password_reset_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+`
+
+// Revokes every unconsumed reset link for the player after a credential
+// change, so a link mailed before the change cannot be used after it (#1329).
+func (q *Queries) DeleteLivePasswordResetTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLivePasswordResetTokensForPlayer, playerID)
+	return err
+}
+
 const demoteAdminGuarded = `-- name: DemoteAdminGuarded :execrows
 UPDATE players
 SET role = ?1,
