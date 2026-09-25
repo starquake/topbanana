@@ -29,6 +29,10 @@ jobs:
       contents: read
       packages: read
     if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    # Serialise deploys to one host; queued runs wait, never cancel mid-deploy.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
     environment:
       name: staging
       url: "${{ vars.SERVER_URL }}"
@@ -201,6 +205,9 @@ jobs:
       contents: read
       packages: read
     if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && startsWith(github.event.workflow_run.head_branch, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     environment:
       name: production
       url: "${{ vars.SERVER_URL }}"
@@ -396,6 +403,9 @@ jobs:
         github.event.workflow_run.head_repository.full_name == github.repository &&
         (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) ||
        (github.event_name == 'workflow_dispatch' && inputs.environment == 'demo'))
+    concurrency:
+      group: deploy-demo
+      cancel-in-progress: false
     environment:
       name: demo
       url: "${{ vars.SERVER_URL }}"
