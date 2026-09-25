@@ -95,12 +95,9 @@ type GoogleAuthenticator struct {
 // derivation) to sign the state cookie so the deployment does not
 // need a second secret.
 func NewGoogleAuthenticator(cfg GoogleConfig, sessionKey []byte) *GoogleAuthenticator {
-	h := hmac.New(sha256.New, sessionKey)
-	_, _ = h.Write([]byte(googleStateDerivationLabel))
-
 	return &GoogleAuthenticator{
 		cfg:      cfg,
-		stateKey: h.Sum(nil),
+		stateKey: DeriveSigningKey(sessionKey, googleStateDerivationLabel),
 	}
 }
 
