@@ -569,6 +569,36 @@ func TestService_EndSessionClosesImmediately(t *testing.T) {
 	}
 }
 
+// TestService_EndSessionForgetsBookkeeping pins #1336: ending a room drops its
+// hub version entry at once and the runner's phase clock on the next tick, so
+// neither pins memory for the process lifetime.
+func TestService_EndSessionForgetsBookkeeping(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	if !ExportRunnerHasPhaseClock(h.runner, sessionID) {
+		t.Fatal("runner phase clock missing after Start, want it set")
+	}
+
+	if err := h.service.EndSession(ctx, h.code, 1); err != nil {
+		t.Fatalf("EndSession err = %v, want nil", err)
+	}
+	if got, want := ExportHubHasVersion(h.hub, h.code), false; got != want {
+		t.Errorf("hub has version after EndSession = %v, want %v", got, want)
+	}
+	h.tick(ctx)
+	if got, want := ExportRunnerHasPhaseClock(h.runner, sessionID), false; got != want {
+		t.Errorf("runner has phase clock after EndSession + tick = %v, want %v", got, want)
+	}
+}
+
 // TestService_EndSessionRejectsNonHost pins that only the host may end a room: a
 // non-host caller gets ErrNotHost and the room stays open.
 func TestService_EndSessionRejectsNonHost(t *testing.T) {

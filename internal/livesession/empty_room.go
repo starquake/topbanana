@@ -142,8 +142,13 @@ func (s *Service) EndSession(ctx context.Context, joinCode string, hostPlayerID 
 	}
 
 	// The room is now terminal; signal subscribers to re-GET so every surface
-	// lands on the finished state and the live clients tear down.
+	// lands on the finished state and the live clients tear down. The version
+	// entry is evicted after that last tick; the runner drops its own
+	// bookkeeping once the room leaves the live list.
 	s.publish(sess.JoinCode, PhaseFinished)
+	if s.publisher != nil {
+		s.publisher.Forget(sess.JoinCode)
+	}
 
 	s.logger.InfoContext(ctx, "live session ended",
 		slog.String(logJoinCodeKey, sess.JoinCode),

@@ -200,8 +200,9 @@ func (r *Runner) Rearm(ctx context.Context, sessionID string) {
 	r.Begin(ctx, sessionID)
 }
 
-// tick scans every live session once and advances each. Exported to tests as
-// Tick via export_test.
+// tick scans every live session once and advances each, then drops the phase
+// clock of any room no longer live (e.g. one the host ended). Exported to tests
+// as Tick via export_test.
 func (r *Runner) tick(ctx context.Context, now time.Time) {
 	ids, err := r.store.ListLiveSessionIDs(ctx)
 	if err != nil {
@@ -212,6 +213,7 @@ func (r *Runner) tick(ctx context.Context, now time.Time) {
 	for _, id := range ids {
 		r.advance(ctx, id, now)
 	}
+	r.forgetAllExcept(ids)
 }
 
 // advance loads one session and applies the single transition (if any) due at
@@ -801,6 +803,17 @@ func (r *Runner) forget(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.phaseSince, sessionID)
+}
+
+// forgetAllExcept drops the phase clock of every session not in live.
+func (r *Runner) forgetAllExcept(live []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id := range r.phaseSince {
+		if !slices.Contains(live, id) {
+			delete(r.phaseSince, id)
+		}
+	}
 }
 
 // questionPlan is the runner's flattened view of a quiz: its questions grouped
