@@ -14,15 +14,21 @@ export function createCoalescedRead(read, staleMs = 5000) {
             return pending;
         }
         const current = (async () => {
-            try {
-                do {
-                    dirty = false;
-                    startedAt = Date.now();
+            let failed = false;
+            let failure;
+            do {
+                dirty = false;
+                startedAt = Date.now();
+                try {
                     await read();
-                } while (dirty && pending === current);
-            } finally {
-                if (pending === current) pending = null;
-            }
+                } catch (err) {
+                    // Keep going so a queued follow-up still runs; report after.
+                    failed = true;
+                    failure = err;
+                }
+            } while (dirty && pending === current);
+            if (pending === current) pending = null;
+            if (failed) throw failure;
         })();
         pending = current;
 
