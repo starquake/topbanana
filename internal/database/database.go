@@ -257,6 +257,8 @@ func ExecTx(ctx context.Context, conn *sql.DB, fn func(*db.Queries) error) error
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	// Releases the transaction if fn panics; a no-op after Commit or Rollback.
+	defer func() { _ = tx.Rollback() }()
 	q := db.New(tx)
 	err = fn(q)
 	if err != nil {

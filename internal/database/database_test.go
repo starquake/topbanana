@@ -1,11 +1,17 @@
 package database_test
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
+	"github.com/starquake/topbanana/internal/db"
+	"github.com/starquake/topbanana/internal/dbtest"
 )
 
 func TestValidateSQLitePragmas(t *testing.T) {
@@ -143,4 +149,35 @@ func TestValidateSQLitePragmas(t *testing.T) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestExecTx_PanicReleasesTransaction pins that a panicking fn does not leave
+// its transaction holding the pool's only connection.
+func TestExecTx_PanicReleasesTransaction(t *testing.T) {
+	t.Parallel()
+
+	conn := dbtest.OpenUnmigrated(t)
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v", cerr)
+		}
+	})
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("recover() = nil, want the fn panic")
+			}
+		}()
+		// fn panics, so ExecTx never returns an error to check.
+		_ = database.ExecTx(t.Context(), conn, func(*db.Queries) error {
+			panic("boom")
+		})
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := database.ExecTx(ctx, conn, func(*db.Queries) error { return nil }); err != nil {
+		t.Errorf("ExecTx after panic err = %v, want nil", err)
+	}
 }
