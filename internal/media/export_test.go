@@ -26,3 +26,17 @@ var ExportDefaultDescription = defaultDescription
 // ExportSanitizeFilename re-exports the unexported upload-filename sanitizer for
 // tests.
 var ExportSanitizeFilename = sanitizeFilename
+
+// FillDecodeSlotsForTest occupies every decode slot and returns the func that
+// frees them.
+func FillDecodeSlotsForTest() func() {
+	for range cap(decodeSlots) {
+		decodeSlots <- struct{}{}
+	}
+
+	return func() {
+		for range cap(decodeSlots) {
+			<-decodeSlots
+		}
+	}
+}

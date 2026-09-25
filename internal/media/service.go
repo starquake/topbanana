@@ -92,7 +92,7 @@ func (s *Service) StoreImage(
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("upload cancelled before processing: %w", ctxErr)
 	}
-	processed, err := Process(r, s.imageMaxBytes)
+	processed, err := Process(ctx, r, s.imageMaxBytes)
 	if err != nil {
 		return nil, err
 	}
