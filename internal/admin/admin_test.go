@@ -3378,3 +3378,122 @@ func TestMediaCardDataDurationLabel(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleQuizSave_KeepsStoredContentOutOfValidation pins that the details
+// form validates only the quiz's own fields: a stored question over today's
+// length cap must not block renaming the quiz (#1350).
+func TestHandleQuizSave_KeepsStoredContentOutOfValidation(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	seed := ownedQuiz("Legacy Quiz", "legacy-quiz")
+	seed.Questions = []*quiz.Question{{
+		Text:     strings.Repeat("a", MaxQuestionTextLength+1),
+		Position: 1,
+		Options:  []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}},
+	}}
+	qz := env.seedQuiz(t, seed)
+
+	form := url.Values{"title": {"Legacy Quiz Renamed"}, "description": {"seeded"}}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/admin/quizzes/%d", qz.ID), strings.NewReader(form.Encode()),
+	)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	HandleQuizSave(slog.New(slog.DiscardHandler), nil, env.quizzes).ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+}
+
+// TestHandleQuestionSave_QuestionCountCap pins that adding a question to a quiz
+// already at the question cap is refused, matching the cap the import enforces
+// (#1350).
+func TestHandleQuestionSave_QuestionCountCap(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	seed := ownedQuiz("Question Cap", "question-cap")
+	for i := range MaxQuestionsPerQuiz {
+		seed.Questions = append(seed.Questions, &quiz.Question{
+			Text: "Q", Position: i + 1, Options: []*quiz.Option{{Text: "A", Correct: true}},
+		})
+	}
+	qz := env.seedQuiz(t, seed)
+
+	form := url.Values{
+		"text":              {"One Too Many"},
+		"round_id":          {strconv.FormatInt(env.defaultRoundID(t, qz.ID), 10)},
+		"option[0].text":    {"A"},
+		"option[0].correct": {"on"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/admin/quizzes/%d/questions", qz.ID),
+		strings.NewReader(form.Encode()),
+	)
+	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	HandleQuestionSave(slog.New(slog.DiscardHandler), nil, env.quizzes, env.media).ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rr.Body.String(), fmt.Sprintf(
+		"at most %d questions",
+		MaxQuestionsPerQuiz,
+	); !strings.Contains(
+		got,
+		want,
+	) {
+		t.Errorf("body should contain %q", want)
+	}
+}
+
+// TestHandleQuizSave_LongTransliteratedTitle pins that a non-Latin title within
+// the title cap saves even though its transliterated slug would outgrow the
+// slug cap: the slug is truncated instead of rejected with an unshown error.
+func TestHandleQuizSave_LongTransliteratedTitle(t *testing.T) {
+	t.Parallel()
+
+	titles := map[string]string{
+		"chinese":  strings.Repeat("\u53cc", 45),
+		"cyrillic": strings.Repeat("\u0449", 60),
+	}
+	for name, title := range titles {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			env := newAdminEnv(t)
+			form := url.Values{"title": {title}, "description": {"d"}}
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/admin/quizzes", strings.NewReader(form.Encode()),
+			)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rr := httptest.NewRecorder()
+
+			HandleQuizSave(slog.New(slog.DiscardHandler), nil, env.quizzes).ServeHTTP(rr, withTestAdmin(req))
+
+			if got, want := rr.Code, http.StatusSeeOther; got != want {
+				t.Fatalf("status = %d, want %d", got, want)
+			}
+			quizzes, err := env.quizzes.ListQuizzes(t.Context())
+			if err != nil {
+				t.Fatalf("ListQuizzes err = %v, want nil", err)
+			}
+			if got, want := len(quizzes), 1; got != want {
+				t.Fatalf("len(quizzes) = %d, want %d", got, want)
+			}
+			if got, want := quizzes[0].Title, title; got != want {
+				t.Errorf("stored title = %q, want %q", got, want)
+			}
+			if got := quizzes[0].Slug; got == "" || len(got) > MaxSlugLength {
+				t.Errorf("stored slug = %q (len %d), want non-empty and <= %d", got, len(got), MaxSlugLength)
+			}
+		})
+	}
+}

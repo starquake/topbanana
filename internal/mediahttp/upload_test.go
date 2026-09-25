@@ -62,6 +62,7 @@ func TestUploadFailureReason(t *testing.T) {
 			err:  media.ErrUnsupportedImage,
 			want: "unsupported image format (use jpg or png)",
 		},
+		{name: "quiz media limit", err: media.ErrQuizMediaLimit, want: "this quiz has reached its image limit"},
 		{name: "unknown error", err: errors.New("some random failure"), want: "upload failed"},
 	}
 	for _, tc := range cases {

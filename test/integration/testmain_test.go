@@ -5,6 +5,8 @@ import (
 	"errors"
 	"maps"
 	"net"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,12 +31,18 @@ func TestMain(m *testing.M) {
 // #281) is satisfied.
 const seededAdminID int64 = 1
 
+var errServerShutdownTimeout = errors.New("server timed out during shutdown")
+
 // testServer is the addressable surface a started integration server
 // exposes. BaseURL covers HTTP-driven tests; DBURI is only needed by tests
 // that open their own *sql.DB for direct store access (e.g. gameplay).
+//
+// Shutdown stops the server and returns Run's error once it exits; t.Cleanup
+// calls it too (tolerating context.Canceled), so a test need not.
 type testServer struct {
-	BaseURL string
-	DBURI   string
+	BaseURL  string
+	DBURI    string
+	Shutdown func() error
 }
 
 // startServer boots a real server against an ephemeral port and a fresh
@@ -122,22 +130,28 @@ func startServer(
 		t.Fatalf("error waiting for server to be ready: %v", werr)
 	}
 
-	t.Cleanup(func() {
+	shutdown := sync.OnceValue(func() error {
 		// Stop forwarding the server's request logs to t.Log before draining
 		// it: an in-flight request that logs during/after shutdown would
 		// otherwise call t.Log as the test completes and race the testing
 		// framework's own teardown (#1008).
 		stdout.Disable()
+		// A pooled client connection that never carried a request would hold
+		// graceful shutdown for net/http's 5s new-connection grace.
+		http.DefaultClient.CloseIdleConnections()
 		stop()
 		select {
 		case err := <-errCh:
-			if err != nil && !errors.Is(err, context.Canceled) {
-				t.Errorf("server exited with error: %v", err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Error("server timed out during shutdown")
+			return err
+		case <-time.After(15 * time.Second):
+			return errServerShutdownTimeout
+		}
+	})
+	t.Cleanup(func() {
+		if err := shutdown(); err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("server exited with error: %v", err)
 		}
 	})
 
-	return ctx, testServer{BaseURL: baseURL, DBURI: dbURI}
+	return ctx, testServer{BaseURL: baseURL, DBURI: dbURI, Shutdown: shutdown}
 }

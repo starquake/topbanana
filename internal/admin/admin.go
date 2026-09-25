@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gosimple/slug"
-
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
@@ -212,6 +210,8 @@ type OptionData struct {
 const (
 	maxOptions  = 4
 	maxFormSize = 1 << 20 // 1 MB
+	// maxImportFormSize fits realistic quizzes (about 100-600 KB urlencoded), not one at every cap.
+	maxImportFormSize = 5 << 20
 )
 
 // actionVariantAdmin selects the Edit/Delete action cluster in the shared
@@ -616,7 +616,7 @@ func fillQuizFromForm(
 		return nil, false
 	}
 	qz.Title = r.PostFormValue("title")
-	qz.Slug = slug.Make(qz.Title)
+	qz.Slug = titleSlug(qz.Title)
 	qz.Description = r.PostFormValue("description")
 	// Per-quiz default time limit (#99). Empty input falls back to the
 	// migration default so a host that never touched the field still
@@ -656,7 +656,7 @@ func fillQuizFromForm(
 	} else {
 		qz.Language = quiz.LanguageEN
 	}
-	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
+	if problems := (&quizForm{quiz: qz}).validMetadata(); len(problems) > 0 {
 		return problems, true
 	}
 
@@ -2136,6 +2136,7 @@ func HandleQuestionSave(
 		if !ok {
 			return
 		}
+		fieldErrors = addQuestionCountProblem(fieldErrors, qctx)
 		if len(fieldErrors) > 0 {
 			renderQuestionForm(w, r, logger, csrfMgr, formRenderer, mediaStore, qctx, fieldErrors)
 
@@ -2156,6 +2157,21 @@ func HandleQuestionSave(
 		// requireQuizOwner so gosec flags fmt.Sprintf's %d as tainted.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(qctx.Quiz.ID, 10), http.StatusSeeOther)
 	})
+}
+
+// addQuestionCountProblem flags a new question on a quiz already at
+// maxQuestionsPerQuiz, so one-at-a-time adds cannot pass the cap an import
+// enforces.
+func addQuestionCountProblem(problems map[string]string, qctx *questionSaveCtx) map[string]string {
+	if qctx.Question.ID != 0 || len(qctx.Quiz.Questions) < maxQuestionsPerQuiz {
+		return problems
+	}
+	if problems == nil {
+		problems = make(map[string]string)
+	}
+	problems["text"] = fmt.Sprintf("A quiz may have at most %d questions", maxQuestionsPerQuiz)
+
+	return problems
 }
 
 // loadQuestionForSave parses the quizID + questionID off the path,

@@ -3,9 +3,73 @@ package admin
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/gosimple/slug"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
+
+// Input caps, generous for real quizzes, that bound what one save or import can
+// write in a single transaction (#1350). Lengths count runes.
+const (
+	maxTitleLength        = 200
+	maxSlugLength         = 200
+	maxDescriptionLength  = 5000
+	maxQuestionTextLength = 2000
+	maxOptionTextLength   = 500
+	maxQuestionsPerQuiz   = 1000
+	maxRoundsPerQuiz      = 100
+)
+
+// tooLong reports whether s is longer than limit runes.
+func tooLong(s string, limit int) bool {
+	return utf8.RuneCountInString(s) > limit
+}
+
+// titleSlug derives a quiz slug from title, cut at a word boundary to
+// maxSlugLength because transliteration can make it far longer than the title.
+func titleSlug(title string) string {
+	s := slug.Make(title)
+	if len(s) <= maxSlugLength {
+		return s
+	}
+	// slug.Make output is ASCII, so byte offsets are character offsets.
+	cut := s[:maxSlugLength+1]
+	if i := strings.LastIndexByte(cut, '-'); i > 0 {
+		cut = cut[:i]
+	} else {
+		cut = cut[:maxSlugLength]
+	}
+
+	return strings.TrimRight(cut, "-")
+}
+
+// lengthProblem is the problem message for a field over its length cap.
+func lengthProblem(field string, limit int) string {
+	return fmt.Sprintf("%s must be at most %d characters", field, limit)
+}
+
+// textField describes one required, length-capped text input.
+type textField struct {
+	key      string
+	label    string
+	value    string
+	required string
+	limit    int
+}
+
+// check records f's problem, if any, in problems.
+func (f textField) check(problems map[string]string) {
+	switch {
+	case f.value == "":
+		problems[f.key] = f.required
+	case tooLong(f.value, f.limit):
+		problems[f.key] = lengthProblem(f.label, f.limit)
+	default:
+	}
+}
 
 // quizForm wraps a parsed [quiz.Quiz] for admin-form validation.
 // Problem-map keys match the lowercase form-field names the templates
@@ -17,17 +81,32 @@ type quizForm struct {
 // Valid checks every form-level rule on the wrapped quiz, its
 // questions, and its options. An empty map means the form is valid.
 func (f *quizForm) Valid(ctx context.Context) map[string]string {
+	problems := f.validMetadata()
+	q := f.quiz
+	if len(q.Questions) > maxQuestionsPerQuiz {
+		problems["questions"] = fmt.Sprintf("A quiz may have at most %d questions", maxQuestionsPerQuiz)
+	}
+	if len(q.Rounds) > maxRoundsPerQuiz {
+		problems["rounds"] = fmt.Sprintf("A quiz may have at most %d rounds", maxRoundsPerQuiz)
+	}
+	addQuestionProblems(ctx, problems, q.Questions)
+	addRoundProblems(ctx, problems, q.Rounds)
+
+	return problems
+}
+
+// validMetadata checks only the quiz's own fields, for the details form, which
+// does not edit the stored questions and rounds and so must not re-judge them.
+func (f *quizForm) validMetadata() map[string]string {
 	problems := make(map[string]string)
 	q := f.quiz
-	if q.Title == "" {
-		problems["title"] = "Title is required"
-	}
+	textField{"title", "Title", q.Title, "Title is required", maxTitleLength}.check(problems)
 	if q.Slug == "" {
 		problems["slug"] = "Slug is required"
 	}
-	if q.Description == "" {
-		problems["description"] = "Description is required"
-	}
+	textField{
+		"description", "Description", q.Description, "Description is required", maxDescriptionLength,
+	}.check(problems)
 	// Only flag the time-limit range when the caller actually set a
 	// value; a zero TimeLimitSeconds means "unset" (the store layer
 	// rewrites it to DefaultTimeLimitSeconds before INSERT), so we
@@ -56,8 +135,6 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	if q.Language != "" && !quiz.IsValidLanguage(q.Language) {
 		problems["language"] = "Language must be one of: en, nl"
 	}
-	addQuestionProblems(ctx, problems, q.Questions)
-	addRoundProblems(ctx, problems, q.Rounds)
 
 	return problems
 }
@@ -106,9 +183,7 @@ type questionForm struct {
 func (f *questionForm) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	q := f.question
-	if q.Text == "" {
-		problems["text"] = "Text is required"
-	}
+	textField{"text", "Text", q.Text, "Text is required", maxQuestionTextLength}.check(problems)
 	switch {
 	case len(q.Options) == 0:
 		problems["options"] = "Options are required"
@@ -118,6 +193,11 @@ func (f *questionForm) Valid(_ context.Context) map[string]string {
 		// Option count is in range. Deliberately no correct-option
 		// check: a question where the player is meant to pick none is a
 		// supported shape.
+		for _, o := range q.Options {
+			if tooLong(o.Text, maxOptionTextLength) {
+				problems["options"] = fmt.Sprintf("Each option must be at most %d characters", maxOptionTextLength)
+			}
+		}
 	}
 	if q.TimeLimitSeconds != nil {
 		v := *q.TimeLimitSeconds
@@ -142,9 +222,7 @@ type optionForm struct {
 // Valid checks the option's field-level rules.
 func (f *optionForm) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
-	if f.option.Text == "" {
-		problems["text"] = "Text is required"
-	}
+	textField{"text", "Text", f.option.Text, "Text is required", maxOptionTextLength}.check(problems)
 
 	return problems
 }

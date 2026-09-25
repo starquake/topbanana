@@ -97,6 +97,13 @@ func HandleRoundSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		if !ok {
 			return
 		}
+		if gctx.IsNew && gctx.RoundCount >= maxRoundsPerQuiz {
+			renderRoundForm(
+				w, r, formRenderer, gctx, nil, fmt.Sprintf("A quiz may have at most %d rounds.", maxRoundsPerQuiz),
+			)
+
+			return
+		}
 
 		fieldErrors, ok := fillRoundFromForm(w, r, logger, csrfMgr, gctx.Round)
 		if !ok {
@@ -422,6 +429,8 @@ type roundSaveCtx struct {
 	Quiz  *quiz.Quiz
 	Round *quiz.Round
 	IsNew bool
+	// RoundCount is how many rounds the quiz holds, filled in for a create.
+	RoundCount int
 }
 
 // loadRoundForSave parses the quizID + roundID off the path, applies
@@ -447,12 +456,15 @@ func loadRoundForSave(
 		return nil, false
 	}
 	if roundID == 0 {
-		pos, posOK := nextRoundPosition(w, r, logger, csrfMgr, quizStore, qz.ID)
-		if !posOK {
+		rounds, listOK := listRoundsForCreate(w, r, logger, csrfMgr, quizStore, qz.ID)
+		if !listOK {
 			return nil, false
 		}
 
-		return &roundSaveCtx{Quiz: qz, Round: &quiz.Round{QuizID: qz.ID, Position: pos}, IsNew: true}, true
+		return &roundSaveCtx{
+			Quiz: qz, Round: &quiz.Round{QuizID: qz.ID, Position: nextRoundPosition(rounds)},
+			IsNew: true, RoundCount: len(rounds),
+		}, true
 	}
 	g, ok := roundByID(w, r, logger, csrfMgr, quizStore, qz.ID, roundID)
 	if !ok {
@@ -462,25 +474,30 @@ func loadRoundForSave(
 	return &roundSaveCtx{Quiz: qz, Round: g, IsNew: false}, true
 }
 
-// nextRoundPosition returns the position a newly created round should
-// take: one past the current highest round position, so a new round
-// lands at the end. Renders a 500 and returns ok=false on a store
-// failure.
-func nextRoundPosition(
+// listRoundsForCreate loads the quiz's rounds for placing and capping a new
+// one. Renders a 500 and returns ok=false on a store failure.
+func listRoundsForCreate(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	quizID int64,
-) (int, bool) {
+) ([]*quiz.Round, bool) {
 	rounds, err := quizStore.ListRoundsByQuiz(r.Context(), quizID)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "error listing rounds for new round position", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
-		return 0, false
+		return nil, false
 	}
+
+	return rounds, true
+}
+
+// nextRoundPosition returns the position one past the highest in rounds, so a
+// new round lands at the end.
+func nextRoundPosition(rounds []*quiz.Round) int {
 	pos := 0
 	for _, g := range rounds {
 		if g.Position >= pos {
@@ -488,7 +505,7 @@ func nextRoundPosition(
 		}
 	}
 
-	return pos, true
+	return pos
 }
 
 func renderRoundForm(
@@ -615,8 +632,9 @@ type roundForm struct {
 // means the form is valid.
 func (f *roundForm) Valid(_ context.Context) map[string]string {
 	problems := map[string]string{}
-	if f.round.Title == "" {
-		problems["title"] = "Give the round a name."
+	textField{"title", "Title", f.round.Title, "Give the round a name.", maxTitleLength}.check(problems)
+	if tooLong(f.round.Summary, maxDescriptionLength) {
+		problems["summary"] = lengthProblem("Summary", maxDescriptionLength)
 	}
 	if f.round.BoundaryDurationSeconds != nil {
 		v := *f.round.BoundaryDurationSeconds

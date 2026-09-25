@@ -44,8 +44,26 @@ const EmailTestRateLimit = 10 * time.Second
 // the CSRF layer would happily slurp it before the handler ever sees
 // the request. Mount this in front of csrfMW on form-driven POSTs.
 func MaxFormSizeMiddleware(next http.Handler) http.Handler {
+	return limitFormBody(maxFormSize, next)
+}
+
+// MaxImportFormSizeMiddleware is [MaxFormSizeMiddleware] with the larger cap
+// the pasted-JSON quiz import needs.
+func MaxImportFormSizeMiddleware(next http.Handler) http.Handler {
+	return limitFormBody(maxImportFormSize, next)
+}
+
+// limitFormBody caps r.Body at limit bytes. A declared Content-Length over the
+// cap is answered 413 up front; the CSRF layer would otherwise report the
+// truncated parse as a bad token.
+func limitFormBody(limit int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+		if r.ContentLength > limit {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/request"
 )
 
 // writeInternalError records an internal failure and writes a generic
@@ -516,7 +517,8 @@ func HandleQuizLeaderboardStream(
 	heartbeatInterval = clampHeartbeat(heartbeatInterval, DefaultLeaderboardHeartbeatInterval)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		ctx, cancel := request.StreamContext(r.Context())
+		defer cancel()
 
 		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
 		if !ok {

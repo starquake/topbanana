@@ -14,7 +14,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -146,7 +145,7 @@ type seedConfig struct {
 	seedSet        string
 	fixturePath    string
 	demoArchiveDir string
-	dbURI          string
+	db             config.DatabaseConfig
 	mediaDir       string
 	playerCount    int
 	playsPerPlayer int
@@ -166,36 +165,40 @@ func main() {
 	demoArchiveDir := flag.String(
 		"demo-archive-dir", defaultDemoArchiveDir, "directory of demo quiz archive zips (demo seed)",
 	)
-	dbURI := flag.String("db", "", "DB URI (defaults to $DB_URI or the dev default)")
+	dbURI := flag.String(
+		"db",
+		"",
+		"DB URI, with the pragmas the server requires (defaults to $DB_URI or the dev default)",
+	)
 	mediaDir := flag.String("media-dir", config.MediaDirDefault, "filesystem directory for stored media (audio clips)")
 	playersFlag := flag.Int("players", defaultPlayerCount, "number of anonymous players to seed")
 	playsFlag := flag.Int("plays", defaultPlaysPerPlayer, "number of quizzes each seeded player finishes")
+	force := flag.Bool("force", false, "seed even when APP_ENV is not development")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if err := checkSeedEnvironment(os.Getenv("APP_ENV")); err != nil && !*force {
+		logger.Error("seed-dev refused", slog.Any("err", err))
+		os.Exit(1)
+	}
 
 	if *seedSet != seedSetTest && *seedSet != seedSetDemo {
 		logger.Error(`seed-dev: unknown -seed value (want "test" or "demo")`, slog.String("seed", *seedSet))
 		os.Exit(1)
 	}
 
-	// ParseDatabase keeps the URI and its pragmas in one source of truth; it
-	// bypasses the production server gates, so it is safe here.
-	uri := *dbURI
-	if uri == "" {
-		dbc, err := config.ParseDatabase(os.Getenv)
-		if err != nil {
-			logger.Error("seed-dev failed to resolve DB URI", slog.Any("err", err))
-			os.Exit(1)
-		}
-		uri = dbc.URI
+	dbc, err := resolveSeedDB(os.Getenv, *dbURI)
+	if err != nil {
+		logger.Error("seed-dev failed to resolve DB URI", slog.Any("err", err))
+		os.Exit(1)
 	}
 
 	cfg := seedConfig{
 		seedSet:        *seedSet,
 		fixturePath:    *fixturePath,
 		demoArchiveDir: *demoArchiveDir,
-		dbURI:          uri,
+		db:             dbc,
 		mediaDir:       *mediaDir,
 		playerCount:    *playersFlag,
 		playsPerPlayer: *playsFlag,
@@ -204,6 +207,43 @@ func main() {
 		logger.Error("seed-dev failed", slog.Any("err", err))
 		os.Exit(1)
 	}
+}
+
+// errNotDevelopment is returned when seed-dev would write to a database outside
+// a development environment.
+var errNotDevelopment = errors.New("seed-dev writes fake quizzes and players; " +
+	"set APP_ENV=development or pass -force")
+
+// checkSeedEnvironment refuses to seed unless APP_ENV is development, so a
+// stray $DB_URI cannot point the seeder at a real DB; -force overrides it.
+func checkSeedEnvironment(appEnv string) error {
+	if appEnv == config.AppEnvironmentDefault {
+		return nil
+	}
+
+	return fmt.Errorf("%w (APP_ENV=%q)", errNotDevelopment, appEnv)
+}
+
+// resolveSeedDB resolves the DB config through [config.ParseDatabase], with an
+// explicit -db standing in for $DB_URI so it satisfies the production DB_URI
+// requirement.
+func resolveSeedDB(getenv func(string) string, dbFlag string) (config.DatabaseConfig, error) {
+	if dbFlag != "" {
+		envGetenv := getenv
+		getenv = func(key string) string {
+			if key == "DB_URI" {
+				return dbFlag
+			}
+
+			return envGetenv(key)
+		}
+	}
+	dbc, err := config.ParseDatabase(getenv)
+	if err != nil {
+		return config.DatabaseConfig{}, fmt.Errorf("parse database config: %w", err)
+	}
+
+	return dbc, nil
 }
 
 // run is the non-fatal entry point: it returns errors so main() keeps its
@@ -219,7 +259,9 @@ func run(logger *slog.Logger, cfg seedConfig) error {
 	}
 
 	database.SetupGoose()
-	conn, err := sql.Open("sqlite", cfg.dbURI)
+	conn, err := database.Open(
+		ctx, cfg.db.Driver, cfg.db.URI, cfg.db.MaxOpenConns, cfg.db.MaxIdleConns, cfg.db.ConnMaxLifetime,
+	)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

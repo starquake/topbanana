@@ -3,6 +3,8 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -114,7 +116,8 @@ func TestRecoverPanic_IgnoresErrAbortHandler(t *testing.T) {
 
 	// http.ErrAbortHandler is the documented sentinel for an
 	// intentional abort. recoverPanic must NOT promote it to a 500
-	// or log at Error - that would turn a feature into noise.
+	// or log at Error - that would turn a feature into noise - but must
+	// re-panic it so net/http aborts the connection (#1355).
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
@@ -124,7 +127,15 @@ func TestRecoverPanic_IgnoresErrAbortHandler(t *testing.T) {
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/abort", nil)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	func() {
+		defer func() {
+			got, ok := recover().(error)
+			if want := http.ErrAbortHandler; !ok || !errors.Is(got, want) {
+				t.Errorf("recovered = %v, want %v re-panicked to net/http", got, want)
+			}
+		}()
+		handler.ServeHTTP(rec, req)
+	}()
 
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d (ErrAbortHandler should not write 500)", got, want)
@@ -134,6 +145,39 @@ func TestRecoverPanic_IgnoresErrAbortHandler(t *testing.T) {
 	}
 	if got, want := buf.String(), "handler aborted"; !strings.Contains(got, want) {
 		t.Errorf("log output missing %q\nfull log:\n%s", want, got)
+	}
+}
+
+// TestRecoverPanic_AbortedResponseReachesClientTruncated pins #1355 over a real
+// connection: a chunked response aborted with http.ErrAbortHandler must read
+// as an error on the client, not as a complete body.
+func TestRecoverPanic_AbortedResponseReachesClientTruncated(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	srv := httptest.NewServer(withReqLogger(logger, ExportRecoverPanic(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "partial")
+			_ = http.NewResponseController(w).Flush()
+			panic(http.ErrAbortHandler)
+		},
+	))))
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("Do err = %v, want nil", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if _, err = io.ReadAll(resp.Body); err == nil {
+		t.Error("ReadAll err = nil, want an error for the aborted response")
 	}
 }
 

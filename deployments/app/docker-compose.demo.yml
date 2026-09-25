@@ -47,6 +47,8 @@ services:
     networks:
       - web
     restart: unless-stopped
+    # Above the app's 10s shutdown bound (HTTP and email drain run concurrently).
+    stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "/home/nonroot/server", "-healthcheck"]
       interval: 30s

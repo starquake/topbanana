@@ -28,6 +28,8 @@ services:
     volumes:
       - topbanana_data:/home/nonroot/data
     restart: unless-stopped
+    # Above the app's 10s shutdown bound (HTTP and email drain run concurrently).
+    stop_grace_period: 20s
 
   # Mailpit is a local SMTP catch-all + web UI. Outgoing mail from the
   # app lands in the mailpit inbox at http://localhost:8025 instead of
