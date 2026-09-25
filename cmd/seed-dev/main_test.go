@@ -570,3 +570,35 @@ func TestSeedPlaysToleratesDuplicateName(t *testing.T) {
 		t.Errorf("plays = %d, want > 0 (non-colliding player still finishes a game)", plays)
 	}
 }
+
+// TestCheckSeedEnvironment pins the #1355 guard: seed-dev writes only when
+// APP_ENV is development.
+func TestCheckSeedEnvironment(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		appEnv  string
+		wantErr bool
+	}{
+		{name: "development seeds", appEnv: "development"},
+		{name: "production refuses", appEnv: "production", wantErr: true},
+		{name: "unset refuses", appEnv: "", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ExportCheckSeedEnvironment(tc.appEnv)
+			if !tc.wantErr {
+				if err != nil {
+					t.Errorf("ExportCheckSeedEnvironment(%q) err = %v, want nil", tc.appEnv, err)
+				}
+
+				return
+			}
+			if got, want := err, ErrExportNotDevelopment; !errors.Is(got, want) {
+				t.Errorf("ExportCheckSeedEnvironment(%q) err = %v, want %v", tc.appEnv, got, want)
+			}
+		})
+	}
+}
