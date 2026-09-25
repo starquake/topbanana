@@ -42,23 +42,23 @@ func ExportFinalizeGoogleSignIn(
 func ExportFinalizeGoogleSignInApproval(
 	w http.ResponseWriter,
 	r *http.Request,
-	logger *slog.Logger,
 	players interface {
 		PlayerStore
 		RoleSetter
 	},
 	sessions *session.Manager,
 	player *Player,
+	sessionPlayerID *int64,
 	firstRegistration bool,
 	approval GoogleApprovalDeps,
 ) {
 	finalizeGoogleSignIn(w, r, googleSignInDeps{
-		logger:   logger,
+		logger:   slog.New(slog.DiscardHandler),
 		players:  players,
 		roles:    players,
 		sessions: sessions,
 		approval: approval,
-	}, player, nil, "", firstRegistration)
+	}, player, sessionPlayerID, "", firstRegistration)
 }
 
 // ExportLinkOrCreateGooglePlayer is the test-only alias for the
