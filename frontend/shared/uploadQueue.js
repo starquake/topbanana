@@ -282,15 +282,15 @@ export function createUploadQueue(config) {
     }
 
     function handleResponse(xhr, row, status, b) {
-        // Try to parse JSON regardless of Content-Type. A misconfigured proxy
-        // that strips Content-Type would otherwise force a successful upload into
-        // the plain-text fallback and the row gets counted as failed.
         if (isLoginRedirect(xhr.responseURL)) {
             b.skipped++;
             finishRow(row, status, SESSION_EXPIRED_MESSAGE, false);
 
             return;
         }
+        // Try to parse JSON regardless of Content-Type. A misconfigured proxy
+        // that strips Content-Type would otherwise force a successful upload into
+        // the plain-text fallback and the row gets counted as failed.
         let json = null;
         if (xhr.status >= 200 && xhr.status < 300) {
             try { json = JSON.parse(xhr.responseText); } catch (_err) { /* json stays null */ }

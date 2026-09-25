@@ -92,7 +92,7 @@ async function hardCloseStream(page: import('./fixtures').Page): Promise<boolean
 }
 
 test.describe('live reconnect and recovery', () => {
-  // #1342: a hard-closed stream used to leave the live view frozen with no banner.
+  // A hard-closed stream shows the banner and re-subscribes on a backoff (#1342).
   test('a hard-closed stream shows the banner and recovers via backoff re-subscribe', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
@@ -174,9 +174,9 @@ test.describe('live reconnect and recovery', () => {
         document.dispatchEvent(new Event('visibilitychange'));
         const root = document.querySelector('[x-data="joinApp"]');
         const cmp = (window as unknown as {
-          Alpine: { $data: (el: Element) => { stateRead: Promise<void> | null } };
+          Alpine: { $data: (el: Element) => { stateReads: { pending: () => Promise<void> | null } } };
         }).Alpine.$data(root!);
-        if (cmp.stateRead) await cmp.stateRead;
+        await cmp.stateReads.pending();
       });
     }
     await expect(page.getByTestId('connection-trouble')).toBeVisible({ timeout: 10_000 });

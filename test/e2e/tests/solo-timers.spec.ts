@@ -11,9 +11,8 @@ test.use({ storageState: adminStatePath() });
 
 const NEXT_PATH = /\/api\/games\/[^/]+\/questions\/next$/;
 
-// #1340: the prefetched question's clock offset used to be computed only when
-// the item was shown, after the feedback pause, so the read beat ran late by
-// the length of the pause.
+// A prefetched question's clock offset is taken when the response lands, not
+// after the feedback pause, so the read beat does not run late (#1340).
 test('a prefetched question keeps the clock offset from when it arrived', async ({ page, browserName }) => {
   test.setTimeout(45_000);
 
@@ -69,15 +68,13 @@ test('a prefetched question keeps the clock offset from when it arrived', async 
   await prefetched;
 
   // Past the feedback pause Q2's read beat has already elapsed, so its options
-  // show straight away. With the offset taken after the pause they stayed
-  // hidden for another 3s.
+  // show straight away.
   await page.clock.runFor(3_500);
   await page.clock.runFor(300);
   await expect(page.getByRole('button', { name: QUIZ_QUESTIONS[1].options[0] })).toBeVisible({ timeout: 1_000 });
 });
 
-// #1341: a double tap on Start used to bootstrap two games, leaking a reveal
-// interval that replayed the answers-show sound and fired an early "Time up".
+// A double tap on Start bootstraps one game, so no second reveal interval runs (#1341).
 test('double-clicking Start creates one game and fetches one question', async ({ page, browserName }) => {
   test.setTimeout(30_000);
 
@@ -103,8 +100,7 @@ test('double-clicking Start creates one game and fetches one question', async ({
   expect(nextCount).toBe(1);
 });
 
-// #1344: playEffectThen registered once('end') and once('stop'); the unfired one
-// stayed on the shared question-show Howl, one more per question.
+// Once the question-show sting finishes, no end/stop listener stays on its shared Howl (#1344).
 test('the question-show sting leaves no stale end/stop listeners', async ({ page, browserName }) => {
   test.setTimeout(45_000);
 

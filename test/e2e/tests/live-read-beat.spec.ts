@@ -35,8 +35,7 @@ async function beatState(page: Page): Promise<BeatState> {
   });
 }
 
-// #1344: every state re-read during the read beat restarted the beat, so the
-// bar jumped back to 0 on each tick.
+// A state re-read during the read beat keeps the bar's progress (#1344).
 test('a state re-read during the read beat does not reset the bar', async ({ page, hostSessions }) => {
   test.setTimeout(60_000);
 

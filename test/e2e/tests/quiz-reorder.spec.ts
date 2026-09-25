@@ -198,9 +198,8 @@ test('the grip handle reorders questions and rounds by keyboard', async ({ page,
   expect(await roundTitles(page)).toEqual(['Round Beta', 'Round Alpha']);
 });
 
-// #1343: an expired session 303s the POST to /login, which fetch followed to a
-// 200 HTML page the old code took as success, leaving the move unsaved and the
-// reorder handlers torn down.
+// An expired session 303s the POST to /login; the move reverts with a session
+// message and the handles keep working (#1343).
 test('an expired session snaps the reorder back and keeps the handles working', async ({ page, browserName }) => {
   test.setTimeout(60_000);
   await openQuiz(page, `E2E Reorder Expired ${browserName} ${Date.now()}`);
