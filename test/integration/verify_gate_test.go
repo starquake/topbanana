@@ -121,7 +121,7 @@ func TestVerifyGate_AfterVerifyAdminReachesDashboard(t *testing.T) {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", err)
 	}
 
-	verify := getWith(ctx, t, client, srv.BaseURL+"/verify-email?"+url.Values{"token": {raw}}.Encode())
+	verify := confirmVerifyLinkWithClient(ctx, t, srv.BaseURL, raw, client)
 	verify.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := verify.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("verify status = %d, want %d", got, want)

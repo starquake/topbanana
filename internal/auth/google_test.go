@@ -24,16 +24,14 @@ import (
 func seedOAuthApprovalPlayers(t *testing.T) (*store.PlayerStore, *Player) {
 	t.Helper()
 	ps := store.NewPlayerStore(dbtest.Open(t), discardLogger())
-	admin, err := ps.CreatePlayerFromOAuth(t.Context(), "adminuser", "admin@example.test")
-	if err != nil {
+	// The linked admin identity makes the store count a credentialled player, so
+	// the next registrant is a plain, unapproved player.
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(), "adminuser", "admin@example.test", ProviderGoogle, "subj-admin",
+	); err != nil {
 		t.Fatalf("CreatePlayerFromOAuth admin err = %v, want nil", err)
 	}
-	// Link the admin's identity as the real callback does, so the store counts a
-	// credentialled player and the next registrant is a plain, unapproved player.
-	if err = ps.LinkProviderIdentity(t.Context(), admin.ID, ProviderGoogle, "subj-admin"); err != nil {
-		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
-	}
-	target, err := ps.CreatePlayerFromOAuth(t.Context(), "newbie", "newbie@example.test")
+	target, err := ps.CreatePlayerFromOAuth(t.Context(), "newbie", "newbie@example.test", ProviderGoogle, "subj-newbie")
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth target err = %v, want nil", err)
 	}
@@ -75,7 +73,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_NewUnapprovedBlockedAndNotified(t
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, true, approval,
+		rec, req, ps, session.New([]byte("k"), false), target, nil, true, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -127,7 +125,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_RepeatUnapprovedBlockedNoMail(t *
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), target, false, approval,
+		rec, req, ps, session.New([]byte("k"), false), target, nil, false, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -153,23 +151,22 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	t.Parallel()
 
 	ps := store.NewPlayerStore(dbtest.Open(t), discardLogger())
-	admin, err := ps.CreatePlayerFromOAuth(t.Context(), "adminuser", "admin@example.test")
-	if err != nil {
-		t.Fatalf("CreatePlayerFromOAuth admin err = %v, want nil", err)
-	}
-	// Link the admin's identity so the store counts a credentialled player and
+	// The linked admin identity makes the store count a credentialled player, so
 	// the guest's claim does not auto-promote to admin.
-	if err = ps.LinkProviderIdentity(t.Context(), admin.ID, ProviderGoogle, "subj-admin"); err != nil {
-		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(), "adminuser", "admin@example.test", ProviderGoogle, "subj-admin",
+	); err != nil {
+		t.Fatalf("CreatePlayerFromOAuth admin err = %v, want nil", err)
 	}
 	anon, err := ps.CreateAnonymousPlayer(t.Context(), "guest-player")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	// The guest signs in with Google for the first time (claim-session branch).
+	// The guest signs in with Google for the first time (claim-session branch),
+	// with registration off: it gates only create-fresh.
 	player, firstReg, err := ExportLinkOrCreateGooglePlayerFirstReg(
-		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, true,
+		t.Context(), ps, "subj-guest", "guest@example.test", &anon.ID, false,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayerFirstReg err = %v, want nil", err)
@@ -197,7 +194,7 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), player, firstReg, approval,
+		rec, req, ps, session.New([]byte("k"), false), player, &anon.ID, firstReg, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -208,6 +205,9 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	}
 	if hasSessionCookie(rec) {
 		t.Error("blocked guest claim set a session cookie, want none")
+	}
+	if !clearsSessionCookie(rec) {
+		t.Error("blocked guest claim kept the guest cookie, want it cleared (it points at the held row)")
 	}
 	if err := tracker.Wait(t.Context()); err != nil {
 		t.Fatalf("tracker.Wait err = %v, want nil", err)
@@ -226,6 +226,44 @@ func TestLinkOrCreate_ApprovalRequired_AnonymousClaimBlockedAndNotified(t *testi
 	}
 	if !toAdmin {
 		t.Error("no approval-request notice sent to the admin")
+	}
+}
+
+// clearsSessionCookie reports whether rec deleted the topbanana_session cookie.
+func clearsSessionCookie(rec *httptest.ResponseRecorder) bool {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "topbanana_session" && c.MaxAge < 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestFinalizeGoogleSignIn_ApprovalRequired_KeepsUnrelatedGuestCookie pins that
+// a blocked sign-in leaves a guest cookie for a different row alone, so the
+// guest's games stay reachable.
+func TestFinalizeGoogleSignIn_ApprovalRequired_KeepsUnrelatedGuestCookie(t *testing.T) {
+	t.Parallel()
+
+	ps, target := seedOAuthApprovalPlayers(t)
+	guest, err := ps.CreateAnonymousPlayer(t.Context(), "other-guest")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	approval := GoogleApprovalDeps{LoginApprovalRequired: true, Tasks: bgtasks.New()}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
+	ExportFinalizeGoogleSignInApproval(
+		rec, req, ps, session.New([]byte("k"), false), target, &guest.ID, false, approval,
+	)
+
+	if got, want := rec.Header().Get("Location"), "/login/pending-approval"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if clearsSessionCookie(rec) {
+		t.Error("blocked sign-in cleared an unrelated guest cookie, want it kept")
 	}
 }
 
@@ -253,7 +291,7 @@ func TestFinalizeGoogleSignIn_ApprovalRequired_ApprovedSignsIn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login/google/callback", nil)
 	ExportFinalizeGoogleSignInApproval(
-		rec, req, discardLogger(), ps, session.New([]byte("k"), false), approved, false, approval,
+		rec, req, ps, session.New([]byte("k"), false), approved, nil, false, approval,
 	)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -297,7 +335,7 @@ func (*collidingIdentityStore) GetPlayerByEmail(_ context.Context, _ string) (*P
 }
 
 func (s *collidingIdentityStore) CreatePlayerFromOAuth(
-	_ context.Context, displayName, email string,
+	_ context.Context, displayName, email, _, _ string,
 ) (*Player, error) {
 	if s.createColl > 0 {
 		s.createColl--
@@ -316,18 +354,18 @@ func (s *collidingIdentityStore) CreatePlayerFromOAuth(
 
 func (*collidingIdentityStore) LinkProviderIdentity(
 	_ context.Context, _ int64, _, _ string,
-) error {
-	return nil
-}
-
-func (*collidingIdentityStore) ClaimPlayerForOAuth(
-	_ context.Context, _ int64, _ string,
 ) (*Player, error) {
 	return nil, errors.ErrUnsupported
 }
 
-func (*collidingIdentityStore) MarkPlayerEmailVerifiedIfNew(_ context.Context, _ int64) error {
-	return errors.ErrUnsupported
+func (*collidingIdentityStore) ClaimPlayerForOAuth(
+	_ context.Context, _ int64, _, _, _ string,
+) (*Player, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*collidingIdentityStore) MarkPlayerEmailVerifiedByOAuth(_ context.Context, _ int64) (*Player, error) {
+	return nil, errors.ErrUnsupported
 }
 
 // TestLinkOrCreateGooglePlayer_NewPlayer covers the most common path:
@@ -418,20 +456,22 @@ func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 func TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail(t *testing.T) {
 	t.Parallel()
 
-	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
-	// CreatePlayer writes email but leaves email_verified_at NULL, so the
-	// linked-but-unstamped state the heal branch repairs is reproduced
-	// without going through the OAuth path.
+	db := dbtest.Open(t)
+	players := store.NewPlayerStore(db, discardLogger())
+	// CreatePlayer writes email but leaves email_verified_at NULL, and the raw
+	// identity insert skips the store's verify stamp, reproducing the
+	// linked-but-unstamped state an older partial commit could leave behind.
 	stranded, err := players.CreatePlayer(
 		t.Context(), "stranded", "stranded@example.test", "h", RolePlayer,
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	if err = players.LinkProviderIdentity(
-		t.Context(), stranded.ID, ProviderGoogle, "google-sub-heal",
+	if _, err = db.ExecContext(t.Context(),
+		"INSERT INTO player_identities (player_id, provider, subject) VALUES (?, ?, ?)",
+		stranded.ID, ProviderGoogle, "google-sub-heal",
 	); err != nil {
-		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+		t.Fatalf("seed identity insert err = %v, want nil", err)
 	}
 	if stranded.EmailVerifiedAt != nil {
 		t.Fatal("seed must leave EmailVerifiedAt nil to exercise the heal branch")
@@ -449,6 +489,44 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail(t *testin
 	if healed.EmailVerifiedAt == nil {
 		t.Error("EmailVerifiedAt = nil, want non-nil (stamp should fire on heal)")
 	}
+	// The password was set before anyone proved the mailbox (#1328).
+	if got, want := healed.PasswordHash, ""; got != want {
+		t.Errorf("PasswordHash = %q, want %q (unproven password dropped on heal)", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_ExistingIdentity_OtherEmailNotStamped pins that
+// the heal only trusts Google for the address Google attested: a row whose
+// email was changed to something else keeps it unverified and keeps its
+// password.
+func TestLinkOrCreateGooglePlayer_ExistingIdentity_OtherEmailNotStamped(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	players := store.NewPlayerStore(db, discardLogger())
+	row, err := players.CreatePlayer(t.Context(), "moved", "typo@example.test", "h", RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if _, err = db.ExecContext(t.Context(),
+		"INSERT INTO player_identities (player_id, provider, subject) VALUES (?, ?, ?)",
+		row.ID, ProviderGoogle, "google-sub-moved",
+	); err != nil {
+		t.Fatalf("seed identity insert err = %v, want nil", err)
+	}
+
+	got, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), players, "google-sub-moved", "real@example.test", nil, true,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got.EmailVerifiedAt != nil {
+		t.Error("EmailVerifiedAt set, want nil (Google did not attest this address)")
+	}
+	if got, want := got.PasswordHash, "h"; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
+	}
 }
 
 // TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop
@@ -461,7 +539,7 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop(t *testin
 	// CreatePlayerFromOAuth stamps email_verified_at, giving an
 	// already-verified row the heal branch must leave untouched.
 	verified, err := players.CreatePlayerFromOAuth(
-		t.Context(), "verified", "verified@example.test",
+		t.Context(), "verified", "verified@example.test", ProviderGoogle, "google-sub-verified",
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
@@ -470,11 +548,6 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop(t *testin
 		t.Fatal("seed must have EmailVerifiedAt set to exercise the no-op branch")
 	}
 	verifiedAt := *verified.EmailVerifiedAt
-	if err = players.LinkProviderIdentity(
-		t.Context(), verified.ID, ProviderGoogle, "google-sub-verified",
-	); err != nil {
-		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
-	}
 
 	got, err := ExportLinkOrCreateGooglePlayer(
 		t.Context(), players, "google-sub-verified", "verified@example.test", nil, true,
@@ -522,6 +595,40 @@ func TestLinkOrCreateGooglePlayer_LinkExistingEmail(t *testing.T) {
 	}
 	if got, want := bySubject.ID, existing.ID; got != want {
 		t.Errorf("bySubject.ID = %d, want %d", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_LinkUnverifiedEmailDropsPassword pins #1328: a
+// password row nobody verified is squatted, so a Google sign-in on that address
+// takes it over without the squatter's password or sessions surviving.
+func TestLinkOrCreateGooglePlayer_LinkUnverifiedEmailDropsPassword(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	squatted, err := players.CreatePlayer(
+		t.Context(), "squatter", "victim@example.test", "attacker-hash", RolePlayer,
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	player, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), players, "google-sub-victim", "victim@example.test", nil, true,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got, want := player.ID, squatted.ID; got != want {
+		t.Errorf("player.ID = %d, want %d (linked, not created)", got, want)
+	}
+	if got, want := player.PasswordHash, ""; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
+	}
+	if got, want := player.SessionVersion, squatted.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+	if !player.IsEmailVerified() {
+		t.Error("IsEmailVerified() = false, want true")
 	}
 }
 
@@ -620,15 +727,10 @@ func TestLinkOrCreateGooglePlayer_RegistrationDisabled_ExistingIdentityLogsIn(t 
 
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	existing, err := players.CreatePlayerFromOAuth(
-		t.Context(), "existing", "existing@example.test",
+		t.Context(), "existing", "existing@example.test", ProviderGoogle, "google-sub-existing",
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
-	}
-	if err = players.LinkProviderIdentity(
-		t.Context(), existing.ID, ProviderGoogle, "google-sub-existing",
-	); err != nil {
-		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
 	}
 
 	got, err := ExportLinkOrCreateGooglePlayer(
@@ -657,18 +759,12 @@ func TestClaimAnonymousSessionPlayer_RecoversFromConcurrentLink(t *testing.T) {
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	// The winning callback's row: already credentialled with an email,
 	// so ClaimPlayerForOAuth's anonymous-only guard rejects this caller.
+	// The identity is linked to the winning row so the recovery lookup finds it.
 	winner, err := players.CreatePlayerFromOAuth(
-		t.Context(), "winner", "winner@example.test",
+		t.Context(), "winner", "winner@example.test", ProviderGoogle, "google-sub-race",
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
-	}
-	// Pre-link the identity to the winning row so the recovery lookup
-	// finds it.
-	if err = players.LinkProviderIdentity(
-		t.Context(), winner.ID, ProviderGoogle, "google-sub-race",
-	); err != nil {
-		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
 	}
 
 	// The loser passes its own session player id (also pointing at
@@ -696,7 +792,7 @@ func TestClaimAnonymousSessionPlayer_NoRaceFallsThrough(t *testing.T) {
 	// Row exists but is no longer claimable (email already set);
 	// nothing has linked the subject yet.
 	row, err := players.CreatePlayerFromOAuth(
-		t.Context(), "stale", "stale@example.test",
+		t.Context(), "stale", "stale@example.test", ProviderGoogle, "google-sub-stale",
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
@@ -716,26 +812,18 @@ func TestClaimAnonymousSessionPlayer_NoRaceFallsThrough(t *testing.T) {
 // TestCreateGooglePlayer_RecoversFromConcurrentLink pins the
 // symmetric race-recovery branch in createGooglePlayer: a concurrent
 // callback for the same (provider, subject) linked the identity onto
-// another row between our identity-lookup miss and our
-// LinkProviderIdentity call. The code returns the already-linked row
-// instead of erroring out.
+// another row between our identity-lookup miss and our create. The code
+// returns the already-linked row instead of erroring out, and the
+// rolled-back create leaves no orphan row (#1330).
 func TestCreateGooglePlayer_RecoversFromConcurrentLink(t *testing.T) {
 	t.Parallel()
 
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	winner, err := players.CreatePlayerFromOAuth(
-		t.Context(), "racewinner", "racewinner@example.test",
+		t.Context(), "racewinner", "racewinner@example.test", ProviderGoogle, "google-sub-create-race",
 	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
-	}
-	if err = players.LinkProviderIdentity(
-		t.Context(),
-		winner.ID,
-		ProviderGoogle,
-		"google-sub-create-race",
-	); err != nil {
-		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
 	}
 
 	got, err := ExportCreateGooglePlayer(
@@ -747,10 +835,10 @@ func TestCreateGooglePlayer_RecoversFromConcurrentLink(t *testing.T) {
 	if got == nil || got.ID != winner.ID {
 		t.Errorf("recovered player.ID = %v, want %d (the winner's row)", got, winner.ID)
 	}
-	// The orphan row that createGooglePlayer's CreatePlayerFromOAuth
-	// inserted before the link failure is observable but harmless
-	// (nothing links to it). The test does not assert its absence -
-	// future cleanup is the operator's call.
+	_, err = players.GetPlayerByEmail(t.Context(), "newcomer@example.test")
+	if got, want := err, ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("GetPlayerByEmail(newcomer) err = %v, want %v (no orphan row)", got, want)
+	}
 }
 
 // TestSignAndValidateState_RoundTrip pins the state-cookie HMAC: a
@@ -797,16 +885,15 @@ func TestSignAndValidateState_RoundTrip(t *testing.T) {
 // in linkExistingPlayerByEmail and claimAnonymousSessionPlayer fire only
 // when two concurrent OAuth callbacks interleave, which a single-threaded
 // real DB cannot reproduce on demand, so the result of each call is
-// injected here. CreatePlayerFromOAuth is never reached by either helper
-// under test, so it stays hard-wired to ErrUnsupported to surface an
-// unexpected call loudly.
+// injected here. CreatePlayerFromOAuth and MarkPlayerEmailVerifiedByOAuth
+// are never reached by either helper under test, so they stay hard-wired to
+// ErrUnsupported to surface an unexpected call loudly.
 type identityStubStore struct {
 	byEmailPlayer   *Player
 	byEmailErr      error
 	bySubjectPlayer *Player
 	bySubjectErr    error
 	linkErr         error
-	markVerifiedErr error
 	claimPlayer     *Player
 	claimErr        error
 }
@@ -819,19 +906,23 @@ func (s *identityStubStore) GetPlayerByProviderSubject(_ context.Context, _, _ s
 	return s.bySubjectPlayer, s.bySubjectErr
 }
 
-func (s *identityStubStore) LinkProviderIdentity(_ context.Context, _ int64, _, _ string) error {
-	return s.linkErr
+func (s *identityStubStore) LinkProviderIdentity(_ context.Context, _ int64, _, _ string) (*Player, error) {
+	if s.linkErr != nil {
+		return nil, s.linkErr
+	}
+
+	return s.byEmailPlayer, nil
 }
 
-func (s *identityStubStore) MarkPlayerEmailVerifiedIfNew(_ context.Context, _ int64) error {
-	return s.markVerifiedErr
+func (*identityStubStore) MarkPlayerEmailVerifiedByOAuth(_ context.Context, _ int64) (*Player, error) {
+	return nil, errors.ErrUnsupported
 }
 
-func (s *identityStubStore) ClaimPlayerForOAuth(_ context.Context, _ int64, _ string) (*Player, error) {
+func (s *identityStubStore) ClaimPlayerForOAuth(_ context.Context, _ int64, _, _, _ string) (*Player, error) {
 	return s.claimPlayer, s.claimErr
 }
 
-func (*identityStubStore) CreatePlayerFromOAuth(_ context.Context, _, _ string) (*Player, error) {
+func (*identityStubStore) CreatePlayerFromOAuth(_ context.Context, _, _, _, _ string) (*Player, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -893,44 +984,6 @@ func TestLinkExistingPlayerByEmail_RefetchAfterLinkRaceErrorWraps(t *testing.T) 
 	}
 	if got, want := err.Error(), "refetch after link race"; !strings.Contains(got, want) {
 		t.Errorf("err.Error() = %q, should contain %q", got, want)
-	}
-}
-
-// TestLinkExistingPlayerByEmail_MarkVerifiedErrorWraps pins branch (d):
-// the link succeeds but MarkPlayerEmailVerifiedIfNew errors, so the
-// failure wraps as "mark email verified after link".
-func TestLinkExistingPlayerByEmail_MarkVerifiedErrorWraps(t *testing.T) {
-	t.Parallel()
-
-	identities := &identityStubStore{
-		byEmailPlayer:   &Player{ID: 7, Email: "alice@example.test"},
-		markVerifiedErr: errors.New("stamp failed"),
-	}
-
-	_, err := ExportLinkExistingPlayerByEmail(t.Context(), identities, "sub", "alice@example.test")
-	if err == nil {
-		t.Fatal("err = nil, want non-nil")
-	}
-	if got, want := err.Error(), "mark email verified after link"; !strings.Contains(got, want) {
-		t.Errorf("err.Error() = %q, should contain %q", got, want)
-	}
-}
-
-// TestLinkExistingPlayerByEmail_StampsVerifiedWhenNil pins branch (e):
-// the happy path links the identity and stamps EmailVerifiedAt on a row
-// whose column was still nil. The non-nil EmailVerifiedAt confirms the
-// helper ran past the MarkPlayerEmailVerifiedIfNew call to the stamp.
-func TestLinkExistingPlayerByEmail_StampsVerifiedWhenNil(t *testing.T) {
-	t.Parallel()
-
-	identities := &identityStubStore{byEmailPlayer: &Player{ID: 7, Email: "alice@example.test"}}
-
-	got, err := ExportLinkExistingPlayerByEmail(t.Context(), identities, "sub", "alice@example.test")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
-	if got.EmailVerifiedAt == nil {
-		t.Error("EmailVerifiedAt = nil, want non-nil (stamped when previously nil)")
 	}
 }
 
@@ -996,16 +1049,15 @@ func TestClaimAnonymousSessionPlayer_NoConcurrentLinkReturnsNotFound(t *testing.
 }
 
 // TestClaimAnonymousSessionPlayer_LinkRaceRefetchesRow pins branch (d):
-// the claim succeeds but LinkProviderIdentity loses the race with
-// ErrIdentityAlreadyLinked, so the refetch by subject returns the
-// canonical OAuth-linked row.
+// the claim's link loses the race with ErrIdentityAlreadyLinked (rolling
+// the claim back), so the refetch by subject returns the canonical
+// OAuth-linked row.
 func TestClaimAnonymousSessionPlayer_LinkRaceRefetchesRow(t *testing.T) {
 	t.Parallel()
 
 	winner := &Player{ID: 99, Email: "winner@example.test"}
 	identities := &identityStubStore{
-		claimPlayer:     &Player{ID: 7, Email: "claimed@example.test"},
-		linkErr:         ErrIdentityAlreadyLinked,
+		claimErr:        ErrIdentityAlreadyLinked,
 		bySubjectPlayer: winner,
 	}
 
@@ -1019,14 +1071,13 @@ func TestClaimAnonymousSessionPlayer_LinkRaceRefetchesRow(t *testing.T) {
 }
 
 // TestClaimAnonymousSessionPlayer_LinkRaceRefetchErrorWraps pins branch
-// (e): the claim succeeds, the link race fires, but the refetch by
-// subject errors, so the failure wraps as "refetch after link race".
+// (e): the claim's link race fires, but the refetch by subject errors,
+// so the failure wraps as "refetch after link race".
 func TestClaimAnonymousSessionPlayer_LinkRaceRefetchErrorWraps(t *testing.T) {
 	t.Parallel()
 
 	identities := &identityStubStore{
-		claimPlayer:  &Player{ID: 7, Email: "claimed@example.test"},
-		linkErr:      ErrIdentityAlreadyLinked,
+		claimErr:     ErrIdentityAlreadyLinked,
 		bySubjectErr: errors.New("refetch failed"),
 	}
 

@@ -295,7 +295,13 @@ func TestPlayerStore_CreatePlayerFromOAuth_LowercasesEmail(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	created, err := ps.CreatePlayerFromOAuth(t.Context(), "oauthuser", "  OAuth@Example.Test ")
+	created, err := ps.CreatePlayerFromOAuth(
+		t.Context(),
+		"oauthuser",
+		"  OAuth@Example.Test ",
+		"google",
+		"sub-oauthuser",
+	)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
@@ -326,7 +332,7 @@ func TestPlayerStore_ClaimPlayerForOAuth_LowercasesEmail(t *testing.T) {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	claimed, err := ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "  Claim@Example.Test ")
+	claimed, err := ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "  Claim@Example.Test ", "google", "sub-claim")
 	if err != nil {
 		t.Fatalf("ClaimPlayerForOAuth err = %v, want nil", err)
 	}
@@ -678,12 +684,9 @@ func TestPlayerStore_ListPlayersByOnboardingState_AndCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	oauth, err := ps.CreatePlayerFromOAuth(t.Context(), "oauth-list-1", "o@example.com")
+	oauth, err := ps.CreatePlayerFromOAuth(t.Context(), "oauth-list-1", "o@example.com", "google", "sub-list-1")
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
-	}
-	if linkErr := ps.LinkProviderIdentity(t.Context(), oauth.ID, "google", "sub-list-1"); linkErr != nil {
-		t.Fatalf("LinkProviderIdentity err = %v, want nil", linkErr)
 	}
 
 	count, err := ps.CountPlayersInOnboardingState(t.Context(), auth.OnboardingStateAll)
@@ -753,12 +756,14 @@ func TestPlayerStore_ListPlayersByOnboardingState_FilterAndCounts(t *testing.T) 
 	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	o, err := ps.CreatePlayerFromOAuth(t.Context(), "oauth-bucket-a", "ob@example.test")
-	if err != nil {
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(),
+		"oauth-bucket-a",
+		"ob@example.test",
+		"google",
+		"sub-bucket-a",
+	); err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
-	}
-	if linkErr := ps.LinkProviderIdentity(t.Context(), o.ID, "google", "sub-bucket-a"); linkErr != nil {
-		t.Fatalf("LinkProviderIdentity err = %v, want nil", linkErr)
 	}
 
 	unverifiedCount, err := ps.CountPlayersInOnboardingState(t.Context(), auth.OnboardingStateUnverified)
@@ -896,7 +901,7 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksDisplayNameClaimed(t *testin
 	// displayName_claimed=0 -> 1 flip we then rename to keep the row in
 	// the "needs claim" state, then run SetPlayerPasswordHash.
 	const email = "set-hash-test@example.test"
-	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-claim-after-pw", email)
+	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-claim-after-pw", email, "google", "sub-anon-claim-after-pw")
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
@@ -935,7 +940,7 @@ func TestPlayerStore_SetPlayerPasswordHash_BumpsSessionVersion(t *testing.T) {
 	ps := NewPlayerStore(db, slog.Default())
 
 	const email = "session-bump-test@example.test"
-	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-session-bump", email)
+	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-session-bump", email, "google", "sub-anon-session-bump")
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
@@ -955,6 +960,16 @@ func TestPlayerStore_SetPlayerPasswordHash_BumpsSessionVersion(t *testing.T) {
 	}
 	if got, want := after.SessionVersion, before.SessionVersion+1; got != want {
 		t.Errorf("SessionVersion = %d, want %d (operator reset must invalidate other sessions)", got, want)
+	}
+}
+
+func TestPlayerStore_SetPlayerPasswordHash_UnknownEmail(t *testing.T) {
+	t.Parallel()
+	ps := NewPlayerStore(dbtest.Open(t), slog.Default())
+
+	err := ps.SetPlayerPasswordHash(t.Context(), "nobody@example.test", "h")
+	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("SetPlayerPasswordHash err = %v, want %v", got, want)
 	}
 }
 
@@ -1600,7 +1615,7 @@ func TestPlayerStore_CreatePlayerFromOAuth_HappyPath(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	player, err := ps.CreatePlayerFromOAuth(t.Context(), "  Oauthy  ", "  Fresh@Example.Test ")
+	player, err := ps.CreatePlayerFromOAuth(t.Context(), "  Oauthy  ", "  Fresh@Example.Test ", "google", "sub-Oauthy")
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
@@ -1627,11 +1642,17 @@ func TestPlayerStore_CreatePlayerFromOAuth_DuplicateDisplayName(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayerFromOAuth(t.Context(), "samename", "first@example.test"); err != nil {
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(),
+		"samename",
+		"first@example.test",
+		"google",
+		"sub-samename",
+	); err != nil {
 		t.Fatalf("first CreatePlayerFromOAuth err = %v, want nil", err)
 	}
 
-	_, err := ps.CreatePlayerFromOAuth(t.Context(), "samename", "second@example.test")
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "samename", "second@example.test", "google", "sub-samename")
 	if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
 		t.Errorf("CreatePlayerFromOAuth err = %v, want %v", got, want)
 	}
@@ -1649,11 +1670,11 @@ func TestPlayerStore_CreatePlayerFromOAuth_ClosedDBWraps(t *testing.T) {
 		t.Fatalf("failed to close database: %v", err)
 	}
 
-	_, err := ps.CreatePlayerFromOAuth(t.Context(), "anyone", "anyone@example.test")
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "anyone", "anyone@example.test", "google", "sub-anyone")
 	if err == nil {
 		t.Fatal("CreatePlayerFromOAuth err = nil, want non-nil on closed DB")
 	}
-	if got, want := err.Error(), "failed to create player from oauth"; !strings.Contains(got, want) {
+	if got, want := err.Error(), "create player from oauth"; !strings.Contains(got, want) {
 		t.Errorf("err.Error() = %q, should contain %q", got, want)
 	}
 }
@@ -1726,4 +1747,486 @@ func TestPlayerStore_ListAdminEmails(t *testing.T) {
 	if got, want := emails[0], "alice@example.test"; got != want {
 		t.Errorf("ListAdminEmails[0] = %q, want %q", got, want)
 	}
+}
+
+// TestPlayerStore_ClaimPlayer_BumpsSessionVersion pins #1327: the anonymous
+// cookie that pointed at the row must stop resolving once the row is claimed.
+func TestPlayerStore_ClaimPlayer_BumpsSessionVersion(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim-bump")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayer(t.Context(), anon.ID, "claimer", "claimer@example.test", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("ClaimPlayer err = %v, want nil", err)
+	}
+	if got, want := claimed.SessionVersion, anon.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_ClaimPlayerForOAuth_BumpsVersionAndLinks pins #1327 and
+// #1330: the OAuth claim invalidates the anonymous cookie and links the
+// identity in the same call.
+func TestPlayerStore_ClaimPlayerForOAuth_BumpsVersionAndLinks(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-oauth-bump")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "bump@example.test", "google", "sub-bump")
+	if err != nil {
+		t.Fatalf("ClaimPlayerForOAuth err = %v, want nil", err)
+	}
+	if got, want := claimed.SessionVersion, anon.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+	linked, err := ps.GetPlayerByProviderSubject(t.Context(), "google", "sub-bump")
+	if err != nil {
+		t.Fatalf("GetPlayerByProviderSubject err = %v, want nil", err)
+	}
+	if got, want := linked.ID, anon.ID; got != want {
+		t.Errorf("linked.ID = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_ClaimPlayerForOAuth_LinkConflictRollsBack pins that a claim
+// whose identity is already linked elsewhere leaves the anonymous row untouched.
+func TestPlayerStore_ClaimPlayerForOAuth_LinkConflictRollsBack(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(),
+		"owner",
+		"owner@example.test",
+		"google",
+		"sub-taken",
+	); err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-conflict")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	_, err = ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "other@example.test", "google", "sub-taken")
+	if got, want := err, auth.ErrIdentityAlreadyLinked; !errors.Is(got, want) {
+		t.Fatalf("ClaimPlayerForOAuth err = %v, want %v", got, want)
+	}
+
+	after, err := ps.GetPlayerByID(t.Context(), anon.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := after.Email, ""; got != want {
+		t.Errorf("Email = %q, want %q (claim must roll back)", got, want)
+	}
+	if got, want := after.SessionVersion, anon.SessionVersion; got != want {
+		t.Errorf("SessionVersion = %d, want %d (claim must roll back)", got, want)
+	}
+}
+
+// TestPlayerStore_CreatePlayerFromOAuth_LinkConflictRollsBack pins #1330: a
+// failed link leaves no unlinked row behind to skew the admin bootstrap.
+func TestPlayerStore_CreatePlayerFromOAuth_LinkConflictRollsBack(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayerFromOAuth(t.Context(), "first", "first@example.test", "google", "sub-dup"); err != nil {
+		t.Fatalf("first CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "second", "second@example.test", "google", "sub-dup")
+	if got, want := err, auth.ErrIdentityAlreadyLinked; !errors.Is(got, want) {
+		t.Fatalf("second CreatePlayerFromOAuth err = %v, want %v", got, want)
+	}
+	_, err = ps.GetPlayerByDisplayName(t.Context(), "second")
+	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("GetPlayerByDisplayName(second) err = %v, want %v (row must roll back)", got, want)
+	}
+}
+
+// TestPlayerStore_CreatePlayerFromOAuth_ConcurrentFirstSignInsOneAdmin pins
+// #1330: concurrent first OAuth sign-ins on a fresh install mint one admin.
+func TestPlayerStore_CreatePlayerFromOAuth_ConcurrentFirstSignInsOneAdmin(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Go(func() {
+			_, errs[i] = ps.CreatePlayerFromOAuth(t.Context(),
+				fmt.Sprintf("racer-%d", i), fmt.Sprintf("racer-%d@example.test", i),
+				"google", fmt.Sprintf("sub-racer-%d", i))
+		})
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreatePlayerFromOAuth(%d) err = %v, want nil", i, err)
+		}
+	}
+
+	var admins int
+	if err := db.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM players WHERE role = 'admin' AND display_name LIKE 'racer-%'",
+	).Scan(&admins); err != nil {
+		t.Fatalf("count admins err = %v, want nil", err)
+	}
+	if got, want := admins, 1; got != want {
+		t.Errorf("admins = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_LinkProviderIdentity_UnverifiedDropsPassword pins #1328: a
+// provider link onto an unverified row proves the address, drops the password
+// nobody proved, and invalidates the row's sessions.
+func TestPlayerStore_LinkProviderIdentity_UnverifiedDropsPassword(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	pw, err := ps.CreatePlayer(t.Context(), "squatter", "victim@example.test", "attacker-hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	linked, err := ps.LinkProviderIdentity(t.Context(), pw.ID, "google", "sub-victim")
+	if err != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+	}
+	if got, want := linked.PasswordHash, ""; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
+	}
+	if got, want := linked.SessionVersion, pw.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+	if got, want := linked.IsEmailVerified(), true; got != want {
+		t.Errorf("IsEmailVerified() = %v, want %v", got, want)
+	}
+}
+
+// TestPlayerStore_LinkProviderIdentity_VerifiedKeepsPassword pins that a row
+// whose owner already proved the address keeps its password and sessions.
+func TestPlayerStore_LinkProviderIdentity_VerifiedKeepsPassword(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	pw, err := ps.CreatePlayer(t.Context(), "owner", "owner@example.test", "owner-hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if markErr := ps.MarkPlayerEmailVerifiedIfNew(t.Context(), pw.ID); markErr != nil {
+		t.Fatalf("MarkPlayerEmailVerifiedIfNew err = %v, want nil", markErr)
+	}
+
+	linked, err := ps.LinkProviderIdentity(t.Context(), pw.ID, "google", "sub-owner")
+	if err != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+	}
+	if got, want := linked.PasswordHash, "owner-hash"; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
+	}
+	if got, want := linked.SessionVersion, pw.SessionVersion; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_LinkProviderIdentity_AlreadyLinked pins the sentinel the
+// OAuth handler's race recovery keys on.
+func TestPlayerStore_LinkProviderIdentity_AlreadyLinked(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(),
+		"holder",
+		"holder@example.test",
+		"google",
+		"sub-held",
+	); err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	pw, err := ps.CreatePlayer(t.Context(), "other", "other@example.test", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	_, err = ps.LinkProviderIdentity(t.Context(), pw.ID, "google", "sub-held")
+	if got, want := err, auth.ErrIdentityAlreadyLinked; !errors.Is(got, want) {
+		t.Fatalf("LinkProviderIdentity err = %v, want %v", got, want)
+	}
+	after, err := ps.GetPlayerByID(t.Context(), pw.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := after.PasswordHash, "h"; got != want {
+		t.Errorf("PasswordHash = %q, want %q (failed link must not touch the row)", got, want)
+	}
+}
+
+// TestPlayerStore_MarkPlayerEmailVerifiedByOAuth pins the self-heal variant of
+// the provider proof: an unverified row loses its password, a verified one is
+// left alone, and a missing row reports ErrPlayerNotFound.
+func TestPlayerStore_MarkPlayerEmailVerifiedByOAuth(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	pw, err := ps.CreatePlayer(t.Context(), "healer", "healer@example.test", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	first, err := ps.MarkPlayerEmailVerifiedByOAuth(t.Context(), pw.ID)
+	if err != nil {
+		t.Fatalf("first MarkPlayerEmailVerifiedByOAuth err = %v, want nil", err)
+	}
+	if got, want := first.PasswordHash, ""; got != want {
+		t.Errorf("PasswordHash = %q, want %q", got, want)
+	}
+	if got, want := first.SessionVersion, pw.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d", got, want)
+	}
+
+	second, err := ps.MarkPlayerEmailVerifiedByOAuth(t.Context(), pw.ID)
+	if err != nil {
+		t.Fatalf("second MarkPlayerEmailVerifiedByOAuth err = %v, want nil", err)
+	}
+	if got, want := second.SessionVersion, first.SessionVersion; got != want {
+		t.Errorf("SessionVersion = %d, want %d (already verified is a no-op)", got, want)
+	}
+
+	_, err = ps.MarkPlayerEmailVerifiedByOAuth(t.Context(), 99999)
+	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("missing row err = %v, want %v", got, want)
+	}
+}
+
+// liveTokens holds the hashes of one live token of each kind for a player.
+type liveTokens struct {
+	registerVerify, changeVerify, reset string
+}
+
+// seedLiveCredentialTokens mints one live register-time verify token, one live
+// email-change verify token, and one live reset token for the player.
+func seedLiveCredentialTokens(t *testing.T, ps *PlayerStore, playerID int64) liveTokens {
+	t.Helper()
+
+	var toks liveTokens
+	for _, v := range []struct {
+		hash    *string
+		pending string
+	}{{&toks.registerVerify, ""}, {&toks.changeVerify, "changed@example.test"}} {
+		_, hash, err := auth.GenerateVerifyToken()
+		if err != nil {
+			t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+		}
+		if cerr := ps.CreateVerifyToken(
+			t.Context(),
+			hash,
+			playerID,
+			time.Now().Add(time.Hour),
+			v.pending,
+		); cerr != nil {
+			t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+		}
+		*v.hash = hash
+	}
+	_, resetHash, err := auth.GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken err = %v, want nil", err)
+	}
+	if cerr := ps.CreateResetToken(t.Context(), resetHash, playerID, time.Now().Add(time.Hour)); cerr != nil {
+		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
+	}
+	toks.reset = resetHash
+
+	return toks
+}
+
+// assertTokenLive fails when consuming the token errored.
+func assertTokenLive(t *testing.T, name string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("%s consume err = %v, want nil (still live)", name, err)
+	}
+}
+
+// assertTokenRevoked fails unless consuming the token reported invalid.
+func assertTokenRevoked(t *testing.T, name string, err, invalid error) {
+	t.Helper()
+	if !errors.Is(err, invalid) {
+		t.Errorf("%s consume err = %v, want %v (revoked)", name, err, invalid)
+	}
+}
+
+// TestPlayerStore_CredentialChangesRevokeLiveTokens pins #1329: a password
+// change revokes reset and email-change links, and an email change revokes
+// every link mailed to the old address.
+func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		change           func(t *testing.T, ps *PlayerStore, playerID int64)
+		wantRegisterLive bool
+	}{
+		{
+			name: "change password",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if err := ps.ChangePlayerPassword(t.Context(), playerID, "new-hash"); err != nil {
+					t.Fatalf("ChangePlayerPassword err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "consume reset token",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				raw, hash, err := auth.GenerateResetToken()
+				if err != nil {
+					t.Fatalf("GenerateResetToken err = %v, want nil", err)
+				}
+				if err := ps.CreateResetToken(t.Context(), hash, playerID, time.Now().Add(time.Hour)); err != nil {
+					t.Fatalf("CreateResetToken err = %v, want nil", err)
+				}
+				if _, err := ps.ConsumeResetToken(t.Context(), auth.HashResetToken(raw), "new-hash"); err != nil {
+					t.Fatalf("ConsumeResetToken err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "operator reset password",
+			change: func(t *testing.T, ps *PlayerStore, _ int64) {
+				t.Helper()
+				if err := ps.SetPlayerPasswordHash(t.Context(), "tokens@example.test", "new-hash"); err != nil {
+					t.Fatalf("SetPlayerPasswordHash err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "google link drops unproven password",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if _, err := ps.LinkProviderIdentity(t.Context(), playerID, "google", "sub-tokens"); err != nil {
+					t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "admin set email",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if err := ps.SetPlayerEmail(t.Context(), playerID, "moved@example.test"); err != nil {
+					t.Fatalf("SetPlayerEmail err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: false,
+		},
+		{
+			name: "confirm email change",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				raw, hash, err := auth.GenerateVerifyToken()
+				if err != nil {
+					t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+				}
+				if err := ps.CreateVerifyToken(
+					t.Context(), hash, playerID, time.Now().Add(time.Hour), "swapped@example.test",
+				); err != nil {
+					t.Fatalf("CreateVerifyToken err = %v, want nil", err)
+				}
+				if _, err := ps.ConsumeVerifyToken(t.Context(), auth.HashVerifyToken(raw)); err != nil {
+					t.Fatalf("ConsumeVerifyToken err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbtest.Open(t)
+			ps := NewPlayerStore(db, slog.Default())
+			p, err := ps.CreatePlayer(t.Context(), "tokens", "tokens@example.test", "old-hash", auth.RolePlayer)
+			if err != nil {
+				t.Fatalf("CreatePlayer err = %v, want nil", err)
+			}
+			toks := seedLiveCredentialTokens(t, ps, p.ID)
+
+			tt.change(t, ps, p.ID)
+
+			_, err = ps.ConsumeResetToken(t.Context(), toks.reset, "attacker-hash")
+			assertTokenRevoked(t, "reset", err, auth.ErrResetTokenInvalid)
+			_, err = ps.ConsumeVerifyToken(t.Context(), toks.registerVerify)
+			if tt.wantRegisterLive {
+				assertTokenLive(t, "register verify", err)
+			} else {
+				assertTokenRevoked(t, "register verify", err, auth.ErrVerifyTokenInvalid)
+			}
+			_, err = ps.ConsumeVerifyToken(t.Context(), toks.changeVerify)
+			assertTokenRevoked(t, "email-change verify", err, auth.ErrVerifyTokenInvalid)
+		})
+	}
+}
+
+// TestPlayerStore_CredentialChangesKeepOtherPlayersTokens pins that revocation
+// is scoped to the changed player.
+func TestPlayerStore_CredentialChangesKeepOtherPlayersTokens(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+	changed, err := ps.CreatePlayer(t.Context(), "changed", "changed@example.test", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	bystander, err := ps.CreatePlayer(t.Context(), "bystander", "bystander@example.test", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	toks := seedLiveCredentialTokens(t, ps, bystander.ID)
+
+	if setErr := ps.SetPlayerEmail(t.Context(), changed.ID, "changed-moved@example.test"); setErr != nil {
+		t.Fatalf("SetPlayerEmail err = %v, want nil", setErr)
+	}
+
+	// Each consume below revokes nothing the next one needs.
+	_, err = ps.ConsumeVerifyToken(t.Context(), toks.registerVerify)
+	assertTokenLive(t, "bystander register verify", err)
+	_, err = ps.ConsumeResetToken(t.Context(), toks.reset, "h2")
+	assertTokenLive(t, "bystander reset", err)
 }

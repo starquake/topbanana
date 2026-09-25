@@ -38,7 +38,8 @@ func addRoutes(
 	cfg *config.Config,
 	mail Mail,
 ) {
-	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
+	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies()).
+		WithLoginApprovalRequired(cfg.LoginApprovalRequired)
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
 	emailDeps := adminEmailDeps{
@@ -166,18 +167,22 @@ func addEmailFlowRoutes(
 ) {
 	csrfMW := csrfMgr.Middleware
 
-	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(logger, csrfMgr, auth.VerifyEmailDeps{
-		Tokens:                stores.VerifyTokens,
-		Players:               stores.Players,
-		Roles:                 stores.AdminPlayers,
-		Sessions:              sessions,
-		AdminEmails:           cfg.AdminEmails,
-		LoginApprovalRequired: cfg.LoginApprovalRequired,
-		Sender:                mail.Tester,
-		AdminEmailLister:      stores.AdminEmailLister,
-		BaseURL:               cfg.BaseURL,
-		Tasks:                 mail.Tasks,
-	}))
+	mux.Handle("GET /verify-email", auth.HandleVerifyEmailConfirm(logger, csrfMgr))
+	mux.Handle(
+		"POST /verify-email",
+		admin.MaxFormSizeMiddleware(csrfMW(auth.HandleVerifyEmail(logger, csrfMgr, auth.VerifyEmailDeps{
+			Tokens:                stores.VerifyTokens,
+			Players:               stores.Players,
+			Roles:                 stores.AdminPlayers,
+			Sessions:              sessions,
+			AdminEmails:           cfg.AdminEmails,
+			LoginApprovalRequired: cfg.LoginApprovalRequired,
+			Sender:                mail.Tester,
+			AdminEmailLister:      stores.AdminEmailLister,
+			BaseURL:               cfg.BaseURL,
+			Tasks:                 mail.Tasks,
+		}))),
+	)
 
 	verifyFlash := auth.NewSignedFlash(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),

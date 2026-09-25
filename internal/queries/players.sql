@@ -109,6 +109,9 @@ RETURNING *;
 -- path: the row now represents a player who picked their own name, so it
 -- must look identical to a CreatePlayerWithCredentials row to downstream
 -- callers.
+--
+-- session_version is bumped so the anonymous cookie that pointed at this row
+-- stops resolving once it carries credentials (#1327).
 UPDATE players
 SET display_name = sqlc.arg('display_name'),
     password_hash = sqlc.arg('password_hash'),
@@ -143,17 +146,18 @@ SET display_name = sqlc.arg('display_name'),
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
     END,
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
   AND players.email IS NULL
 RETURNING *;
 
--- name: SetPlayerPasswordHash :execrows
+-- name: SetPlayerPasswordHash :one
 -- Used by the cmd/server -reset-password operator tool to rotate a single
 -- player's password without disturbing display_name / role / email. Returns the
--- number of affected rows so the caller can map "no rows" to an "email
--- not found" error. The lookup is by email (the post-#446 login credential)
+-- row id so the caller can revoke its live links, and sql.ErrNoRows when no
+-- email matches. The lookup is by email (the post-#446 login credential)
 -- so the operator's reset target matches what the player types into /login.
 --
 -- display_name_claimed is set to 1 alongside the password because once an
@@ -172,7 +176,8 @@ UPDATE players
 SET password_hash    = sqlc.arg('password_hash'),
     display_name_claimed = 1,
     session_version = session_version + 1
-WHERE email = sqlc.arg('email');
+WHERE email = sqlc.arg('email')
+RETURNING id;
 
 -- name: GetPlayerByEmail :one
 -- Look up a player by email so the Google OAuth callback can link a
@@ -276,6 +281,9 @@ VALUES (?, ?, ?);
 -- and matches no rows; the wrapper maps that to ErrPlayerNotFound
 -- so the handler can fall through to the create path with the same
 -- petname-collision retry it uses for cookieless visitors.
+--
+-- session_version is bumped so the anonymous cookie that pointed at this row
+-- stops resolving once it carries an email (#1327).
 UPDATE players
 SET email = sqlc.arg('email'),
     email_verified_at = CURRENT_TIMESTAMP,
@@ -305,7 +313,8 @@ SET email = sqlc.arg('email'),
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
-    END
+    END,
+    session_version = session_version + 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -400,6 +409,18 @@ SET email_verified_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id')
   AND email_verified_at IS NULL;
 
+-- name: MarkPlayerEmailVerifiedByOAuth :execrows
+-- Stamps email_verified_at when an OAuth provider has just attested the
+-- address. A row that was still unverified had its password set by someone who
+-- never proved the mailbox, so the password is dropped and every live cookie is
+-- invalidated (#1328). A row already verified is left untouched.
+UPDATE players
+SET email_verified_at = CURRENT_TIMESTAMP,
+    password_hash = NULL,
+    session_version = session_version + 1
+WHERE id = sqlc.arg('id')
+  AND email_verified_at IS NULL;
+
 -- name: SwapPlayerEmail :execrows
 -- Atomically replaces players.email with the supplied address and stamps
 -- email_verified_at (re-stamped because the new address has just been
@@ -421,7 +442,7 @@ WHERE id = sqlc.arg('id');
 -- name: CreateEmailVerifyToken :exec
 -- Stores the sha256 hash of a freshly minted verify-email token. The raw
 -- token only exists on the way out the door in the email; a DB leak should
--- not be replayable against GET /verify-email.
+-- not be replayable against POST /verify-email.
 --
 -- pending_email is NULL for the register-time path and the resend variant;
 -- the in-session email-change path (#497) sets it to the new address the
@@ -468,6 +489,22 @@ RETURNING player_id, pending_email;
 DELETE FROM email_verify_tokens
 WHERE expires_at <= sqlc.arg('now');
 
+-- name: DeleteLiveEmailVerifyTokensForPlayer :exec
+-- Revokes every unconsumed verify link for the player after an email change,
+-- so a link mailed before the change cannot be used after it (#1329).
+DELETE FROM email_verify_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL;
+
+-- name: DeleteLiveEmailChangeTokensForPlayer :exec
+-- Revokes the player's unconsumed email-change links after a password change,
+-- so a change started on the old credential cannot finish on the new one
+-- (#1329). Register-time links only re-verify the current address and stay.
+DELETE FROM email_verify_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL
+  AND pending_email IS NOT NULL;
+
 -- name: CreatePasswordResetToken :exec
 -- Stores the sha256 hash of a freshly minted reset-password token. The
 -- raw token only exists on the way out the door in the email; a DB leak
@@ -505,6 +542,13 @@ RETURNING player_id;
 -- timezone.
 DELETE FROM password_reset_tokens
 WHERE expires_at <= sqlc.arg('now');
+
+-- name: DeleteLivePasswordResetTokensForPlayer :exec
+-- Revokes every unconsumed reset link for the player after a credential
+-- change, so a link mailed before the change cannot be used after it (#1329).
+DELETE FROM password_reset_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL;
 
 -- name: SetPlayerRole :execrows
 -- Sets the role on the row identified by id, from the caller (#538), so one

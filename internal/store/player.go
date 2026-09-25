@@ -283,54 +283,178 @@ func (s *PlayerStore) GetPlayerByProviderSubject(
 }
 
 // CreatePlayerFromOAuth inserts a new players row with the supplied
-// displayName + email and no password_hash. Returns auth.ErrDisplayNameTaken
-// when the displayName collides (the OAuth handler retries on this
-// sentinel with a fresh petname).
+// displayName + email and no password_hash, and links the (provider, subject)
+// identity onto it in the same transaction. The immediate write lock serialises
+// the "first credentialled player becomes admin" check against a concurrent
+// sign-in, and a failed link rolls the row back rather than leaving an
+// unlinked admin behind (#1330). Returns auth.ErrDisplayNameTaken when the
+// displayName collides (the OAuth handler retries on this sentinel with a fresh
+// petname) and auth.ErrIdentityAlreadyLinked when the identity is already
+// linked to another row.
 func (s *PlayerStore) CreatePlayerFromOAuth(
 	ctx context.Context,
-	displayName, email string,
+	displayName, email, provider, subject string,
 ) (*auth.Player, error) {
-	row, err := s.q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
-		DisplayName: strings.TrimSpace(displayName),
-		Email:       sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+	var created db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
+			DisplayName: strings.TrimSpace(displayName),
+			Email:       sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+		})
+		if err != nil {
+			var sqliteErr *sqlite.Error
+			if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+				return auth.ErrDisplayNameTaken
+			}
+
+			return fmt.Errorf("failed to create player from oauth: %w", err)
+		}
+		created = row
+
+		return linkProviderIdentity(ctx, q, row.ID, provider, subject)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create player from oauth: %w", err)
+	}
+
+	return playerFromRow(created), nil
+}
+
+// ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
+// anonymous (no password_hash, no email) players row and links the
+// (provider, subject) identity onto it in one transaction, so the admin
+// bootstrap check and the link commit together (#1330). Returns
+// auth.ErrPlayerNotFound when the row does not match the anonymous-only
+// guards in the SQL - the OAuth handler treats that sentinel as "fall through
+// to create a new row" so a session pointing at a deleted, credentialled, or
+// already-OAuth-linked row degrades gracefully - and
+// auth.ErrIdentityAlreadyLinked when the identity is already linked elsewhere,
+// in which case the claim is rolled back.
+func (s *PlayerStore) ClaimPlayerForOAuth(
+	ctx context.Context,
+	playerID int64,
+	email, provider, subject string,
+) (*auth.Player, error) {
+	var claimed db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
+			ID:    playerID,
+			Email: sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return auth.ErrPlayerNotFound
+			}
+
+			return fmt.Errorf("failed to claim player for oauth: %w", err)
+		}
+		claimed = row
+
+		return linkProviderIdentity(ctx, q, row.ID, provider, subject)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claim player for oauth: %w", err)
+	}
+
+	return playerFromRow(claimed), nil
+}
+
+// LinkProviderIdentity links the (provider, subject) identity onto an existing
+// row and, in the same transaction, treats the row's email as proven by the
+// provider: an unverified row is stamped verified, its unproven password is
+// dropped, and its sessions are invalidated (#1328). Returns the row as it
+// stands after the link, or auth.ErrIdentityAlreadyLinked when the identity is
+// already linked (the caller re-reads it).
+func (s *PlayerStore) LinkProviderIdentity(
+	ctx context.Context,
+	playerID int64,
+	provider, subject string,
+) (*auth.Player, error) {
+	var linked db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		if err := linkProviderIdentity(ctx, q, playerID, provider, subject); err != nil {
+			return err
+		}
+		row, err := markEmailVerifiedByOAuth(ctx, q, playerID)
+		if err != nil {
+			return err
+		}
+		linked = row
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("link provider identity: %w", err)
+	}
+
+	return playerFromRow(linked), nil
+}
+
+// MarkPlayerEmailVerifiedByOAuth applies the same provider-attested proof as
+// [PlayerStore.LinkProviderIdentity] to a row whose identity is already linked:
+// an unverified row is stamped verified, its password dropped, and its sessions
+// invalidated. Returns the row as it stands afterwards, or auth.ErrPlayerNotFound.
+func (s *PlayerStore) MarkPlayerEmailVerifiedByOAuth(ctx context.Context, playerID int64) (*auth.Player, error) {
+	var marked db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := markEmailVerifiedByOAuth(ctx, q, playerID)
+		if err != nil {
+			return err
+		}
+		marked = row
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mark email verified by oauth: %w", err)
+	}
+
+	return playerFromRow(marked), nil
+}
+
+// linkProviderIdentity inserts the player_identities row on q, mapping the
+// UNIQUE (provider, subject) collision to auth.ErrIdentityAlreadyLinked.
+func linkProviderIdentity(ctx context.Context, q *db.Queries, playerID int64, provider, subject string) error {
+	err := q.LinkProviderIdentity(ctx, db.LinkProviderIdentityParams{
+		PlayerID: playerID,
+		Provider: provider,
+		Subject:  subject,
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, auth.ErrDisplayNameTaken
+			return auth.ErrIdentityAlreadyLinked
 		}
 
-		return nil, fmt.Errorf("failed to create player from oauth: %w", err)
+		return fmt.Errorf("failed to link provider identity: %w", err)
 	}
 
-	return playerFromRow(row), nil
+	return nil
 }
 
-// ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
-// anonymous (no password_hash, no email) players row. Returns
-// auth.ErrPlayerNotFound when the row does not match the
-// anonymous-only guards in the SQL - the OAuth handler treats that
-// sentinel as "fall through to create a new row" so a session
-// pointing at a deleted, credentialled, or already-OAuth-linked row
-// degrades gracefully.
-func (s *PlayerStore) ClaimPlayerForOAuth(
-	ctx context.Context,
-	playerID int64,
-	email string,
-) (*auth.Player, error) {
-	row, err := s.q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
-		ID:    playerID,
-		Email: sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
-	})
+// markEmailVerifiedByOAuth runs MarkPlayerEmailVerifiedByOAuth on q, revoking the
+// dropped password's reset links when it applied, and returns the row as it
+// stands afterwards.
+func markEmailVerifiedByOAuth(ctx context.Context, q *db.Queries, playerID int64) (db.Player, error) {
+	rows, err := q.MarkPlayerEmailVerifiedByOAuth(ctx, playerID)
+	if err != nil {
+		return db.Player{}, fmt.Errorf("failed to mark email verified by oauth: %w", err)
+	}
+	if rows > 0 {
+		if revokeErr := revokeTokensAfterPasswordChange(ctx, q, playerID); revokeErr != nil {
+			return db.Player{}, revokeErr
+		}
+	}
+	row, err := q.GetPlayer(ctx, playerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, auth.ErrPlayerNotFound
+			return db.Player{}, auth.ErrPlayerNotFound
 		}
 
-		return nil, fmt.Errorf("failed to claim player for oauth: %w", err)
+		return db.Player{}, fmt.Errorf("failed to reload player: %w", err)
 	}
 
-	return playerFromRow(row), nil
+	return row, nil
 }
 
 // MarkPlayerEmailVerifiedIfNew stamps email_verified_at when it is
@@ -433,7 +557,8 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 // successful consume. Register/resend rows stamp email_verified_at
 // when still NULL; email-change rows (pending_email non-empty) swap
 // players.email, re-stamp email_verified_at, and bump session_version
-// in a single UPDATE. Split out of ConsumeVerifyToken so the
+// in a single UPDATE, then revoke the links mailed to the old address. Split
+// out of ConsumeVerifyToken so the
 // transaction body stays under revive's function-length cap.
 func applyVerifyTokenSideEffect(
 	ctx context.Context, q *db.Queries, row db.ConsumeEmailVerifyTokenRow,
@@ -462,7 +587,7 @@ func applyVerifyTokenSideEffect(
 		return auth.ErrPlayerNotFound
 	}
 
-	return nil
+	return revokeTokensAfterEmailChange(ctx, q, row.PlayerID)
 }
 
 // classifyVerifyTokenMiss disambiguates the UPDATE-no-rows case. The
@@ -543,7 +668,8 @@ func (s *PlayerStore) LookupResetToken(ctx context.Context, tokenHash string) (i
 }
 
 // ConsumeResetToken atomically marks the reset row consumed, rotates
-// password_hash, and bumps session_version - all in one transaction
+// password_hash, bumps session_version, and revokes the player's other live
+// reset and email-change links - all in one transaction
 // so a crash mid-flow cannot leave a player with a consumed token but
 // an old password, nor a new password with old sessions still live.
 // Returns the player id on success, auth.ErrResetTokenInvalid when no
@@ -578,7 +704,7 @@ func (s *PlayerStore) ConsumeResetToken(
 		}
 		playerID = id
 
-		return nil
+		return revokeTokensAfterPasswordChange(ctx, q, id)
 	})
 	if err != nil {
 		if errors.Is(err, auth.ErrResetTokenInvalid) {
@@ -602,66 +728,89 @@ func (s *PlayerStore) DeleteExpiredResetTokens(ctx context.Context) error {
 	return nil
 }
 
-// LinkProviderIdentity inserts a player_identities row tying the given
-// player to the (provider, subject) pair. Returns
-// auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)
-// constraint fires; the caller treats this as "another request beat us
-// to it" and re-reads the identity row.
-func (s *PlayerStore) LinkProviderIdentity(ctx context.Context, playerID int64, provider, subject string) error {
-	err := s.q.LinkProviderIdentity(ctx, db.LinkProviderIdentityParams{
-		PlayerID: playerID,
-		Provider: provider,
-		Subject:  subject,
-	})
-	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return auth.ErrIdentityAlreadyLinked
+// ChangePlayerPassword atomically rotates password_hash, bumps
+// session_version, and revokes every live reset and email-change link on the
+// row identified by id. Shares the ResetPlayerPassword query with the
+// forgot-password flow: both paths want the same "new hash + invalidate other
+// cookies" semantics, only the auth proof differs (token vs current password
+// verified by the caller). Returns auth.ErrPlayerNotFound when no row matches
+// the id.
+func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		rows, err := q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
+			ID:           playerID,
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to change player password: %w", err)
+		}
+		if rows == 0 {
+			return auth.ErrPlayerNotFound
 		}
 
-		return fmt.Errorf("failed to link provider identity: %w", err)
-	}
-
-	return nil
-}
-
-// ChangePlayerPassword atomically rotates password_hash and bumps
-// session_version on the row identified by id. Shares the
-// ResetPlayerPassword query with the forgot-password flow: both paths
-// want the same "new hash + invalidate other cookies" semantics, only
-// the auth proof differs (token vs current password verified by the
-// caller). Returns auth.ErrPlayerNotFound when no row matches the id.
-func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error {
-	rows, err := s.q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
-		ID:           playerID,
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+		return revokeTokensAfterPasswordChange(ctx, q, playerID)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to change player password: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return fmt.Errorf("change player password: %w", err)
 	}
 
 	return nil
 }
 
-// SetPlayerPasswordHash overwrites the password_hash on the row identified
-// by email. Returns auth.ErrPlayerNotFound when no row matches; intended
-// for the cmd/server -reset-password operator tool, not the public auth flow.
+// revokeTokensAfterEmailChange deletes the player's unconsumed verify and reset
+// tokens on q: each was mailed to the old address, so none may act on the new
+// one (#1329).
+func revokeTokensAfterEmailChange(ctx context.Context, q *db.Queries, playerID int64) error {
+	if err := q.DeleteLiveEmailVerifyTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke verify tokens: %w", err)
+	}
+	if err := q.DeleteLivePasswordResetTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke reset tokens: %w", err)
+	}
+
+	return nil
+}
+
+// revokeTokensAfterPasswordChange deletes the player's unconsumed reset and
+// email-change tokens on q, so neither can undo or outlive the new credential
+// (#1329). A register-time verify link only re-proves the current address, so
+// it stays live.
+func revokeTokensAfterPasswordChange(ctx context.Context, q *db.Queries, playerID int64) error {
+	if err := q.DeleteLiveEmailChangeTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke email-change tokens: %w", err)
+	}
+	if err := q.DeleteLivePasswordResetTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke reset tokens: %w", err)
+	}
+
+	return nil
+}
+
+// SetPlayerPasswordHash atomically overwrites the password_hash on the row
+// identified by email and revokes its live reset and email-change links.
+// Returns auth.ErrPlayerNotFound when no row matches; intended for the
+// cmd/server -reset-password operator tool, not the public auth flow.
 // The lookup matches how the post-#446 login flow finds the row, so the
 // reset target equals what the player types into /login.
 func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, email, passwordHash string) error {
 	cleaned := strings.ToLower(strings.TrimSpace(email))
-	rows, err := s.q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
-		Email:        sql.NullString{String: cleaned, Valid: cleaned != ""},
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		id, err := q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+			Email:        sql.NullString{String: cleaned, Valid: cleaned != ""},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return auth.ErrPlayerNotFound
+			}
+
+			return fmt.Errorf("failed to set password hash: %w", err)
+		}
+
+		return revokeTokensAfterPasswordChange(ctx, q, id)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to set password hash: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return fmt.Errorf("set player password hash: %w", err)
 	}
 
 	return nil
@@ -900,28 +1049,36 @@ func (s *PlayerStore) ListAdminEmails(ctx context.Context) ([]string, error) {
 	return emails, nil
 }
 
-// SetPlayerEmail rewrites players.email on the row identified by id and
-// clears email_verified_at so the changed address must be re-proven. Used
-// by the admin "Set / overwrite email" action (#450); the admin then marks
-// the account verified or triggers a resend if the new address should be
-// treated as proven. Returns auth.ErrEmailTaken on a UNIQUE collision and
-// auth.ErrPlayerNotFound when no row matches.
+// SetPlayerEmail rewrites players.email on the row identified by id, clears
+// email_verified_at so the changed address must be re-proven, and revokes every
+// live verify and reset link mailed to the old address. Used by the admin
+// "Set / overwrite email" action (#450); the admin then marks the account
+// verified or triggers a resend if the new address should be treated as proven.
+// Returns auth.ErrEmailTaken on a UNIQUE collision and auth.ErrPlayerNotFound
+// when no row matches.
 func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email string) error {
 	cleaned := strings.ToLower(strings.TrimSpace(email))
-	rows, err := s.q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
-		Email: sql.NullString{String: cleaned, Valid: cleaned != ""},
-		ID:    playerID,
-	})
-	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return auth.ErrEmailTaken
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		rows, err := q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
+			Email: sql.NullString{String: cleaned, Valid: cleaned != ""},
+			ID:    playerID,
+		})
+		if err != nil {
+			var sqliteErr *sqlite.Error
+			if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+				return auth.ErrEmailTaken
+			}
+
+			return fmt.Errorf("failed to set player email: %w", err)
+		}
+		if rows == 0 {
+			return auth.ErrPlayerNotFound
 		}
 
-		return fmt.Errorf("failed to set player email: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return revokeTokensAfterEmailChange(ctx, q, playerID)
+	})
+	if err != nil {
+		return fmt.Errorf("set player email: %w", err)
 	}
 
 	return nil

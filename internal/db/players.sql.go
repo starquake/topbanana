@@ -89,7 +89,8 @@ SET display_name = ?1,
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
     END,
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -128,6 +129,9 @@ type ClaimPlayerParams struct {
 // path: the row now represents a player who picked their own name, so it
 // must look identical to a CreatePlayerWithCredentials row to downstream
 // callers.
+//
+// session_version is bumped so the anonymous cookie that pointed at this row
+// stops resolving once it carries credentials (#1327).
 func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayer,
 		arg.DisplayName,
@@ -183,7 +187,8 @@ SET email = ?1,
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN CURRENT_TIMESTAMP
         ELSE approved_at
-    END
+    END,
+    session_version = session_version + 1
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -215,6 +220,9 @@ type ClaimPlayerForOAuthParams struct {
 // and matches no rows; the wrapper maps that to ErrPlayerNotFound
 // so the handler can fall through to the create path with the same
 // petname-collision retry it uses for cookieless visitors.
+//
+// session_version is bumped so the anonymous cookie that pointed at this row
+// stops resolving once it carries an email (#1327).
 func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAuthParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayerForOAuth, arg.Email, arg.ID)
 	var i Player
@@ -351,7 +359,7 @@ type CreateEmailVerifyTokenParams struct {
 
 // Stores the sha256 hash of a freshly minted verify-email token. The raw
 // token only exists on the way out the door in the email; a DB leak should
-// not be replayable against GET /verify-email.
+// not be replayable against POST /verify-email.
 //
 // pending_email is NULL for the register-time path and the resend variant;
 // the in-session email-change path (#497) sets it to the new address the
@@ -586,6 +594,47 @@ WHERE expires_at <= ?1
 // timezone.
 func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time.Time) error {
 	_, err := q.db.ExecContext(ctx, deleteExpiredPasswordResetTokens, now)
+	return err
+}
+
+const deleteLiveEmailChangeTokensForPlayer = `-- name: DeleteLiveEmailChangeTokensForPlayer :exec
+DELETE FROM email_verify_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+  AND pending_email IS NOT NULL
+`
+
+// Revokes the player's unconsumed email-change links after a password change,
+// so a change started on the old credential cannot finish on the new one
+// (#1329). Register-time links only re-verify the current address and stay.
+func (q *Queries) DeleteLiveEmailChangeTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLiveEmailChangeTokensForPlayer, playerID)
+	return err
+}
+
+const deleteLiveEmailVerifyTokensForPlayer = `-- name: DeleteLiveEmailVerifyTokensForPlayer :exec
+DELETE FROM email_verify_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+`
+
+// Revokes every unconsumed verify link for the player after an email change,
+// so a link mailed before the change cannot be used after it (#1329).
+func (q *Queries) DeleteLiveEmailVerifyTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLiveEmailVerifyTokensForPlayer, playerID)
+	return err
+}
+
+const deleteLivePasswordResetTokensForPlayer = `-- name: DeleteLivePasswordResetTokensForPlayer :exec
+DELETE FROM password_reset_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+`
+
+// Revokes every unconsumed reset link for the player after a credential
+// change, so a link mailed before the change cannot be used after it (#1329).
+func (q *Queries) DeleteLivePasswordResetTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLivePasswordResetTokensForPlayer, playerID)
 	return err
 }
 
@@ -936,6 +985,27 @@ func (q *Queries) ListPlayerFinishStats(ctx context.Context, playerIds []int64) 
 	return items, nil
 }
 
+const markPlayerEmailVerifiedByOAuth = `-- name: MarkPlayerEmailVerifiedByOAuth :execrows
+UPDATE players
+SET email_verified_at = CURRENT_TIMESTAMP,
+    password_hash = NULL,
+    session_version = session_version + 1
+WHERE id = ?1
+  AND email_verified_at IS NULL
+`
+
+// Stamps email_verified_at when an OAuth provider has just attested the
+// address. A row that was still unverified had its password set by someone who
+// never proved the mailbox, so the password is dropped and every live cookie is
+// invalidated (#1328). A row already verified is left untouched.
+func (q *Queries) MarkPlayerEmailVerifiedByOAuth(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markPlayerEmailVerifiedByOAuth, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markPlayerEmailVerifiedIfNew = `-- name: MarkPlayerEmailVerifiedIfNew :execrows
 UPDATE players
 SET email_verified_at = CURRENT_TIMESTAMP
@@ -1040,12 +1110,13 @@ func (q *Queries) SetPlayerApprovedNow(ctx context.Context, id int64) (int64, er
 	return result.RowsAffected()
 }
 
-const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
+const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :one
 UPDATE players
 SET password_hash    = ?1,
     display_name_claimed = 1,
     session_version = session_version + 1
 WHERE email = ?2
+RETURNING id
 `
 
 type SetPlayerPasswordHashParams struct {
@@ -1055,8 +1126,8 @@ type SetPlayerPasswordHashParams struct {
 
 // Used by the cmd/server -reset-password operator tool to rotate a single
 // player's password without disturbing display_name / role / email. Returns the
-// number of affected rows so the caller can map "no rows" to an "email
-// not found" error. The lookup is by email (the post-#446 login credential)
+// row id so the caller can revoke its live links, and sql.ErrNoRows when no
+// email matches. The lookup is by email (the post-#446 login credential)
 // so the operator's reset target matches what the player types into /login.
 //
 // display_name_claimed is set to 1 alongside the password because once an
@@ -1072,11 +1143,10 @@ type SetPlayerPasswordHashParams struct {
 // is almost always a security action (compromised or lost account), so
 // leaving old sessions alive on the previous credential would defeat it.
 func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	row := q.db.QueryRowContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setPlayerRole = `-- name: SetPlayerRole :execrows

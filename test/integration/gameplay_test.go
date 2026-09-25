@@ -128,7 +128,7 @@ func seedGameplayAdmin(
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if err := stores.OAuth.MarkPlayerEmailVerifiedIfNew(ctx, p.ID); err != nil {
+	if err := stores.InvitePlayers.MarkPlayerEmailVerifiedIfNew(ctx, p.ID); err != nil {
 		t.Fatalf("MarkPlayerEmailVerifiedIfNew err = %v, want nil", err)
 	}
 

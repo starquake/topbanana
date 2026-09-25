@@ -592,7 +592,7 @@ func verifyPlayerEmail(ctx context.Context, t *testing.T, dbURI, displayName str
 	if err != nil {
 		t.Fatalf("verifyPlayerEmail GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if err := stores.OAuth.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
+	if err := stores.InvitePlayers.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
 		t.Fatalf("verifyPlayerEmail MarkPlayerEmailVerifiedIfNew err = %v, want nil", err)
 	}
 }

@@ -245,12 +245,9 @@ func (e *adminEnv) seedHostPlayer(t *testing.T, displayName, email string) int64
 func (e *adminEnv) seedOAuthPlayer(t *testing.T, displayName, email, provider, subject string) int64 {
 	t.Helper()
 
-	p, err := e.oauth.CreatePlayerFromOAuth(t.Context(), displayName, email)
+	p, err := e.oauth.CreatePlayerFromOAuth(t.Context(), displayName, email, provider, subject)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth(%q) err = %v, want nil", displayName, err)
-	}
-	if err := e.oauth.LinkProviderIdentity(t.Context(), p.ID, provider, subject); err != nil {
-		t.Fatalf("LinkProviderIdentity(%d) err = %v, want nil", p.ID, err)
 	}
 
 	return p.ID

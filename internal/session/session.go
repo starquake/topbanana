@@ -53,9 +53,10 @@ const issuedAtBitSize = 64
 // the clock so callers do not have to thread these parameters through every
 // call site, and so tests can fix the clock without touching package-level state.
 type Manager struct {
-	key           []byte
-	now           func() time.Time
-	secureCookies bool
+	key                   []byte
+	now                   func() time.Time
+	secureCookies         bool
+	loginApprovalRequired bool
 }
 
 // New returns a Manager that signs cookies with the given key. secureCookies
@@ -71,6 +72,21 @@ func New(key []byte, secureCookies bool) *Manager {
 // variable.
 func newWithClock(key []byte, secureCookies bool, now func() time.Time) *Manager {
 	return &Manager{key: key, now: now, secureCookies: secureCookies}
+}
+
+// WithLoginApprovalRequired returns a copy of m carrying the deployment's
+// LOGIN_APPROVAL_REQUIRED policy, so every session reader applies it the same way.
+func (m *Manager) WithLoginApprovalRequired(required bool) *Manager {
+	c := *m
+	c.loginApprovalRequired = required
+
+	return &c
+}
+
+// LoginApprovalRequired reports whether a session may only resolve to an
+// account an admin has approved.
+func (m *Manager) LoginApprovalRequired() bool {
+	return m.loginApprovalRequired
 }
 
 // Set writes a signed session cookie carrying the player ID and the

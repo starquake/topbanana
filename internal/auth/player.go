@@ -123,6 +123,15 @@ func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role != RolePlayer
 }
 
+// isHeldForApproval reports whether LOGIN_APPROVAL_REQUIRED keeps this account
+// signed out: it carries credentials, is not an admin, and is not approved.
+// An anonymous guest row carries no credentials, so it is never held.
+func (p *Player) isHeldForApproval() bool {
+	credentialled := p.PasswordHash != "" || p.Email != ""
+
+	return credentialled && !p.IsAdmin() && !p.IsApproved()
+}
+
 // AnonymousGameMigrator carries an anonymous visitor's game data onto
 // the account they just signed into. Implemented by store.GameStore;
 // defined here so the auth package can call into it without importing
@@ -462,7 +471,7 @@ type PlayerStore interface {
 		displayName, email, passwordHash, requestedRole string,
 	) (*Player, error)
 	// SetPlayerPasswordHash overwrites the password_hash on the row identified
-	// by email. Used by the operator-only -reset-password tool to rotate a
+	// by email and revokes its live reset and email-change links. Used by the operator-only -reset-password tool to rotate a
 	// forgotten admin password; matching by email lines the operator's reset
 	// target up with the post-#446 login credential. Returns ErrPlayerNotFound
 	// when no row matches.

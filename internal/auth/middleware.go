@@ -70,7 +70,8 @@ func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Mana
 // referenced a deleted row OR the cookie's session_version stamp does
 // not match the row's current session_version (a password reset has
 // happened since the cookie was issued, so it must be treated as
-// invalidated). Other store failures bubble up as wrapped errors.
+// invalidated) OR the account is held for approval. Other store failures
+// bubble up as wrapped errors.
 func loadSessionPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, error) {
 	playerID, sessionVersion, hasSession := sessions.Decode(r)
 	if !hasSession {
@@ -88,6 +89,9 @@ func loadSessionPlayer(r *http.Request, players PlayerStore, sessions *session.M
 	if player.SessionVersion != sessionVersion {
 		// Reset bumped session_version after this cookie was minted -
 		// surface as not-found so the caller bounces through login.
+		return nil, ErrPlayerNotFound
+	}
+	if sessions.LoginApprovalRequired() && player.isHeldForApproval() {
 		return nil, ErrPlayerNotFound
 	}
 
