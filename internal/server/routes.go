@@ -749,7 +749,9 @@ func addQuizImportArchiveRoute(
 	requireGameHost func(http.Handler) http.Handler,
 ) {
 	budget := mediahttp.NewUploadBudgetLimiter(cfg.MediaImportBudget, cfg.MediaImportBudgetWindow)
-	limits := admin.NewArchiveImportLimits(cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes)
+	limits := admin.NewArchiveImportLimits(
+		cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes, cfg.MediaQuizImageLimit,
+	)
 	mux.Handle(
 		"POST /admin/quizzes/import/archive",
 		requireGameHost(mediahttp.MaxMultipartFormMiddlewareWithLimit(cfg.MediaImportMaxBytes, csrfMgr.Middleware(

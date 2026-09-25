@@ -287,6 +287,33 @@ func fillQuizFromArchiveRounds(qz *quiz.Quiz, rounds []quizArchiveRound) ([]ques
 	return plan, nil
 }
 
+// checkArchiveMediaCount rejects a plan that references more unique images or
+// sounds than the per-quiz ceiling; a zero limit disables the check. The quiz is
+// new, so the plan is its whole library.
+func checkArchiveMediaCount(plan []questionMediaPlan, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	images := map[string]struct{}{}
+	audios := map[string]struct{}{}
+	for _, entry := range plan {
+		if entry.image != nil {
+			images[entry.image.File] = struct{}{}
+		}
+		if entry.audio != nil {
+			audios[entry.audio.File] = struct{}{}
+		}
+	}
+	if len(images) > limit {
+		return fmt.Errorf("%w: %d images (max %d)", ErrArchiveTooManyMedia, len(images), limit)
+	}
+	if len(audios) > limit {
+		return fmt.Errorf("%w: %d sounds (max %d)", ErrArchiveTooManyMedia, len(audios), limit)
+	}
+
+	return nil
+}
+
 // questionFromArchive maps one manifest question onto the domain type at the
 // given quiz-wide position and returns its media-plan entry (nil when the
 // question carries no media). The media ids are left nil here: they are not

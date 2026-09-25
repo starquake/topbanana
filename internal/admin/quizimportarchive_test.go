@@ -25,14 +25,15 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// importTestImageMax, importTestAudioMax, and importTestTotalMax are generous
-// per-entry / total caps for the importer under test: large enough that the tiny
+// importTestImageMax, importTestAudioMax, importTestTotalMax, and
+// importTestMediaMax are generous per-entry / total / per-quiz caps for the importer under test: large enough that the tiny
 // test media never trips a size guard, so a size-rejection test can drop them low
 // deliberately.
 const (
 	importTestImageMax int64 = 10 << 20
 	importTestAudioMax int64 = 20 << 20
 	importTestTotalMax int64 = 64 << 20
+	importTestMediaMax       = 10
 )
 
 // newImportHandler builds the archive-import handler over the env's real quiz
@@ -126,7 +127,7 @@ func importAdmin() *auth.Player {
 }
 
 func defaultImportLimits() ArchiveImportLimits {
-	return NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax)
+	return NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax, importTestMediaMax)
 }
 
 // openZipReader opens the given archive bytes as a zip.Reader, the shape
@@ -632,7 +633,7 @@ func TestHandleQuizImportArchive_OversizedEntry(t *testing.T) {
 	mediaSvc := newMediaServiceOverTemp(t, env)
 	// Image cap of 1 byte: the real archive's image entry is larger, so the
 	// per-entry guard trips.
-	limits := NewArchiveImportLimits(1, importTestAudioMax, importTestTotalMax)
+	limits := NewArchiveImportLimits(1, importTestAudioMax, importTestTotalMax, importTestMediaMax)
 	handler := newImportHandler(t, env, mediaSvc, limits)
 
 	rr := httptest.NewRecorder()
@@ -709,7 +710,7 @@ func TestHandleQuizImportArchive_TotalTooLarge(t *testing.T) {
 	env := newAdminEnv(t)
 	mediaSvc := newMediaServiceOverTemp(t, env)
 	// Total cap of 1 byte: the summed uncompressed size exceeds it.
-	limits := NewArchiveImportLimits(importTestImageMax, importTestAudioMax, 1)
+	limits := NewArchiveImportLimits(importTestImageMax, importTestAudioMax, 1, importTestMediaMax)
 	handler := newImportHandler(t, env, mediaSvc, limits)
 
 	rr := httptest.NewRecorder()
@@ -1054,4 +1055,131 @@ func quizShape(t *testing.T, env *adminEnv, quizID int64) []string {
 	}
 
 	return shape
+}
+
+// imageManifest returns a flat manifest whose questions reference the given
+// image files in order, one question per file.
+func imageManifest(files ...string) []byte {
+	questions := make([]string, 0, len(files))
+	for i, f := range files {
+		questions = append(questions, fmt.Sprintf(
+			`{"text": "Q%d", "image": {"file": %q, "mime": "image/png"}, "options": [{"text": "a", "correct": true}]}`,
+			i+1, f,
+		))
+	}
+
+	return []byte(`{"formatVersion": 1, "title": "Media Quiz", "description": "d", "questions": [` +
+		strings.Join(questions, ",") + `]}`)
+}
+
+// TestHandleQuizImportArchive_QuizMediaLimit pins that the per-quiz media
+// ceiling applies to an archive import: more unique images than the limit is a
+// 400 with nothing stored, while a file reused across questions counts once.
+func TestHandleQuizImportArchive_QuizMediaLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		manifest []byte
+		want     int
+	}{
+		{
+			name:     "over the limit",
+			manifest: imageManifest("media/1.png", "media/2.png", "media/3.png"),
+			want:     http.StatusBadRequest,
+		},
+		{
+			name:     "reused file counts once",
+			manifest: imageManifest("media/1.png", "media/2.png", "media/1.png"),
+			want:     http.StatusSeeOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := newAdminEnv(t)
+			mediaSvc := newMediaServiceOverTemp(t, env)
+			limits := NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax, 2)
+			handler := newImportHandler(t, env, mediaSvc, limits)
+			archiveBytes := buildZip(t, map[string][]byte{
+				"quiz.json":   tt.manifest,
+				"media/1.png": tinyPNG(t),
+				"media/2.png": tinyPNG(t),
+				"media/3.png": tinyPNG(t),
+			})
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, importRequest(t, archiveBytes, "", "", importAdmin()))
+
+			if got, want := rr.Code, tt.want; got != want {
+				t.Fatalf("status = %d, want %d (body: %s)", got, want, rr.Body.String())
+			}
+			if tt.want != http.StatusBadRequest {
+				return
+			}
+			if got, want := rr.Body.String(), "3 images (max 2)"; !strings.Contains(got, want) {
+				t.Errorf("body = %q, should contain %q", got, want)
+			}
+			assertNoQuiz(t, env)
+			if got, want := len(allMediaRows(t, env)), 0; got != want {
+				t.Errorf("media rows = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+// TestImportQuizArchive_QuizMediaLimit pins the same ceiling on the HTTP-free
+// restore path as the ErrArchiveTooManyMedia sentinel.
+func TestImportQuizArchive_QuizMediaLimit(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	archiveBytes := buildZip(t, map[string][]byte{
+		"quiz.json":   imageManifest("media/1.png", "media/2.png"),
+		"media/1.png": tinyPNG(t),
+		"media/2.png": tinyPNG(t),
+	})
+
+	_, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, newMediaServiceOverTemp(t, env),
+		openZipReader(t, archiveBytes), testAdminID,
+		NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax, 1),
+	)
+	if got, want := err, ErrArchiveTooManyMedia; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+	assertNoQuiz(t, env)
+}
+
+// TestHandleQuizImportArchive_MediaRejected pins that a media file the media
+// pipeline rejects is a 400 naming the file, and the import rolls back.
+func TestHandleQuizImportArchive_MediaRejected(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	root := t.TempDir()
+	mediaSvc := media.NewService(
+		store.NewMediaStore(env.db, slog.New(slog.DiscardHandler)),
+		root, importTestImageMax, importTestAudioMax, slog.New(slog.DiscardHandler),
+	)
+	handler := newImportHandler(t, env, mediaSvc, defaultImportLimits())
+	archiveBytes := buildZip(t, map[string][]byte{
+		"quiz.json":        imageManifest("media/1.png", "media/broken.png"),
+		"media/1.png":      tinyPNG(t),
+		"media/broken.png": []byte("not an image"),
+	})
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, importRequest(t, archiveBytes, "", "", importAdmin()))
+
+	if got, want := rr.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d (body: %s)", got, want, rr.Body.String())
+	}
+	if got, want := rr.Body.String(), "media/broken.png"; !strings.Contains(got, want) {
+		t.Errorf("body = %q, should contain %q", got, want)
+	}
+	assertNoQuiz(t, env)
+	assertMediaRootEmpty(t, root)
 }
