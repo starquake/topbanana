@@ -1418,10 +1418,7 @@ type roundsPartialData struct {
 	Rounds []RoundViewData
 }
 
-// renderRoundsPartial refetches the quiz tree and emits the
-// questions_list partial. Used by the question and round position
-// handlers so a move updates only the grouped block instead of a full
-// page reload.
+// renderRoundsPartial refetches the quiz tree and emits the questions_list partial.
 func renderRoundsPartial(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1880,10 +1877,7 @@ func HandleQuestionEdit(
 	})
 }
 
-// HandleQuizSetMode flips a quiz between solo and live without going through
-// the edit form (#830). The target mode is the {mode} path segment; only the quiz owner (or
-// an admin) may change it. On success it redirects back to the quiz view so
-// the re-rendered page reflects the new mode.
+// HandleQuizSetMode sets a quiz to the solo or live {mode} path segment; owner or admin only (#830).
 func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool

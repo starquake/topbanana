@@ -94,13 +94,7 @@ type ArchiveImportLimits struct {
 	quizMediaLimit int
 }
 
-// NewArchiveImportLimits builds the zip-bomb size guards for the archive
-// importer from the configured caps (#1113): the per-entry image and audio
-// uncompressed caps reuse the media upload caps, and totalMaxBytes bounds the
-// summed uncompressed size of every entry. quizMediaLimit is the per-quiz,
-// per-type media ceiling the upload routes enforce (MEDIA_QUIZ_IMAGE_LIMIT). A
-// zero in any field disables that guard. Exported so the server wiring can build
-// it from config.
+// NewArchiveImportLimits builds the archive importer's size and per-quiz media guards (#1113); zero disables one.
 func NewArchiveImportLimits(imageMaxBytes, audioMaxBytes, totalMaxBytes int64, quizMediaLimit int) ArchiveImportLimits {
 	return ArchiveImportLimits{
 		imageMaxBytes:  imageMaxBytes,
