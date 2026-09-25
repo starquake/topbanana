@@ -1,10 +1,13 @@
 package migrations_test
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
+	dbgen "github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/dbtest"
 )
 
@@ -56,31 +59,65 @@ func TestIndexForeignKeys_EveryChildColumnIsIndexed(t *testing.T) {
 	}
 }
 
-// TestIndexForeignKeys_OptionLookupsUseIndex pins that reading a question's
-// options seeks options_question_id_idx instead of scanning options (#1345).
+// TestIndexForeignKeys_OptionLookupsUseIndex pins that the sqlc queries reading
+// a question's options seek options_question_id_idx instead of scanning options
+// (#1345).
 func TestIndexForeignKeys_OptionLookupsUseIndex(t *testing.T) {
 	t.Parallel()
 
-	db := dbtest.Open(t)
-	t.Cleanup(func() {
-		if cerr := db.Close(); cerr != nil {
-			t.Errorf("db.Close err = %v", cerr)
-		}
-	})
+	tests := []struct {
+		name string
+		call func(ctx context.Context, q *dbgen.Queries) error
+	}{
+		{
+			name: "ListOptionsByQuestionID",
+			call: func(ctx context.Context, q *dbgen.Queries) error {
+				_, err := q.ListOptionsByQuestionID(ctx, 1)
 
-	for _, query := range []string{
-		"SELECT * FROM options WHERE question_id = 1 ORDER BY id",
-		"SELECT o.* FROM options o JOIN questions q ON q.id = o.question_id WHERE q.quiz_id = 1 ORDER BY o.question_id, o.id",
-		"DELETE FROM options WHERE question_id = 1",
-	} {
-		plan := dbtest.QueryPlan(t, db, query)
-		joined := strings.Join(plan, "\n")
-		if got, want := joined, "INDEX options_question_id_idx"; !strings.Contains(got, want) {
-			t.Errorf("plan for %q = %q, should contain %q", query, got, want)
-		}
-		if slices.ContainsFunc(plan, isScan) {
-			t.Errorf("plan for %q = %q, should have no SCAN step", query, joined)
-		}
+				return err
+			},
+		},
+		{
+			name: "ListOptionIDsByQuestionID",
+			call: func(ctx context.Context, q *dbgen.Queries) error {
+				_, err := q.ListOptionIDsByQuestionID(ctx, 1)
+
+				return err
+			},
+		},
+		{
+			name: "ListOptionsByQuizID",
+			call: func(ctx context.Context, q *dbgen.Queries) error {
+				_, err := q.ListOptionsByQuizID(ctx, 1)
+
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbtest.Open(t)
+			t.Cleanup(func() {
+				if cerr := db.Close(); cerr != nil {
+					t.Errorf("db.Close err = %v", cerr)
+				}
+			})
+			rec := &dbtest.QueryRecorder{DB: db}
+			if got, want := tt.call(t.Context(), dbgen.New(rec)), errors.ErrUnsupported; !errors.Is(got, want) {
+				t.Fatalf("%s err = %v, want %v", tt.name, got, want)
+			}
+
+			plan := dbtest.QueryPlan(t, db, rec.Query, rec.Args...)
+			joined := strings.Join(plan, "\n")
+			if got, want := joined, "INDEX options_question_id_idx"; !strings.Contains(got, want) {
+				t.Errorf("plan = %q, should contain %q", got, want)
+			}
+			if slices.ContainsFunc(plan, isScan) {
+				t.Errorf("plan = %q, should have no SCAN step", joined)
+			}
+		})
 	}
 }
 
