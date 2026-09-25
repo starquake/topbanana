@@ -71,9 +71,9 @@ WHERE game_id = ?
 ORDER BY game_question_id;
 
 -- name: CreateGameQuestion :one
--- started_at and expired_at are bound as CURRENT_TIMESTAMP-format text strings
--- ('YYYY-MM-DD HH:MM:SS') via the CAST, so the stored values land in the exact
--- UTC encoding the leaderboard staleness comparison in
+-- started_at and expired_at are bound as UTC text strings with milliseconds
+-- ('YYYY-MM-DD HH:MM:SS.SSS', #1339) via the CAST, so the stored values land in
+-- the exact UTC encoding the leaderboard staleness comparison in
 -- ListParticipantsForQuizLeaderboard reads. Binding a Go time.Time would arrive
 -- in the driver's t.String() format ('... -0700 MST'); the timezone-offset
 -- suffix makes the lexical compare invert across a DST boundary and flip the
@@ -136,8 +136,8 @@ WHERE g.quiz_id = ?
 -- Joins through `games` so the WHERE filters on games.quiz_id (NOT
 -- NULL); game_participants.quiz_id is nullable in the schema, which
 -- would otherwise force sqlc to infer sql.NullInt64 for the parameter.
--- stale_before is bound as a CURRENT_TIMESTAMP-format text string
--- ('YYYY-MM-DD HH:MM:SS') via the CAST so it shares the UTC encoding
+-- stale_before is bound as a UTC text string
+-- ('YYYY-MM-DD HH:MM:SS.SSS') via the CAST so it shares the UTC encoding
 -- expired_at is stored in (see CreateGameQuestion); a bound Go time.Time
 -- would arrive in t.String() format whose timezone-offset suffix inverts
 -- the lexical compare across a DST boundary and flips the in-progress dot (#789).

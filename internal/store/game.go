@@ -17,6 +17,10 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 )
 
+// gameQuestionTimestampLayout keeps milliseconds so truncation cannot shorten
+// the read beat (#1339); legacy whole-second rows still compare correctly as text.
+const gameQuestionTimestampLayout = "2006-01-02 15:04:05.000"
+
 // GameStore provides methods for managing game-related data in a database, including queries and transactions.
 type GameStore struct {
 	q      *db.Queries
@@ -253,9 +257,9 @@ func execCreateGameAndParticipant(
 
 // CreateQuestion saves a new game question in the database and updates the
 // provided Question object with generated values. started_at and expired_at are
-// formatted as UTC CURRENT_TIMESTAMP-format text so the stored column shares the
-// encoding the leaderboard staleness cutoff compares against (#789); see
-// [sqliteTimestampLayout]. When completesGame is true, the same transaction
+// formatted as UTC text with millisecond precision so the stored column shares
+// the encoding the leaderboard staleness cutoff compares against (#789); see
+// [gameQuestionTimestampLayout]. When completesGame is true, the same transaction
 // also bumps quizzes.play_count for the quiz that owns this game (#891), so the
 // counter cannot drift from the "game just became completed" transition that
 // fires alongside the final question.
@@ -274,8 +278,8 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question, compl
 			db.CreateGameQuestionParams{
 				GameID:     gq.GameID,
 				QuestionID: gq.QuestionID,
-				StartedAt:  gq.StartedAt.UTC().Format(sqliteTimestampLayout),
-				ExpiredAt:  gq.ExpiredAt.UTC().Format(sqliteTimestampLayout),
+				StartedAt:  gq.StartedAt.UTC().Format(gameQuestionTimestampLayout),
+				ExpiredAt:  gq.ExpiredAt.UTC().Format(gameQuestionTimestampLayout),
 			},
 		)
 		if qerr != nil {
@@ -435,14 +439,14 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 // ListParticipantsForQuizLeaderboard returns one row per player joined
 // to the quiz, flagged with IsCompleted and IsStale (#336). Pass
 // [time.Now]-stalePeriod for staleBefore. Canonical entry set per #335.
-// staleBefore is formatted as UTC CURRENT_TIMESTAMP-format text so the
-// comparison against the stored expired_at stays a same-encoding string
-// compare (#789); see [sqliteTimestampLayout].
+// staleBefore is formatted as UTC text so the comparison against the stored
+// expired_at stays a same-encoding string compare (#789); see
+// [gameQuestionTimestampLayout].
 func (s *GameStore) ListParticipantsForQuizLeaderboard(
 	ctx context.Context, quizID int64, staleBefore time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	rows, err := s.q.ListParticipantsForQuizLeaderboard(ctx, db.ListParticipantsForQuizLeaderboardParams{
-		StaleBefore: staleBefore.UTC().Format(sqliteTimestampLayout),
+		StaleBefore: staleBefore.UTC().Format(gameQuestionTimestampLayout),
 		QuizID:      quizID,
 	})
 	if err != nil {

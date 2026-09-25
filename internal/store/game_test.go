@@ -1340,12 +1340,12 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 	)
 }
 
-// sqliteDateTimeLayout matches SQLite's CURRENT_TIMESTAMP text encoding,
-// the format CreateQuestion writes started_at / expired_at in (#789).
-const sqliteDateTimeLayout = "2006-01-02 15:04:05"
+// gameQuestionLayout is the millisecond UTC text encoding CreateQuestion
+// writes started_at / expired_at in (#789, #1339).
+const gameQuestionLayout = "2006-01-02 15:04:05.000"
 
 // TestGameStore_CreateQuestion_StoresUTCTimestampText pins the #789 encoding
-// fix: started_at and expired_at must be stored as UTC 'YYYY-MM-DD HH:MM:SS'
+// fix: started_at and expired_at must be stored as UTC 'YYYY-MM-DD HH:MM:SS.SSS'
 // text, NOT a Go time.Time bound raw (which the driver serialises via
 // t.String() as '... -0700 MST'). The timezone-offset suffix on the raw form
 // makes the lexical staleness compare invert across a DST boundary. Anchoring
@@ -1368,7 +1368,7 @@ func TestGameStore_CreateQuestion_StoresUTCTimestampText(t *testing.T) {
 	}
 
 	nonUTC := time.FixedZone("UTC+2", 2*60*60)
-	startedAt := time.Date(2026, 6, 7, 14, 30, 0, 0, nonUTC)
+	startedAt := time.Date(2026, 6, 7, 14, 30, 0, 250*int(time.Millisecond), nonUTC)
 	expiredAt := startedAt.Add(10 * time.Second)
 	gq := &game.Question{
 		GameID:     g.ID,
@@ -1392,10 +1392,10 @@ func TestGameStore_CreateQuestion_StoresUTCTimestampText(t *testing.T) {
 		t.Fatalf("failed to read back stored timestamps: %v", err)
 	}
 
-	if got, want := startedText, startedAt.UTC().Format(sqliteDateTimeLayout); got != want {
+	if got, want := startedText, startedAt.UTC().Format(gameQuestionLayout); got != want {
 		t.Errorf("stored started_at = %q, want %q (UTC text, not a raw time.Time bind)", got, want)
 	}
-	if got, want := expiredText, expiredAt.UTC().Format(sqliteDateTimeLayout); got != want {
+	if got, want := expiredText, expiredAt.UTC().Format(gameQuestionLayout); got != want {
 		t.Errorf("stored expired_at = %q, want %q (UTC text, not a raw time.Time bind)", got, want)
 	}
 }
@@ -1433,7 +1433,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard_StaleBoundary(t *testing.T
 	}
 
 	// Anchor the unanswered question's expiry at a fixed instant in a non-UTC
-	// zone. Storage truncates to seconds, so pick a whole second.
+	// zone.
 	nonUTC := time.FixedZone("UTC+2", 2*60*60)
 	expiredAt := time.Date(2026, 6, 7, 14, 30, 0, 0, nonUTC)
 	gq := &game.Question{
@@ -1477,6 +1477,153 @@ func TestGameStore_ListParticipantsForQuizLeaderboard_StaleBoundary(t *testing.T
 			t.Errorf("rows[0].IsStale = %v, want %v (cutoff predates the expiry)", got, want)
 		}
 	})
+}
+
+// TestGameStore_CreateQuestion_KeepsMilliseconds pins #1339: started_at keeps
+// millisecond precision through the write and the read back, so the solo read
+// beat is not shortened by whole-second truncation.
+func TestGameStore_CreateQuestion_KeepsMilliseconds(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	testQuiz := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	gameStore := NewGameStore(db, slog.Default())
+	g := &game.Game{QuizID: testQuiz.ID}
+	if err := gameStore.CreateGame(t.Context(), g); err != nil {
+		t.Fatalf("failed to create game: %v", err)
+	}
+
+	startedAt := time.Date(2026, 6, 7, 14, 30, 0, 987654321, time.UTC)
+	gq := &game.Question{
+		GameID:     g.ID,
+		QuestionID: testQuiz.Questions[0].ID,
+		StartedAt:  startedAt,
+		ExpiredAt:  startedAt.Add(10 * time.Second),
+	}
+	if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
+		t.Fatalf("CreateQuestion err = %v, want nil", err)
+	}
+
+	want := startedAt.Truncate(time.Millisecond)
+	if got := gq.StartedAt; !got.Equal(want) {
+		t.Errorf("CreateQuestion StartedAt = %v, want %v", got, want)
+	}
+
+	loaded, err := gameStore.GetGame(t.Context(), g.ID)
+	if err != nil {
+		t.Fatalf("GetGame err = %v, want nil", err)
+	}
+	if got, want := len(loaded.Questions), 1; got != want {
+		t.Fatalf("len(Questions) = %d, want %d", got, want)
+	}
+	if got := loaded.Questions[0].StartedAt; !got.Equal(want) {
+		t.Errorf("GetGame StartedAt = %v, want %v", got, want)
+	}
+}
+
+// TestGameStore_GameQuestionTimestamps_MixedPrecision pins that whole-second
+// rows written before #1339 still parse and compare correctly against the
+// millisecond encoding.
+func TestGameStore_GameQuestionTimestamps_MixedPrecision(t *testing.T) {
+	t.Parallel()
+
+	legacyStarted := time.Date(2026, 6, 7, 14, 29, 50, 0, time.UTC)
+	legacyExpired := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
+
+	// setup seeds one participant whose only question row is a legacy
+	// whole-second one, and returns the store, quiz and game.
+	setup := func(t *testing.T) (*GameStore, *quiz.Quiz, *game.Game) {
+		t.Helper()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		player, err := NewPlayerStore(db, slog.Default()).CreateAnonymousPlayer(t.Context(), "anon-mixed")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+		if _, err = db.ExecContext(t.Context(),
+			"INSERT INTO game_questions (game_id, question_id, started_at, expired_at) VALUES (?, ?, ?, ?)",
+			g.ID, testQuiz.Questions[0].ID,
+			legacyStarted.Format(time.DateTime), legacyExpired.Format(time.DateTime),
+		); err != nil {
+			t.Fatalf("failed to insert legacy game question: %v", err)
+		}
+
+		return gameStore, testQuiz, g
+	}
+
+	t.Run("GetGame parses both encodings", func(t *testing.T) {
+		t.Parallel()
+
+		gameStore, testQuiz, g := setup(t)
+		newStarted := time.Date(2026, 6, 7, 14, 30, 5, 250*int(time.Millisecond), time.UTC)
+		if err := gameStore.CreateQuestion(t.Context(), &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[1].ID,
+			StartedAt:  newStarted,
+			ExpiredAt:  newStarted.Add(10 * time.Second),
+		}, false); err != nil {
+			t.Fatalf("CreateQuestion err = %v, want nil", err)
+		}
+
+		loaded, err := gameStore.GetGame(t.Context(), g.ID)
+		if err != nil {
+			t.Fatalf("GetGame err = %v, want nil", err)
+		}
+		if got, want := len(loaded.Questions), 2; got != want {
+			t.Fatalf("len(Questions) = %d, want %d", got, want)
+		}
+		for i, want := range []time.Time{legacyStarted, newStarted} {
+			if got := loaded.Questions[i].StartedAt; !got.Equal(want) {
+				t.Errorf("Questions[%d].StartedAt = %v, want %v", i, got, want)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name      string
+		cutoff    time.Time
+		wantStale bool
+	}{
+		{"legacy expiry 1ms before a millisecond cutoff is stale", legacyExpired.Add(time.Millisecond), true},
+		{"legacy expiry 1ms after a millisecond cutoff is not stale", legacyExpired.Add(-time.Millisecond), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gameStore, testQuiz, _ := setup(t)
+			rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID, tc.cutoff)
+			if err != nil {
+				t.Fatalf("ListParticipantsForQuizLeaderboard err = %v, want nil", err)
+			}
+			if got, want := len(rows), 1; got != want {
+				t.Fatalf("len(rows) = %d, want %d", got, want)
+			}
+			if got, want := rows[0].IsStale, tc.wantStale; got != want {
+				t.Errorf("rows[0].IsStale = %v, want %v", got, want)
+			}
+		})
+	}
 }
 
 // TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered pins
