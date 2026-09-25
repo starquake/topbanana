@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/starquake/topbanana/internal/bgtasks"
+	"github.com/starquake/topbanana/internal/request"
 )
 
 const (
@@ -34,12 +35,18 @@ func runHTTPServer(
 	logger *slog.Logger,
 	writeTimeout time.Duration,
 ) error {
+	// Cancelled as shutdown begins so long-lived streams end instead of pinning
+	// Shutdown for its whole timeout; see request.StreamContext.
+	shuttingDown, beginShutdown := context.WithCancel(context.WithoutCancel(ctx))
+	defer beginShutdown()
+	baseCtx := request.WithShutdown(context.WithoutCancel(ctx), shuttingDown)
 	httpServer := &http.Server{
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 		Handler:           srv,
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
 
 	g, gCtx := errgroup.WithContext(signalCtx)
@@ -62,38 +69,44 @@ func runHTTPServer(
 
 	g.Go(func() error {
 		<-gCtx.Done()
-		// make a new context for the Shutdown
-		// use the root ctx to ensure shutdown has its own timeout even though signalCtx is already canceled
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, shutdownTimeout)
-		defer shutdownCancel()
-		shutdownErr := httpServer.Shutdown(shutdownCtx)
-		// Drain the detached email-dispatch goroutines AFTER Shutdown stops
-		// the listener and BEFORE Run's deferred conn.Close runs, so a
-		// dispatch can't write to a closed DB (#740, #741). The bound is
-		// detached from ctx via WithoutCancel: at shutdown ctx is already
-		// cancelled (signal-driven, and the integration harness cancels the
-		// same ctx it passes to Run), so a plain WithTimeout(ctx, ...) would
-		// fire instantly and skip the wait. The dispatches carry per-send
-		// timeouts longer than shutdownTimeout, so a stuck SMTP must not pin
-		// shutdown - draining what it can within the bound and giving up is
-		// the right trade.
-		drainCtx, drainCancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
-		defer drainCancel()
-		if drainErr := emailTasks.Wait(drainCtx); drainErr != nil {
-			logger.WarnContext(ctx, "gave up waiting for background email dispatches", slog.Any("err", drainErr))
-		}
-		if shutdownErr != nil {
-			logger.ErrorContext(shutdownCtx, "error shutting down server", slog.Any("err", shutdownErr))
+		beginShutdown()
 
-			return fmt.Errorf("error shutting down server: %w", shutdownErr)
-		}
-
-		return nil
+		return shutdown(ctx, httpServer, emailTasks, logger)
 	})
 
 	err := g.Wait()
 	if err != nil {
 		return fmt.Errorf("error running server: %w", err)
+	}
+
+	return nil
+}
+
+// shutdown stops the HTTP server and drains the detached email dispatches
+// concurrently, so the two bounds overlap rather than add up against the
+// container's stop grace. It returns only once both are done, so the caller
+// can close the DB after it (#740, #741, #1351).
+//
+// Both bounds are detached from ctx: at shutdown ctx is already cancelled
+// (signal-driven, and the integration harness cancels the ctx it passes to
+// Run), so a plain WithTimeout(ctx, ...) would fire instantly.
+func shutdown(ctx context.Context, httpServer *http.Server, emailTasks *bgtasks.Tracker, logger *slog.Logger) error {
+	boundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		if drainErr := emailTasks.Wait(boundCtx); drainErr != nil {
+			logger.WarnContext(ctx, "gave up waiting for background email dispatches", slog.Any("err", drainErr))
+		}
+	}()
+	shutdownErr := httpServer.Shutdown(boundCtx)
+	<-drained
+	if shutdownErr != nil {
+		logger.ErrorContext(ctx, "error shutting down server", slog.Any("err", shutdownErr))
+
+		return fmt.Errorf("error shutting down server: %w", shutdownErr)
 	}
 
 	return nil
