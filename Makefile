@@ -360,7 +360,8 @@ tailwind-watch: $(TAILWIND_BIN)
 .PHONY: tailwind-check
 tailwind-check: $(TAILWIND_BIN)
 	@tmp=$$(mktemp) && \
-	    $(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $$tmp --minify 2>/dev/null && \
+	    { out=$$($(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $$tmp --minify 2>&1) || \
+	        { echo "$$out"; echo "ERROR: Tailwind build of $(TAILWIND_INPUT) failed."; rm -f $$tmp; exit 1; }; } && \
 	    if ! diff -q $$tmp $(TAILWIND_OUTPUT) >/dev/null; then \
 	        echo "ERROR: $(TAILWIND_OUTPUT) is out of date — run \`make tailwind\` and commit the result."; \
 	        diff -u $(TAILWIND_OUTPUT) $$tmp || true; \
@@ -485,7 +486,8 @@ js-check: $(JS_DEPS)
 .PHONY: js-check-one
 js-check-one:
 	@tmp=$$(mktemp -d) && \
-	    $(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(JS_CHECK_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
+	    { out=$$($(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(JS_CHECK_FLAGS) --outdir=$$tmp 2>&1) || \
+	        { echo "$$out"; echo "ERROR: esbuild build for $(JS_CHECK_OUT) failed."; rm -rf $$tmp; exit 1; }; } && \
 	    if ! diff -rq $$tmp $(JS_CHECK_OUT) >/dev/null; then \
 	        echo "ERROR: $(JS_CHECK_OUT) is out of date — run \`make js\` and commit the result."; \
 	        diff -ru $(JS_CHECK_OUT) $$tmp || true; \
