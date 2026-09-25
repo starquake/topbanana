@@ -150,6 +150,12 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
+// unlimited returns a disabled mint limiter for EnsurePlayer tests that do
+// not exercise the budget.
+func unlimited() *IPBudgetLimiter {
+	return NewIPBudgetLimiter(0, 0, nil)
+}
+
 // findSessionCookie returns the response's session cookie and a boolean
 // reporting whether it was set. Used by the EnsurePlayer tests to assert
 // whether a fresh session cookie is set on the response.
