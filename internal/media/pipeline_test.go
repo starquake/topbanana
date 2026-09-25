@@ -12,6 +12,7 @@ import (
 	"image/png"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/media"
 )
@@ -422,21 +423,17 @@ func TestProcess_DecodeSlotHonoursContext(t *testing.T) {
 	defer release()
 
 	raw := encodePNG(t, gradient(8, 8))
-	ctx, cancel := context.WithCancel(t.Context())
-	errc := make(chan error, 1)
-	go func() {
-		_, err := Process(ctx, bytes.NewReader(raw), MaxUploadBytes)
-		errc <- err
-	}()
-	cancel()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
 
-	if got, want := <-errc, context.Canceled; !errors.Is(got, want) {
-		t.Errorf("Process(cancelled while waiting) err = %v, want %v", got, want)
+	_, err := Process(ctx, bytes.NewReader(raw), MaxUploadBytes)
+	if got, want := err, context.DeadlineExceeded; !errors.Is(got, want) {
+		t.Errorf("Process(deadline passes while waiting) err = %v, want %v", got, want)
 	}
 }
 
 // TestProcess_WaitsForDecodeSlot pins that a Process blocked on a full decode
-// semaphore completes once a slot frees.
+// semaphore waits, then completes once a slot frees.
 //
 //nolint:paralleltest // occupies the package-wide decode slots
 func TestProcess_WaitsForDecodeSlot(t *testing.T) {
@@ -453,7 +450,7 @@ func TestProcess_WaitsForDecodeSlot(t *testing.T) {
 	case err := <-errc:
 		release()
 		t.Fatalf("Process returned %v while every decode slot was held, want it to wait", err)
-	default:
+	case <-time.After(50 * time.Millisecond):
 	}
 	release()
 
