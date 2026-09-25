@@ -648,6 +648,25 @@ func TestPlayerStore_UpdatePlayerDisplayName(t *testing.T) {
 		}
 	})
 
+	t.Run("passwordless host returns ErrPlayerNotAnonymous", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		host, err := ps.CreateAnonymousPlayer(t.Context(), "Demo Host")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+		if err = ps.SetPlayerRole(t.Context(), host.ID, auth.RoleHost); err != nil {
+			t.Fatalf("SetPlayerRole err = %v, want nil", err)
+		}
+
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), host.ID, "x")
+		if got, want := err, auth.ErrPlayerNotAnonymous; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("unknown player ID returns ErrPlayerNotFound", func(t *testing.T) {
 		t.Parallel()
 		db := dbtest.Open(t)

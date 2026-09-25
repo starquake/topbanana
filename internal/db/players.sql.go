@@ -1150,7 +1150,7 @@ const updatePlayerDisplayName = `-- name: UpdatePlayerDisplayName :one
 UPDATE players
 SET display_name = ?1,
     display_name_claimed = 1
-WHERE id = ?2 AND password_hash IS NULL
+WHERE id = ?2 AND password_hash IS NULL AND role = 'player'
 RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
@@ -1161,7 +1161,8 @@ type UpdatePlayerDisplayNameParams struct {
 
 // Updates the display_name on an anonymous player row in place. The WHERE
 // clause refuses the update when the player has already claimed a
-// non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
+// non-anonymous identity (password_hash IS NOT NULL) or holds a higher role
+// (a passwordless Host such as the shared demo Host), so the SQL is the
 // atomic guard against a stale anonymous check in the service layer.
 // Returns the updated row when one was affected; the wrapper distinguishes
 // "not anonymous anymore" (sql.ErrNoRows) from "display_name collision"

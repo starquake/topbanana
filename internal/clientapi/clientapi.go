@@ -1255,6 +1255,13 @@ func HandlePlayerClaimName(
 
 			return
 		}
+		// Only guests rename here; signed-in accounts, including the passwordless demo Host, use /profile (#1358).
+		if !current.IsAnonymous() {
+			writeClaimNameError(w, r, logger,
+				http.StatusConflict, "already_claimed", "display name already set for this account")
+
+			return
+		}
 
 		req, err := handlers.DecodeJSON[claimNameRequest](w, r)
 		if err != nil {
