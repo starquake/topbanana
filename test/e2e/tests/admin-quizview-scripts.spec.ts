@@ -5,8 +5,8 @@ import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
 
-// #1344 moved the quiz view's inline scripts (copy pill, share modal, the
-// post-upload URL cleanup) and the modal manager into bundled ES modules.
+// The quiz view's copy pill, share modal and post-upload URL cleanup run from
+// bundled ES modules, not inline scripts (#1344).
 
 async function openQuizView(page: Page, title: string): Promise<string> {
   await importQuiz(page, {

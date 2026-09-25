@@ -135,8 +135,7 @@ test.describe('host-armed last-call countdown', () => {
   });
 });
 
-// #1343: an expired session 303s the start POST to /login, which fetch follows to
-// a 200, so the old code read the login page as a successful start.
+// An expired session 303s the start POST to /login; the host is told the session expired (#1343).
 test('Start now with an expired session says the session expired', async ({ page, hostSessions }) => {
   test.setTimeout(60_000);
   const quizTitle = `Start Expired ${Date.now()}`;
