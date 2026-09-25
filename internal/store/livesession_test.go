@@ -1568,3 +1568,38 @@ func TestLiveSessionStore_RecordAnswer_OnlyWhileQuestionOpen(t *testing.T) {
 		t.Errorf("RecordAnswer after reveal err = %v, want %v", got, want)
 	}
 }
+
+// TestLiveSessionStore_FinishFrom pins the idle-close guard (#1336): the finish
+// is written only from the expected phase.
+func TestLiveSessionStore_FinishFrom(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	sess := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "FIN234"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	applied, err := sessionStore.FinishFrom(t.Context(), sess.ID, livesession.PhaseIntermission)
+	if err != nil {
+		t.Fatalf("FinishFrom wrong phase err = %v, want nil", err)
+	}
+	if applied {
+		t.Error("FinishFrom from the wrong phase applied = true, want false")
+	}
+	applied, err = sessionStore.FinishFrom(t.Context(), sess.ID, livesession.PhaseLobby)
+	if err != nil {
+		t.Fatalf("FinishFrom err = %v, want nil", err)
+	}
+	if !applied {
+		t.Error("FinishFrom from the loaded phase applied = false, want true")
+	}
+	got, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if got, want := got.Phase, livesession.PhaseFinished; got != want {
+		t.Errorf("phase after FinishFrom = %q, want %q", got, want)
+	}
+}

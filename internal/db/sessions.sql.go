@@ -867,6 +867,29 @@ func (q *Queries) SetSessionFinished(ctx context.Context, id string) error {
 	return err
 }
 
+const setSessionFinishedFromPhase = `-- name: SetSessionFinishedFromPhase :execresult
+UPDATE sessions
+SET phase               = 'finished',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = ?1
+  AND phase = ?2
+`
+
+type SetSessionFinishedFromPhaseParams struct {
+	ID            string
+	ExpectedPhase string
+}
+
+// The idle-close variant of SetSessionFinished: an optimistic write against the
+// phase the runner loaded, so a stale snapshot cannot close a room the host
+// has just moved on (see SetSessionRoundIntro).
+func (q *Queries) SetSessionFinishedFromPhase(ctx context.Context, arg SetSessionFinishedFromPhaseParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionFinishedFromPhase, arg.ID, arg.ExpectedPhase)
+}
+
 const setSessionIntermission = `-- name: SetSessionIntermission :execresult
 UPDATE sessions
 SET phase               = 'intermission',
