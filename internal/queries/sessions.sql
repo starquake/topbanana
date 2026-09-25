@@ -220,6 +220,19 @@ SET phase               = 'finished',
     finished_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
+-- name: SetSessionFinishedFromPhase :execresult
+-- The idle-close variant of SetSessionFinished: an optimistic write against the
+-- phase the runner loaded, so a stale snapshot cannot close a room the host
+-- has just moved on (see SetSessionRoundIntro).
+UPDATE sessions
+SET phase               = 'finished',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg('id')
+  AND phase = sqlc.arg('expected_phase');
+
 -- name: SetSessionIntermission :execresult
 -- Ends a game without closing the room (#836): marks it intermission (the
 -- between-games screen showing the final standings while the host arms the next

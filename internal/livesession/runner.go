@@ -615,13 +615,14 @@ func (r *Runner) endEmptyGame(ctx context.Context, sess *Session) {
 	r.publish(sess.JoinCode, PhaseIntermission)
 }
 
-// finishTerminal closes the room for good: it persists the finished transition,
-// publishes, and drops the session's in-memory bookkeeping (its phase clock and,
-// since the room is now terminal, its publisher version entry). Reached only
-// when the room is actually closed - the idle auto-close swept it (host gone and
-// no players present) or the host explicitly ended the session.
+// finishTerminal closes an idle room for good: it persists the finished
+// transition, publishes, and drops the session's in-memory bookkeeping (its
+// phase clock and, since the room is now terminal, its publisher version
+// entry). The write is guarded on the loaded phase, so a room the host moved on
+// since the snapshot (e.g. started the next quiz) stays open.
 func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
-	if err := r.store.Finish(ctx, sess.ID); err != nil {
+	applied, err := r.store.FinishFrom(ctx, sess.ID, sess.Phase)
+	if err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to finish session",
@@ -629,6 +630,9 @@ func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 			slog.Any("err", err),
 		)
 
+		return
+	}
+	if !applied {
 		return
 	}
 	r.forget(sess.ID)

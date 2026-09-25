@@ -1592,10 +1592,11 @@ type hookStore struct {
 	*store.LiveSessionStore
 
 	mu sync.Mutex
-	// beforeEnterReveal / beforeRecordAnswer each run once, on the first
-	// matching call.
+	// beforeEnterReveal / beforeRecordAnswer / afterCountActive each run once,
+	// on the first matching call.
 	beforeEnterReveal  func()
 	beforeRecordAnswer func()
+	afterCountActive   func()
 	// failScores is how many SetAnswerScore calls fail before one succeeds.
 	failScores int
 }
@@ -1614,6 +1615,13 @@ func (s *hookStore) RecordAnswer(
 	s.takeHook(&s.beforeRecordAnswer)()
 
 	return s.LiveSessionStore.RecordAnswer(ctx, sessionID, questionID, playerID, optionID, answeredAt)
+}
+
+func (s *hookStore) CountActive(ctx context.Context, sessionID string, since time.Time) (int, error) {
+	n, err := s.LiveSessionStore.CountActive(ctx, sessionID, since)
+	s.takeHook(&s.afterCountActive)()
+
+	return n, err
 }
 
 func (s *hookStore) SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error {
@@ -1770,5 +1778,31 @@ func TestRunner_RetriesFailedScoring(t *testing.T) {
 	}
 	if got, want := *score, scoreAt(q, answerAt); got != want {
 		t.Errorf("score after retry = %d, want %d", got, want)
+	}
+}
+
+// TestRunner_IdleCloseSkipsRoomThatMovedOn pins the idle-close phase guard
+// (#1336): a room the host started after the runner loaded its idle snapshot
+// is not closed by that stale snapshot.
+func TestRunner_IdleCloseSkipsRoomThatMovedOn(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.afterCountActive = func() {
+		if err := h.service.Start(ctx, h.code, 1); err != nil {
+			t.Errorf("Start err = %v, want nil", err)
+		}
+	}
+	ExportRunnerTick(ctx, h.runnerOver(hooked), h.clock.Now())
+
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Errorf("phase after stale idle close = %q, want %q (room left open)", got, want)
 	}
 }

@@ -189,6 +189,10 @@ func (*fakeStore) EnterRoundResults(context.Context, string, Phase) (bool, error
 
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
 
+func (*fakeStore) FinishFrom(context.Context, string, Phase) (bool, error) {
+	return false, errors.ErrUnsupported
+}
+
 func (*fakeStore) Intermission(context.Context, string, bool) error {
 	return errors.ErrUnsupported
 }

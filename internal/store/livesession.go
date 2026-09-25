@@ -337,6 +337,23 @@ func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// FinishFrom ends the session terminally only if it is still in expected, the
+// phase the caller loaded. Reports false when no row was written because the
+// session moved on.
+func (s *LiveSessionStore) FinishFrom(
+	ctx context.Context, sessionID string, expected livesession.Phase,
+) (bool, error) {
+	res, err := s.q.SetSessionFinishedFromPhase(ctx, db.SetSessionFinishedFromPhaseParams{
+		ID:            sessionID,
+		ExpectedPhase: string(expected),
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to finish session: %w", err)
+	}
+
+	return database.MustRowsAffected(res) > 0, nil
+}
+
 // Intermission ends a game without closing the room: marks it intermission and
 // clears the per-question runner columns, leaving the room alive (#836). When
 // bumpPlayCount is true AND the session actually transitioned (it was

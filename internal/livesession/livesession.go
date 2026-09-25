@@ -363,6 +363,9 @@ type Store interface {
 	// per-question runner columns. Used when the room is actually closed (idle
 	// auto-close, or an explicit host End session).
 	Finish(ctx context.Context, sessionID string) error
+	// FinishFrom is [Store.Finish] as an optimistic write against expected
+	// (see EnterRoundIntro), for the runner's idle close.
+	FinishFrom(ctx context.Context, sessionID string, expected Phase) (bool, error)
 	// Intermission ends a game without closing the room (#836): marks it
 	// intermission (the between-games screen) and clears the per-question runner
 	// columns, leaving the room alive so the host can arm the next quiz. When
