@@ -310,22 +310,6 @@ func quizFromRow(row db.GetQuizRow) *quiz.Quiz {
 	}
 }
 
-// GetQuizVisibility returns just the visibility of a quiz by its ID,
-// without loading its questions or options. Returns ErrQuizNotFound when
-// the quiz does not exist.
-func (s *QuizStore) GetQuizVisibility(ctx context.Context, id int64) (string, error) {
-	visibility, err := s.q.GetQuizVisibility(ctx, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", quiz.ErrQuizNotFound
-		}
-
-		return "", fmt.Errorf("failed to get quiz visibility: %w", err)
-	}
-
-	return visibility, nil
-}
-
 // CreateQuiz creates a new quiz using a transaction.
 func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {

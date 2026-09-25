@@ -697,43 +697,6 @@ func TestQuizStore_ListQuestions(t *testing.T) {
 	})
 }
 
-func TestQuizStore_GetQuizVisibility(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns the visibility of an existing quiz", func(t *testing.T) {
-		t.Parallel()
-
-		db := dbtest.Open(t)
-		quizStore := NewQuizStore(db, slog.Default())
-
-		testQuiz := newTestQuizzes()[0]
-		testQuiz.Visibility = quiz.VisibilityPrivate
-		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
-			t.Fatalf("failed to create quiz: %v", err)
-		}
-
-		visibility, err := quizStore.GetQuizVisibility(t.Context(), testQuiz.ID)
-		if err != nil {
-			t.Fatalf("GetQuizVisibility err = %v, want nil", err)
-		}
-		if got, want := visibility, quiz.VisibilityPrivate; got != want {
-			t.Errorf("GetQuizVisibility = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("returns ErrQuizNotFound for a missing quiz", func(t *testing.T) {
-		t.Parallel()
-
-		db := dbtest.Open(t)
-		quizStore := NewQuizStore(db, slog.Default())
-
-		_, err := quizStore.GetQuizVisibility(t.Context(), 999)
-		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-}
-
 func TestQuizStore_GetQuizMeta(t *testing.T) {
 	t.Parallel()
 

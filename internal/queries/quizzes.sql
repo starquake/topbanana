@@ -170,15 +170,6 @@ LIMIT 1;
 -- of questions and options that GetQuiz materialises.
 SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
 
--- name: GetQuizVisibility :one
--- Returns just the visibility column for a quiz. Used by the read-path
--- visibility gate, which only needs visibility + existence and must not
--- pay the questions/options fan-out that GetQuiz materialises.
-SELECT visibility
-FROM quizzes
-WHERE id = ?
-LIMIT 1;
-
 -- name: CreateQuiz :one
 -- created_by_player_id is NOT NULL with an FK to players.id (migration
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with

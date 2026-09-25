@@ -216,9 +216,6 @@ func (stubQuizStore) GetQuizMeta(_ context.Context, _ int64) (*quiz.Quiz, error)
 	return nil, errStub
 }
 
-func (stubQuizStore) GetQuizVisibility(_ context.Context, _ int64) (string, error) {
-	return "", errStub
-}
 func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error       { return errStub }
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error       { return errStub }
 func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error            { return errStub }

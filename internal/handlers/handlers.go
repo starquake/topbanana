@@ -62,6 +62,17 @@ func IDFromSlugID(s string) (int64, error) {
 	return id, nil
 }
 
+// SlugFromSlugID returns the slug part of a slug-id string such as
+// "my-quiz-123" (here "my-quiz"), or "" when the input contains no "-".
+func SlugFromSlugID(s string) string {
+	i := strings.LastIndex(s, "-")
+	if i < 0 {
+		return ""
+	}
+
+	return s[:i]
+}
+
 // ParseIDFromSlugPath parses an int64 ID from a slug-id path parameter.
 // It calls IDFromSlugID on the path value identified by s.
 // Returns the parsed ID and true on success, or renders a 400 error and returns 0, false on failure.
