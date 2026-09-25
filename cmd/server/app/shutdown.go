@@ -23,8 +23,11 @@ const (
 	// CDN linger indefinitely and leak file descriptors. 120s is the conventional
 	// upper bound; long enough for legitimate keep-alive reuse, short enough to
 	// reclaim sockets from stale clients.
-	idleTimeout     = 120 * time.Second
-	shutdownTimeout = 5 * time.Second
+	idleTimeout = 120 * time.Second
+	// Longer than the 5s net/http waits before treating a connection that never
+	// sent a request (a browser preconnect) as idle, so one cannot pin Shutdown
+	// to its deadline.
+	shutdownTimeout = 10 * time.Second
 )
 
 func runHTTPServer(
@@ -82,14 +85,9 @@ func runHTTPServer(
 	return nil
 }
 
-// shutdown stops the HTTP server and drains the detached email dispatches
-// concurrently, so the two bounds overlap rather than add up against the
-// container's stop grace. It returns only once both are done, so the caller
-// can close the DB after it (#740, #741, #1351).
-//
-// Both bounds are detached from ctx: at shutdown ctx is already cancelled
-// (signal-driven, and the integration harness cancels the ctx it passes to
-// Run), so a plain WithTimeout(ctx, ...) would fire instantly.
+// shutdown stops the HTTP server and drains the email dispatches concurrently,
+// returning once both are done so the caller can close the DB (#740, #1351).
+// The bound is detached from ctx, which is already cancelled at shutdown.
 func shutdown(ctx context.Context, httpServer *http.Server, emailTasks *bgtasks.Tracker, logger *slog.Logger) error {
 	boundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()

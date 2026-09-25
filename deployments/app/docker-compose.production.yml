@@ -79,7 +79,7 @@ services:
     networks:
       - web
     restart: unless-stopped
-    # Above the app's 5s HTTP shutdown plus its concurrent email drain.
+    # Above the app's 10s shutdown bound (HTTP and email drain run concurrently).
     stop_grace_period: 20s
     # Mirrors the Dockerfile HEALTHCHECK so `docker ps` reports a
     # health column and any compose-aware orchestrator (rolling

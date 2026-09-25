@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -135,11 +136,14 @@ func startServer(
 		// otherwise call t.Log as the test completes and race the testing
 		// framework's own teardown (#1008).
 		stdout.Disable()
+		// A pooled client connection that never carried a request would hold
+		// graceful shutdown for net/http's 5s new-connection grace.
+		http.DefaultClient.CloseIdleConnections()
 		stop()
 		select {
 		case err := <-errCh:
 			return err
-		case <-time.After(10 * time.Second):
+		case <-time.After(15 * time.Second):
 			return errServerShutdownTimeout
 		}
 	})
