@@ -359,8 +359,8 @@ func TestSessionLobby_ReplayAfterFinishedSession(t *testing.T) {
 	}
 }
 
-// TestSessionLobby_JoinCodesAreUnique opens two sessions and asserts the
-// generated join codes differ.
+// TestSessionLobby_JoinCodesAreUnique opens two sessions (one per host, since a
+// host has one active room) and asserts the generated join codes differ.
 func TestSessionLobby_JoinCodesAreUnique(t *testing.T) {
 	t.Parallel()
 
@@ -368,16 +368,51 @@ func TestSessionLobby_JoinCodesAreUnique(t *testing.T) {
 	baseURL := setup.BaseURL
 	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-unique")
 
+	codes := make([]string, 0, 2)
+	for _, name := range []string{"unique-host-a", "unique-host-b"} {
+		host := &http.Client{
+			Jar:           mustJar(t),
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+		}
+		registerVerifyAndMint(ctx, t, host, baseURL, setup.DBURI, name, name+"-pass-123")
+		setPlayerRole(ctx, t, setup.DBURI, name, "admin")
+		codes = append(codes, createSession(ctx, t, host, baseURL, qz.ID))
+	}
+	if codes[0] == codes[1] {
+		t.Errorf("two sessions share join code %q, want distinct", codes[0])
+	}
+}
+
+// TestSessionLobby_SecondCreateReturnsActiveRoom pins one active room per host
+// (#1336): a second create while the first room is open (a double-click)
+// returns the same room instead of opening another.
+func TestSessionLobby_SecondCreateReturnsActiveRoom(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-one-room")
+
 	host := &http.Client{
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "unique-host", "unique-host-pass-123")
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "one-room-host", "one-room-host-pass-123")
 
-	code1 := createSession(ctx, t, host, baseURL, qz.ID)
-	code2 := createSession(ctx, t, host, baseURL, qz.ID)
-	if code1 == code2 {
-		t.Errorf("two sessions share join code %q, want distinct", code1)
+	if got, want := createSession(
+		ctx,
+		t,
+		host,
+		baseURL,
+		qz.ID,
+	), createSession(
+		ctx,
+		t,
+		host,
+		baseURL,
+		qz.ID,
+	); got != want {
+		t.Errorf("second create join code = %q, want the active room %q", want, got)
 	}
 }
 
