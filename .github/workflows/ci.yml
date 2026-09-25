@@ -178,12 +178,23 @@ jobs:
         name: coverage-profile
         path: build/coverage
 
+    # The go-test-coverage action's own image ref is a movable tag, so run that
+    # image by digest instead. Dependabot cannot see this digest: bump it by hand.
     - name: Commit coverage badge
-      uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
-      with:
-        config: .testcoverage.yml
-        git-token: ${{ secrets.GITHUB_TOKEN }}
-        git-branch: badges
+      env:
+        INPUT_CONFIG: .testcoverage.yml
+        INPUT_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        INPUT_GIT_BRANCH: badges
+        INPUT_GIT_REPOSITORY: ${{ github.repository }}
+        INPUT_GIT_FILE_NAME: .badges/${{ github.ref_name }}/coverage.svg
+      run: |
+        docker run --rm \
+          --entrypoint /docker-entrypoint.sh \
+          -v "$GITHUB_WORKSPACE:/github/workspace" -w /github/workspace \
+          -v "$GITHUB_OUTPUT:/github/output" -e GITHUB_OUTPUT=/github/output \
+          -e INPUT_CONFIG -e INPUT_GIT_TOKEN -e INPUT_GIT_BRANCH \
+          -e INPUT_GIT_REPOSITORY -e INPUT_GIT_FILE_NAME \
+          ghcr.io/vladopajic/go-test-coverage@sha256:b2d4e95d83a70e3e38f31e9c5dec9454a67d921b63a38ba5754d4772ec4ab0bc # v2.19.0
 
   e2e:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
