@@ -739,6 +739,41 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 	}
 }
 
+// TestService_CreateSession_ReturnsActiveRoom pins one active room per host
+// (#1336): a second create while the host's room is open returns that room,
+// and once it is ended the host can open a new one.
+func TestService_CreateSession_ReturnsActiveRoom(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	first, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	second, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("second CreateSession err = %v, want nil", err)
+	}
+	if got, want := second.ID, first.ID; got != want {
+		t.Errorf("second CreateSession id = %q, want the active room %q", got, want)
+	}
+
+	if err = h.service.EndSession(ctx, first.JoinCode, hostID); err != nil {
+		t.Fatalf("EndSession err = %v, want nil", err)
+	}
+	third, err := h.service.CreateSession(ctx, nil, hostID, false)
+	if err != nil {
+		t.Fatalf("CreateSession after end err = %v, want nil", err)
+	}
+	if third.ID == first.ID {
+		t.Errorf("CreateSession after end id = %q, want a new room", third.ID)
+	}
+}
+
 // TestService_SubmitAnswer_HostRejected pins #1336: the host is not on the
 // roster, so they cannot record a live answer.
 func TestService_SubmitAnswer_HostRejected(t *testing.T) {

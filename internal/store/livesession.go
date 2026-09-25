@@ -53,7 +53,8 @@ func (s *LiveSessionStore) Ping(ctx context.Context) error {
 // the returned row. The room's quiz is optional (#836): a nil sess.QuizID opens
 // an empty room (quiz_id NULL, the "no game running yet" state). A join_code
 // UNIQUE collision (the loser of a probe race in the service) surfaces as
-// [livesession.ErrJoinCodeUnavailable].
+// [livesession.ErrJoinCodeUnavailable], and a second active room for the same
+// host (one active room per host, #1336) as [livesession.ErrHostHasActiveRoom].
 func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.Session) error {
 	var quizID sql.NullInt64
 	if sess.QuizID != nil {
@@ -66,17 +67,7 @@ func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.
 		JoinCode:     sess.JoinCode,
 	})
 	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			// A bare UNIQUE violation is ambiguous (id PK or join_code). Probe
-			// the join code so an id PK collision surfaces as a real internal
-			// error instead of the join-code re-probe loop.
-			if taken, probeErr := s.q.JoinCodeExists(ctx, sess.JoinCode); probeErr == nil && taken {
-				return livesession.ErrJoinCodeUnavailable
-			}
-		}
-
-		return fmt.Errorf("failed to create session: %w", err)
+		return s.classifyCreateConflict(ctx, sess, err)
 	}
 
 	applySessionRow(sess, row)
@@ -688,6 +679,24 @@ func (s *LiveSessionStore) ListLiveSessionIDs(ctx context.Context) ([]string, er
 	}
 
 	return ids, nil
+}
+
+// classifyCreateConflict maps a CreateSession insert error onto its sentinel.
+// A bare UNIQUE violation is ambiguous (id PK, join_code, or the one active room
+// per host), so it probes the join code and the host's active room; an id PK
+// collision stays a real internal error instead of the join-code re-probe loop.
+func (s *LiveSessionStore) classifyCreateConflict(ctx context.Context, sess *livesession.Session, err error) error {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		if taken, probeErr := s.q.JoinCodeExists(ctx, sess.JoinCode); probeErr == nil && taken {
+			return livesession.ErrJoinCodeUnavailable
+		}
+		if _, probeErr := s.q.GetActiveSessionForHost(ctx, sess.HostPlayerID); probeErr == nil {
+			return livesession.ErrHostHasActiveRoom
+		}
+	}
+
+	return fmt.Errorf("failed to create session: %w", err)
 }
 
 // listPlayers loads the lobby roster for a session in join order.

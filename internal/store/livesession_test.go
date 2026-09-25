@@ -1569,6 +1569,33 @@ func TestLiveSessionStore_RecordAnswer_OnlyWhileQuestionOpen(t *testing.T) {
 	}
 }
 
+// TestLiveSessionStore_CreateSession_OneActiveRoomPerHost pins #1336: a host
+// with an active room cannot open a second one, but can once it is finished.
+func TestLiveSessionStore_CreateSession_OneActiveRoomPerHost(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+
+	first := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "ONE234"}
+	if err := sessionStore.CreateSession(t.Context(), first); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	second := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "TWO234"}
+	if got, want := sessionStore.CreateSession(t.Context(), second), livesession.ErrHostHasActiveRoom; !errors.Is(
+		got, want,
+	) {
+		t.Errorf("second CreateSession err = %v, want %v", got, want)
+	}
+
+	if err := sessionStore.Finish(t.Context(), first.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+	if err := sessionStore.CreateSession(t.Context(), second); err != nil {
+		t.Errorf("CreateSession after finish err = %v, want nil", err)
+	}
+}
+
 // TestLiveSessionStore_FinishFrom pins the idle-close guard (#1336): the finish
 // is written only from the expected phase.
 func TestLiveSessionStore_FinishFrom(t *testing.T) {

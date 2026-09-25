@@ -45,6 +45,11 @@ var (
 	// the retry-exhaustion detail.
 	ErrJoinCodeUnavailable = errors.New("could not allocate a unique join code")
 
+	// ErrHostHasActiveRoom is returned by [Store.CreateSession] when the host
+	// already has an active (non-finished) room: a host has at most one (#1336).
+	// [Service.CreateSession] resolves it to the existing room.
+	ErrHostHasActiveRoom = errors.New("host already has an active room")
+
 	// ErrNotHost is returned by host-gated actions ([Service.Start]) when
 	// the caller is not the session's host. Handlers map it to 403.
 	ErrNotHost = errors.New("player is not the session host")
@@ -602,7 +607,8 @@ func hostableQuizErr(qz *quiz.Quiz, requesterID int64, isAdmin bool) error {
 // #1207, overriding the old owner-or-published rule). Returns
 // [quiz.ErrQuizNotFound] when the supplied quiz does not exist, [ErrNotLiveQuiz]
 // when it is a solo quiz, and [ErrQuizNotOwned] when a non-admin host did not
-// create it.
+// create it. A host has at most one active room (#1336): when one already
+// exists (e.g. a double-clicked "Host live") that room is returned unchanged.
 func (s *Service) CreateSession(
 	ctx context.Context,
 	quizID *int64,
@@ -631,6 +637,10 @@ func (s *Service) CreateSession(
 		Phase:        PhaseLobby,
 	}
 	if err = s.store.CreateSession(ctx, sess); err != nil {
+		if errors.Is(err, ErrHostHasActiveRoom) {
+			return s.existingRoomForHost(ctx, hostPlayerID)
+		}
+
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -1071,6 +1081,23 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 		slog.Int64(logPlayerKey, playerID))
 
 	return nil
+}
+
+// existingRoomForHost returns the host's active room after a create lost the
+// one-room-per-host race.
+func (s *Service) existingRoomForHost(ctx context.Context, hostPlayerID int64) (*Session, error) {
+	active, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)
+	if err != nil {
+		return nil, fmt.Errorf(errGetActiveSessionFmt, err)
+	}
+	if active == nil {
+		return nil, fmt.Errorf("failed to create session: %w", ErrHostHasActiveRoom)
+	}
+	s.logger.InfoContext(ctx, "live session create reused the host's active room",
+		slog.String(logJoinCodeKey, active.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID))
+
+	return active, nil
 }
 
 // lobbyQuiz loads the room's quiz for the session state, or (nil, nil) for an empty
