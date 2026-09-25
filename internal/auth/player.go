@@ -84,6 +84,12 @@ func (p *Player) IsEmailVerified() bool {
 	return p.EmailVerifiedAt != nil
 }
 
+// EmailVerificationPending reports whether the player has an email address
+// that is not verified yet. A row with no email (anonymous) has nothing to verify.
+func (p *Player) EmailVerificationPending() bool {
+	return p.Email != "" && !p.IsEmailVerified()
+}
+
 // IsApproved reports whether an admin has cleared this account to sign in (#1227).
 func (p *Player) IsApproved() bool {
 	return p.ApprovedAt != nil

@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
 )
@@ -79,6 +80,29 @@ func TestPlayer_IsAdmin(t *testing.T) {
 			p := Player{Role: tc.role}
 			if got, want := p.IsAdmin(), tc.want; got != want {
 				t.Errorf("IsAdmin() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPlayer_EmailVerificationPending(t *testing.T) {
+	t.Parallel()
+
+	verifiedAt := time.Now()
+	tests := []struct {
+		name   string
+		player Player
+		want   bool
+	}{
+		{"no email", Player{}, false},
+		{"unverified email", Player{Email: "a@example.test"}, true},
+		{"verified email", Player{Email: "a@example.test", EmailVerifiedAt: &verifiedAt}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := tc.player.EmailVerificationPending(), tc.want; got != want {
+				t.Errorf("EmailVerificationPending() = %v, want %v", got, want)
 			}
 		})
 	}
