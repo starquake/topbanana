@@ -47,8 +47,7 @@ async function fireRefreshes(page: Page, selector: string, method: string, times
   }, { selector, method, times });
 }
 
-// #1344: every tick fired its own GET /state with no coalescing, so a burst of
-// ticks piled up overlapping reads.
+// Ticks that land while a GET /state is pending share it plus one follow-up read (#1344).
 test.describe('state read coalescing', () => {
   test('player ticks during a pending read cost one follow-up read', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
@@ -73,6 +72,36 @@ test.describe('state read coalescing', () => {
     await expect.poll(() => reads.count()).toBe(2);
     await page.waitForTimeout(500);
     expect(reads.count()).toBe(2);
+  });
+
+  test('a hung read does not block a later one', async ({ page, hostSessions }) => {
+    test.setTimeout(60_000);
+    const stamp = Date.now();
+    const quizTitle = `Coalesce Hung ${stamp}`;
+    const eve = `Eve-${stamp}`;
+
+    const host = await hostSessions.adminHost();
+    await seedQuiz(host, quizTitle);
+    const { joinCode } = await hostSessions.openViaApi(makeQuizLive(quizTitle));
+
+    await page.goto(`/join/${joinCode}`);
+    await page.getByTestId('join-name-input').fill(eve);
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('lobby-roster').getByText(eve)).toBeVisible();
+    await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
+
+    const reads = await holdStateReads(page, joinCode);
+    await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
+    await expect.poll(() => reads.count()).toBe(1);
+    // Within the stale window a new tick joins the hung read.
+    await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
+    await page.waitForTimeout(300);
+    expect(reads.count()).toBe(1);
+    // Past it, a tick starts a fresh read instead of waiting on the hung one.
+    await page.waitForTimeout(5_500);
+    await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
+    await expect.poll(() => reads.count()).toBe(2);
+    reads.release();
   });
 
   test('host ticks during a pending read cost one follow-up read', async ({ hostSessions }) => {

@@ -2,6 +2,8 @@ import { sessionService } from '../services/SessionService.js';
 import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
+import { createCoalescedRead } from '@shared/coalescedRead.js';
+import { createReconnectBackoff } from '@shared/reconnectBackoff.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import {
@@ -30,11 +32,6 @@ const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 // outage. A 404 is not counted here - it is the room-gone signal that flips
 // sessionClosed instead.
 const STATE_FAILURE_LIMIT = 3;
-
-// EventSource gives up for good on a fatal non-200, so the live surface
-// re-subscribes itself on a capped backoff, like the host big screen (#1342).
-const RECONNECT_BASE_DELAY = 1000;
-const RECONNECT_MAX_DELAY = 30000;
 
 // rememberSession persists the join code so a reload can resume. Best-effort: a
 // storage exception (private mode, quota) is swallowed - resume is a
@@ -114,8 +111,7 @@ export class JoinApp {
         this.sessionClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
-        this.reconnectTimer = null;
-        this.reconnectDelay = RECONNECT_BASE_DELAY;
+        this.reconnect = createReconnectBackoff();
         this.readBeat = {};
         // The bound visibility/focus handler, wired once in init. Held on the
         // instance so a single shared reference backs all three listeners. Null
@@ -212,10 +208,9 @@ export class JoinApp {
         // Monotonic id per GET /state read; ignore a superseded response so an
         // out-of-order read can't regress the surface (e.g. reveal->question) (#1178).
         this.stateSeq = 0;
-        // The in-flight GET /state, plus a flag asking for one follow-up read when
-        // ticks arrive while it is pending, so a burst of ticks costs two reads.
-        this.stateRead = null;
-        this.stateDirty = false;
+        // Assigned in init so the read runs on the reactive proxy: a burst of
+        // ticks shares one in-flight GET /state plus one follow-up.
+        this.stateReads = null;
         // Guards the connection-trouble banner's "Reconnect now" control (#1121)
         // so a double-tap does not fire two overlapping recoveries, and drives
         // the button's in-flight "Reconnecting..." label.
@@ -267,6 +262,7 @@ export class JoinApp {
     // /join/{code} deep link otherwise lands on the name form; the bare /join
     // entry with no remembered session shows the enter-code form first.
     async init() {
+        this.stateReads = createCoalescedRead(() => this.readState());
         // Capture the component root so the standings FLIP can scope its row
         // queries to this island. $root resolves here because init() runs in
         // Alpine context; the later SSE-driven syncStandingsFromState path does
@@ -550,25 +546,8 @@ export class JoinApp {
         await this.refreshState();
     }
 
-    // refreshState coalesces reads: one GET /state in flight, at most one follow-up.
     refreshState() {
-        if (this.stateRead) {
-            this.stateDirty = true;
-
-            return this.stateRead;
-        }
-        this.stateRead = (async () => {
-            try {
-                do {
-                    this.stateDirty = false;
-                    await this.readState();
-                } while (this.stateDirty);
-            } finally {
-                this.stateRead = null;
-            }
-        })();
-
-        return this.stateRead;
+        return this.stateReads.run();
     }
 
     // readState performs the authoritative read. A null result (404) means
@@ -950,10 +929,10 @@ export class JoinApp {
         const url = `/api/sessions/${encodeURIComponent(this.code)}/events`;
         const source = new EventSource(url);
         source.onopen = () => {
-            this.reconnectDelay = RECONNECT_BASE_DELAY;
+            this.reconnect.reset();
         };
         source.onmessage = () => {
-            this.reconnectDelay = RECONNECT_BASE_DELAY;
+            this.reconnect.reset();
             this.refreshState();
         };
         source.onerror = () => {
@@ -969,30 +948,18 @@ export class JoinApp {
         this.eventSource = source;
     }
 
-    // scheduleReconnect arms a backoff timer that re-opens the stream and
-    // re-reads state after a hard close. Idempotent while a retry is pending.
+    // scheduleReconnect re-opens the stream and re-reads state after a hard close.
     scheduleReconnect() {
-        if (this.reconnectTimer) return;
-        const delay = this.reconnectDelay;
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_DELAY);
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
+        this.reconnect.schedule(() => {
             if (this.sessionClosed || this.step !== 'lobby' || !this.code) return;
             this.subscribe();
             this.refreshState();
-        }, delay);
-    }
-
-    clearReconnectTimer() {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
+        });
     }
 
     // closeStream is safe to call regardless of subscription state.
     closeStream() {
-        this.clearReconnectTimer();
+        this.reconnect.cancel();
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;

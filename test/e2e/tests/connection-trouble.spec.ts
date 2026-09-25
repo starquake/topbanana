@@ -75,9 +75,9 @@ test.describe('live client connection trouble', () => {
         document.dispatchEvent(new Event('visibilitychange'));
         const root = document.querySelector('[x-data="joinApp"]');
         const cmp = (window as unknown as {
-          Alpine: { $data: (el: Element) => { stateRead: Promise<void> | null } };
+          Alpine: { $data: (el: Element) => { stateReads: { pending: () => Promise<void> | null } } };
         }).Alpine.$data(root!);
-        if (cmp.stateRead) await cmp.stateRead;
+        await cmp.stateReads.pending();
       });
     }
     await expect(page.getByTestId('connection-trouble')).toBeVisible({ timeout: 10_000 });
