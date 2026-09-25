@@ -63,6 +63,10 @@ const (
 	ycbcrComponents = 3
 	cmykComponents  = 4
 
+	pngInterlaceOffset = 28 // signature (8) + IHDR length and type (8) + IHDR field offset (12)
+	pngInterlaceAdam7  = 1
+	adam7PeakFactor    = 2
+
 	// MaxLongEdge caps the stored full image's long edge in pixels. The image
 	// is only ever downscaled to this; a smaller image passes through at its
 	// native size (never upscaled). Sized for the admin lightbox at typical
@@ -226,18 +230,35 @@ func decodeGuarded(raw []byte) (image.Image, string, error) {
 // decodedPixelBytes is the worst-case decode memory per pixel for an image of
 // model m in format, as the stdlib decoders allocate it.
 func decodedPixelBytes(raw []byte, m color.Model, format string) int64 {
-	perPixel := bytesPerPixel(m)
-	switch {
-	case format == "png" && m == color.GrayModel:
-		// A tRNS chunk, which DecodeConfig does not read, promotes gray to NRGBA.
-		return rgbaPixelBytes
-	case format == "png" && m == color.Gray16Model:
-		return rgba64PixelBytes
-	case format == "jpeg":
+	switch format {
+	case "jpeg":
 		return jpegPixelBytes(raw, m)
+	case "png":
+		return pngPixelBytes(raw, m)
 	default:
-		return perPixel
+		return bytesPerPixel(m)
 	}
+}
+
+// pngPixelBytes is image/png's peak decode memory per pixel. DecodeConfig has
+// already validated raw's IHDR, so its interlace byte is at a fixed offset.
+func pngPixelBytes(raw []byte, m color.Model) int64 {
+	var cost int64
+	switch m {
+	case color.GrayModel:
+		// A tRNS chunk, which DecodeConfig does not read, promotes gray to NRGBA.
+		cost = rgbaPixelBytes
+	case color.Gray16Model:
+		cost = rgba64PixelBytes
+	default:
+		cost = bytesPerPixel(m)
+	}
+	if len(raw) > pngInterlaceOffset && raw[pngInterlaceOffset] == pngInterlaceAdam7 {
+		// Adam7 decodes each pass into its own image before merging it into the full one.
+		cost *= adam7PeakFactor
+	}
+
+	return cost
 }
 
 // jpegPixelBytes is image/jpeg's peak decode memory per pixel: a byte per
