@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
@@ -65,6 +66,7 @@ func New(
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores, gameService, realtime, cfg, mail)
 	var handler http.Handler = mux
+	handler = absurl.Middleware(cfg.BaseURL, cfg.TrustedProxyCIDRs)(handler)
 	// securityHeaders is the innermost wrapper so the security headers land on
 	// w.Header() before any handler writes the response, including the 500
 	// recoverPanic emits on a handler panic (the headers survive the unwind).
