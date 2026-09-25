@@ -1733,8 +1733,8 @@ func TestRunner_ScoresAnswerLandingJustBeforeClose(t *testing.T) {
 }
 
 // TestRunner_RetriesFailedScoring pins #1335: a scoring failure at close does
-// not leave the picks unscored; the runner holds the reveal and retries until
-// every pick is scored, then advances.
+// not leave the picks unscored; the runner retries on every reveal tick,
+// republishes the reveal once the scores land, and only then advances.
 func TestRunner_RetriesFailedScoring(t *testing.T) {
 	t.Parallel()
 
@@ -1752,6 +1752,12 @@ func TestRunner_RetriesFailedScoring(t *testing.T) {
 	hooked := &hookStore{LiveSessionStore: h.store, failScores: 2}
 	r := h.runnerOver(hooked)
 	tick := func() { ExportRunnerTick(ctx, r, h.clock.Now()) }
+	version := func() uint64 {
+		_, v, unsubscribe := h.hub.Subscribe(h.code)
+		unsubscribe()
+
+		return v
+	}
 
 	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
 	tick()
@@ -1762,22 +1768,31 @@ func TestRunner_RetriesFailedScoring(t *testing.T) {
 		t.Fatalf("score after failed close = %d, want nil (injected failure)", *score)
 	}
 
-	h.clock.advance(runnerCfg.RevealBeat)
 	tick()
-	if got, want := h.phase(t), PhaseReveal; got != want {
-		t.Fatalf("phase after failed retry = %q, want %q (held until scored)", got, want)
+	if score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); score != nil {
+		t.Fatalf("score after failed retry = %d, want nil (injected failure)", *score)
 	}
 
+	before := version()
 	tick()
-	if got, want := h.phase(t), PhaseIntermission; got != want {
-		t.Fatalf("phase after successful retry = %q, want %q", got, want)
-	}
 	score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0])
 	if score == nil {
-		t.Fatal("score after retry = nil, want the pick scored")
+		t.Fatal("score after retry = nil, want the pick scored within the reveal beat")
 	}
 	if got, want := *score, scoreAt(q, answerAt); got != want {
 		t.Errorf("score after retry = %d, want %d", got, want)
+	}
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Errorf("phase after late scoring = %q, want %q (beat not elapsed)", got, want)
+	}
+	if got := version(); got <= before {
+		t.Errorf("hub version after late scoring = %d, want > %d (reveal republished)", got, before)
+	}
+
+	h.clock.advance(runnerCfg.RevealBeat)
+	tick()
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Errorf("phase after reveal beat = %q, want %q", got, want)
 	}
 }
 
