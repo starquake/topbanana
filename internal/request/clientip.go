@@ -71,10 +71,7 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if len(trustedCIDRs) == 0 {
-		return host
-	}
-	if !ipInCIDRs(host, trustedCIDRs) {
+	if !FromTrustedProxy(r, trustedCIDRs) {
 		return host
 	}
 
