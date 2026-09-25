@@ -108,6 +108,7 @@ func (n noDirFS) Open(name string) (fs.File, error) {
 		return nil, fmt.Errorf("open static asset %q: %w", name, err)
 	}
 	info, err := f.Stat()
+	// Closing a read-only file we are discarding cannot lose data.
 	if err != nil {
 		_ = f.Close()
 
