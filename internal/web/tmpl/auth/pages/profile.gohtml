@@ -8,8 +8,8 @@
         {{if .Saved}}
             {{template "authNotice" (t "profile.savedName")}}
         {{end}}
-        {{if .SignedOutEverywhere}}
-            {{template "authNotice" (t "profile.signedOutEverywhere")}}
+        {{if .Notice}}
+            {{template "authNotice" .Notice}}
         {{end}}
         {{if .Message}}
             {{template "authError" .Message}}

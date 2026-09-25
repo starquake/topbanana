@@ -37,24 +37,30 @@ const maxFormBodySize = 16 * 1024
 // logPlayerIDKey is the structured-log attribute key for the acting player.
 const logPlayerIDKey = "player_id"
 
+// FlashCookieName / FlashCookiePath scope the one-shot banner
+// GET /profile shows after a redirecting profile POST.
+const (
+	FlashCookieName = "topbanana_profile_flash"
+	FlashCookiePath = "/profile"
+)
+
 // pageData feeds profile.gohtml. Title flows into the auth layout's
 // <title>. DisplayName is the value pre-filled into the input. Message
 // surfaces server-side validation errors (taken display name, empty
 // input, etc.). Saved is true on a successful POST so the template
-// can show a small confirmation banner; SignedOutEverywhere does the same
-// for the sign-out-everywhere POST. Back* drive the form's
+// can show a small confirmation banner; Notice carries the flashed banner
+// of a redirecting POST. Back* drive the form's
 // return link so a visitor arriving from the admin chrome lands back
 // on the dashboard instead of the public home page.
 type pageData struct {
 	Title       string
 	DisplayName string
 	Message     string
+	Notice      string
 	Saved       bool
 	BackHref    string
 	BackLabel   string
 	Next        string
-
-	SignedOutEverywhere bool
 }
 
 // profileBack resolves the page's return link from the ?next= query
@@ -86,8 +92,9 @@ func adminNextPath(raw string) string {
 
 // HandleProfile returns the [http.Handler] for GET /profile. The
 // auth.RequireAuthenticated middleware mounted upstream guarantees
-// the request context carries the signed-in player.
-func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+// the request context carries the signed-in player. flash holds the banner a
+// redirecting profile POST left behind.
+func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager, flash *auth.SignedFlash) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,13 +111,18 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 
 		loc := locale.Resolve(r)
 		backHref, backLabel, next := profileBack(r)
-		renderer.render(w, r, http.StatusOK, pageData{
+		data := pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: player.DisplayName,
 			BackHref:    backHref,
 			BackLabel:   backLabel,
 			Next:        next,
-		})
+		}
+		if fr := flash.Read(w, r); fr.OK {
+			data.Notice = fr.Notice
+			data.Message = fr.Err
+		}
+		renderer.render(w, r, http.StatusOK, data)
 	})
 }
 
