@@ -148,7 +148,7 @@ To serve Top Banana! over HTTPS on your own domain, run it behind a reverse prox
 
 - **`address already in use` on `:8080`**: another process holds the port. Publish a different host port (`-p 8081:8080`) or, when running the binary directly, set `PORT` to a free one.
 - **`SESSION_KEY must be set in production`**: the instance is in production mode with no `SESSION_KEY`. Generate one (`openssl rand -hex 32`), set it, and restart.
-- **`database is locked` under load**: SQLite serialises writes. The default connection string enables WAL mode and a `busy_timeout`; if you set a custom `DB_URI`, add the same `?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)`.
+- **`database is locked` under load**: SQLite serialises writes. The default connection string enables WAL mode, a `busy_timeout`, and immediate transactions; if you set a custom `DB_URI`, add the same `?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate`. The server refuses to start without `foreign_keys`, a non-zero `busy_timeout`, and `_txlock=immediate`.
 
 ## Development
 

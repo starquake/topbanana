@@ -51,7 +51,7 @@ USER nonroot
 ENV APP_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
-ENV DB_URI="file:data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+ENV DB_URI="file:data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 
 # The image is distroless (no shell, no wget/curl) so the healthcheck
 # reuses the server binary itself with -healthcheck -- does an HTTP
