@@ -50,6 +50,8 @@ function clampPercent(value) {
 //                         true).
 //   - setTimer(handle):   store the interval handle (null clears it).
 //   - clearTimer():       cancel any pending interval.
+//   - readBeat:           optional caller-owned {} memo that keeps the read
+//                         beat's start across re-calls for the same question.
 //
 // startedAt / expiresAt are ISO 8601 strings off the question payload. A
 // missing or unparseable pair leaves the bar full and revealing off, matching
@@ -65,18 +67,32 @@ export function startQuestionCountdown(question, hooks) {
         return;
     }
     if (hooks.serverNow() < start) {
-        startReadBeat(start, end, hooks);
+        startReadBeat(start, end, beatStartFor(question, hooks), hooks);
 
         return;
     }
     startAnswerCountdown(start, end, hooks);
 }
 
-// startReadBeat fills the bar 0 -> 100 over [serverNow, startAt] while options
+// beatStartFor returns when the read beat for this question began, so a state
+// re-read mid-beat does not snap the bar back to 0. startedAt is part of the
+// key because a replayed quiz reuses question ids.
+function beatStartFor(question, hooks) {
+    const memo = hooks.readBeat;
+    if (!memo) return hooks.serverNow();
+    const key = `${question.id}|${question.startedAt}`;
+    if (memo.key !== key) {
+        memo.key = key;
+        memo.start = hooks.serverNow();
+    }
+
+    return memo.start;
+}
+
+// startReadBeat fills the bar 0 -> 100 over [beatStart, startAt] while options
 // stay hidden, then hands off to startAnswerCountdown the moment the window
 // opens.
-function startReadBeat(startAt, endAt, hooks) {
-    const beatStart = hooks.serverNow();
+function startReadBeat(startAt, endAt, beatStart, hooks) {
     hooks.setRevealing(true);
     hooks.setProgress(0);
     const tick = () => {

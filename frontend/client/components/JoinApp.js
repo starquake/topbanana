@@ -116,6 +116,7 @@ export class JoinApp {
         this.eventSource = null;
         this.reconnectTimer = null;
         this.reconnectDelay = RECONNECT_BASE_DELAY;
+        this.readBeat = {};
         // The bound visibility/focus handler, wired once in init. Held on the
         // instance so a single shared reference backs all three listeners. Null
         // until init attaches it.
@@ -807,6 +808,7 @@ export class JoinApp {
             setRevealing: (revealing) => { this.revealing = revealing; },
             setTimer: (handle) => { this.questionTimer = handle; },
             clearTimer: () => this.clearQuestionTimer(),
+            readBeat: this.readBeat,
         });
     }
 
