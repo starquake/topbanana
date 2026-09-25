@@ -117,9 +117,10 @@ type Processed struct {
 
 // Process decodes the upload (jpeg or png), downscales it so its long edge is
 // at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
-// ThumbLongEdge jpeg thumbnail from the same decoded source. It is pure: no
-// disk or network. The reader is fully consumed. maxBytes caps the raw upload
-// size; zero or negative disables the cap.
+// ThumbLongEdge jpeg thumbnail from the same decoded source. A jpeg's EXIF
+// Orientation is applied to both outputs. It is pure: no disk or network. The
+// reader is fully consumed. maxBytes caps the raw upload size; zero or negative
+// disables the cap.
 //
 // At most maxConcurrentDecodes calls decode at once; a call waiting for a slot
 // returns ctx's error when ctx ends first.
@@ -139,13 +140,17 @@ func Process(ctx context.Context, r io.Reader, maxBytes int64) (*Processed, erro
 	}
 	defer release()
 
-	src, err := decodeGuarded(raw)
+	src, format, err := decodeGuarded(raw)
 	if err != nil {
 		return nil, err
 	}
 
-	full := resizeLongEdge(src, MaxLongEdge)
-	thumb := resizeLongEdge(src, ThumbLongEdge)
+	orientation := orientationNormal
+	if format == "jpeg" {
+		orientation = jpegOrientation(raw)
+	}
+	full := applyOrientation(resizeLongEdge(src, MaxLongEdge), orientation)
+	thumb := applyOrientation(resizeLongEdge(src, ThumbLongEdge), orientation)
 
 	fullBytes, err := encodeJPEG(full)
 	if err != nil {
@@ -184,30 +189,31 @@ func acquireDecodeSlot(ctx context.Context) (func(), error) {
 	}
 }
 
-// decodeGuarded decodes raw (jpeg or png). It rejects a decode bomb from the
-// header first (DecodeConfig reads only the header; PNG's max declared edge of
-// 2^31 keeps the int64 area product in range, so it cannot overflow), then
-// decodes the full image. Returns ErrImageTooLarge for an oversized declared
-// area or decoded size and ErrUnsupportedImage for undecodable bytes.
-func decodeGuarded(raw []byte) (image.Image, error) {
+// decodeGuarded decodes raw (jpeg or png) and returns the image and its format
+// name. It rejects a decode bomb from the header first (DecodeConfig reads only
+// the header; PNG's max declared edge of 2^31 keeps the int64 area product in
+// range, so it cannot overflow), then decodes the full image. Returns
+// ErrImageTooLarge for an oversized declared area or decoded size and
+// ErrUnsupportedImage for undecodable bytes.
+func decodeGuarded(raw []byte) (image.Image, string, error) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, ErrImageTooLarge
+		return nil, "", ErrImageTooLarge
 	}
 	area := int64(cfg.Width) * int64(cfg.Height)
 	if area > MaxPixels || area*bytesPerPixel(cfg.ColorModel) > MaxDecodedBytes {
-		return nil, ErrImageTooLarge
+		return nil, "", ErrImageTooLarge
 	}
 
-	src, _, err := image.Decode(bytes.NewReader(raw))
+	src, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
 	}
 
-	return src, nil
+	return src, format, nil
 }
 
 // bytesPerPixel is the decoded buffer cost per pixel of the image type the
