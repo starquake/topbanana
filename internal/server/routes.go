@@ -675,27 +675,7 @@ func addMediaRoutes(
 
 	addQuizImportArchiveRoute(mux, logger, stores, csrfMgr, svc, cfg, requireGameHost)
 
-	// auth outermost so an unauthenticated caller is rejected before the body is
-	// spooled; the parse still precedes CSRF, which reads the token from PostForm.
-	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
-	mux.Handle(
-		"POST /admin/quizzes/{quizID}/media",
-		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
-			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
-		))),
-	)
-
-	// The audio upload is a single-file multipart POST (the form JS measures the
-	// clip duration in-browser and posts it alongside the file). It reuses the
-	// same multipart middleware, edit gate, upload budget, and per-quiz library
-	// ceiling as the image route (#1059); only the field name and store path
-	// differ.
-	mux.Handle(
-		"POST /admin/quizzes/{quizID}/media/audio",
-		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
-			mediahttp.HandleAudioUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
-		))),
-	)
+	addMediaUploadRoutes(mux, logger, stores, csrfMgr, cfg, requireGameHost)
 
 	// The delete POST is an ordinary urlencoded form (only a csrf_token), not a
 	// multipart upload, so it uses the normal CSRF/form path - no
@@ -732,6 +712,45 @@ func addMediaRoutes(
 	}
 	mux.Handle("GET /media/{id}", mediahttp.HandleMediaServe(logger, svc, stores.Quizzes, viewer))
 	mux.Handle("GET /media/{id}/thumb", mediahttp.HandleMediaThumb(logger, svc, stores.Quizzes, viewer))
+}
+
+// addMediaUploadRoutes registers the image and audio upload POSTs. Split out of
+// addMediaRoutes so that function stays under revive's function-length cap.
+func addMediaUploadRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+	requireGameHost func(http.Handler) http.Handler,
+) {
+	// auth outermost so an unauthenticated caller is rejected before the body is
+	// spooled; the parse still precedes CSRF, which reads the token from PostForm.
+	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
+	// The handlers' up-front library-cap check races concurrent uploads, so the
+	// upload service re-checks it atomically as each row is flipped ready.
+	uploadSvc := media.NewService(
+		stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger,
+		media.WithQuizLimit(cfg.MediaQuizImageLimit),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media",
+		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
+			mediahttp.HandleMediaUpload(logger, uploadSvc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
+		))),
+	)
+
+	// The audio upload is a single-file multipart POST (the form JS measures the
+	// clip duration in-browser and posts it alongside the file). It reuses the
+	// same multipart middleware, edit gate, upload budget, and per-quiz library
+	// ceiling as the image route (#1059); only the field name and store path
+	// differ.
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media/audio",
+		requireGameHost(mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(
+			mediahttp.HandleAudioUpload(logger, uploadSvc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
+		))),
+	)
 }
 
 // addQuizImportArchiveRoute registers the quiz-archive import POST (#1113): a

@@ -90,6 +90,30 @@ func (s *MediaStore) MarkMediaReady(ctx context.Context, id int64) error {
 	return nil
 }
 
+// MarkMediaReadyWithinLimit flips a media row ready only while its quiz holds
+// fewer than limit ready rows of its type. Returns media.ErrQuizMediaLimit when
+// the cap is reached and media.ErrMediaNotFound when no row matched.
+func (s *MediaStore) MarkMediaReadyWithinLimit(ctx context.Context, id int64, limit int) error {
+	res, err := s.q.MarkMediaReadyWithinLimit(ctx, db.MarkMediaReadyWithinLimitParams{
+		ID: id, MaxReady: int64(limit),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to mark media ready within limit: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read media ready update result: %w", err)
+	}
+	if affected > 0 {
+		return nil
+	}
+	if _, err = s.GetMedia(ctx, id); err != nil {
+		return fmt.Errorf("checking media after capped ready: %w", err)
+	}
+
+	return media.ErrQuizMediaLimit
+}
+
 // ListStaleNotReadyMedia returns not-ready media rows older than olderThan. The
 // window is passed to SQL as whole seconds (the cutoff date is computed there),
 // so a sub-second olderThan rounds down to its second floor.
