@@ -546,9 +546,8 @@ func quizByID(
 // - the IDOR fix for #339 lives here: every mutating question route
 // is quiz-scoped in the URL, so loading by questionID alone would let
 // an admin who owns quizA edit a question on quizB by mounting it as
-// /admin/quizzes/A/questions/B-question. SwapQuestionPositions does
-// its own quiz-scoping; the read + write + delete paths route through
-// this helper.
+// /admin/quizzes/A/questions/B-question. The read + write + delete
+// paths route through this helper.
 func questionByID(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1412,7 +1411,7 @@ func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*qu
 
 // roundsPartialData mirrors the subset of QuizViewData the
 // questions_list partial actually ranges over. Shared by the question
-// and round move handlers so an HTMX swap keeps the page's scroll
+// and round position handlers so an HTMX swap keeps the page's scroll
 // position instead of bouncing through a 303.
 type roundsPartialData struct {
 	Quiz   *QuizData
@@ -1420,9 +1419,9 @@ type roundsPartialData struct {
 }
 
 // renderRoundsPartial refetches the quiz tree and emits the
-// questions_list partial. Used by the HTMX paths of HandleQuestionMove
-// and HandleRoundMove so a successful (or knowingly-impossible) move
-// updates only the grouped block instead of a full page reload.
+// questions_list partial. Used by the question and round position
+// handlers so a move updates only the grouped block instead of a full
+// page reload.
 func renderRoundsPartial(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1882,8 +1881,7 @@ func HandleQuestionEdit(
 }
 
 // HandleQuizSetMode flips a quiz between solo and live without going through
-// the edit form (#830). The target mode is the {mode} path segment, mirroring
-// the {direction} segment on the question-move route; only the quiz owner (or
+// the edit form (#830). The target mode is the {mode} path segment; only the quiz owner (or
 // an admin) may change it. On success it redirects back to the quiz view so
 // the re-rendered page reflects the new mode.
 func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
@@ -1972,93 +1970,6 @@ func HandleQuizDelete(
 		}
 
 		http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
-	})
-}
-
-// renderQuestionMoveError translates a SwapQuestionPositions failure
-// into the right HTTP response. In HX-Request mode, boundary errors
-// return 204 so the existing DOM stays in place; classic form posts
-// redirect back to the quiz view.
-//
-//nolint:revive // htmxResponder is a wire-format selector, not a flag-as-mode toggle; splitting the function in two would duplicate the switch rather than clarify it.
-func renderQuestionMoveError(
-	w http.ResponseWriter,
-	r *http.Request,
-	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
-	quizID int64,
-	err error,
-	htmxResponder bool,
-) {
-	switch {
-	case errors.Is(err, quiz.ErrInvalidDirection):
-		render400(w, r, logger, csrfMgr, "invalid direction")
-	case errors.Is(err, quiz.ErrQuestionAtTop),
-		errors.Is(err, quiz.ErrQuestionAtBottom):
-		// Boundary case: the button should have been disabled in
-		// the UI, so a request here is unusual but harmless. For
-		// HTMX, 204 leaves the existing DOM untouched; for the
-		// classic form post, redirect back to the view.
-		if htmxResponder {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
-			http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
-		}
-	case errors.Is(err, quiz.ErrQuestionNotFound):
-		render404(w, r, logger, csrfMgr)
-	default:
-		logger.ErrorContext(r.Context(), "error swapping question positions", slog.Any("err", err))
-		render500(w, r, logger, csrfMgr)
-	}
-}
-
-// HandleQuestionMove handles the per-row Up/Down reorder buttons on the
-// quiz view (#16). The {direction} path segment must be "up" or "down";
-// the underlying store handles the swap atomically and returns sentinel
-// errors for boundary conditions (already at top/bottom) which we map
-// to 400 here so the operator sees the cause rather than a generic
-// 500. After a successful swap we redirect back to the quiz view; the
-// re-rendered page reflects the new order from the database.
-func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	// The HX-Request path renders only the questions_list partial. Reuse
-	// the quiz-view template tree because parseTemplate loads every
-	// admin/partials/*.gohtml alongside any page template, so the partial
-	// is in scope for ExecuteTemplate by name.
-	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var ok bool
-
-		var quizID int64
-		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
-			return
-		}
-
-		if _, ok = requireEditableQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
-			return
-		}
-
-		var questionID int64
-		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
-			return
-		}
-
-		direction := r.PathValue("direction")
-		isHX := htmx.IsRequest(r)
-
-		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
-			renderQuestionMoveError(w, r, logger, csrfMgr, quizID, err, isHX)
-
-			return
-		}
-
-		if isHX {
-			renderRoundsPartial(w, r, logger, csrfMgr, renderer, quizStore, quizID)
-
-			return
-		}
-
-		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
 	})
 }
 
