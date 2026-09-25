@@ -35,6 +35,10 @@ func ExportHubHasVersion(h *Hub, code string) bool {
 	return ok
 }
 
+// ExportScoreFailureLogInterval re-exports scoreFailureLogInterval so a test
+// can step past the scoring-failure log throttle. Test-only.
+const ExportScoreFailureLogInterval = scoreFailureLogInterval
+
 // ExportRunnerTick drives one runner scan at the given instant, so a test can
 // advance a session through its phases off a controlled clock without waiting
 // on the beat ticker. Test-only.

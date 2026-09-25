@@ -40,6 +40,10 @@ const (
 	defaultQuestionReadBeat = 3 * time.Second
 )
 
+// scoreFailureLogInterval caps how often a persistent scoring failure is
+// logged, since the reveal retries it every beat.
+const scoreFailureLogInterval = 30 * time.Second
+
 // errNoQuiz guards the runner against driving a quiz-less room (#836). A room
 // created without a quiz stays in the empty lobby until the host arms one, so the
 // gameplay advance never runs without a quiz; this is the defensive error the
@@ -132,6 +136,9 @@ type Runner struct {
 	// unscored marks sessions revealed while scoring their question failed,
 	// so the reveal retries it every tick and republishes once it lands.
 	unscored map[string]bool
+	// scoreFailLoggedAt records when a session's ongoing scoring failure was
+	// last logged.
+	scoreFailLoggedAt map[string]time.Time
 }
 
 // NewRunner builds a runner over the live-session store, quiz reader, tick
@@ -149,6 +156,8 @@ func NewRunner(
 		cfg:        cfg.withDefaults(),
 		phaseSince: make(map[string]time.Time),
 		unscored:   make(map[string]bool),
+
+		scoreFailLoggedAt: make(map[string]time.Time),
 	}
 }
 
@@ -354,7 +363,7 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 	r.markPhase(sess.ID, now)
-	if !r.scoreQuestionLogged(ctx, sess) {
+	if !r.scoreQuestionLogged(ctx, sess, now) {
 		r.markUnscored(sess.ID)
 	}
 	r.publish(sess.JoinCode, PhaseReveal)
@@ -368,7 +377,7 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 // than showing "Scores so far" back-to-back with "Final scores".
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
 	if r.isUnscored(sess.ID) {
-		if !r.scoreQuestionLogged(ctx, sess) {
+		if !r.scoreQuestionLogged(ctx, sess, now) {
 			return
 		}
 		r.clearUnscored(sess.ID)
@@ -378,7 +387,7 @@ func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time
 		return
 	}
 	// Backstop for a restart that lost the unscored mark.
-	if !r.scoreQuestionLogged(ctx, sess) {
+	if !r.scoreQuestionLogged(ctx, sess, now) {
 		return
 	}
 
@@ -658,19 +667,23 @@ func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 	r.forgetPublished(sess.JoinCode)
 }
 
-// scoreQuestionLogged runs scoreQuestion and logs a failure, reporting whether
-// every pick is now scored.
-func (r *Runner) scoreQuestionLogged(ctx context.Context, sess *Session) bool {
+// scoreQuestionLogged runs scoreQuestion, reporting whether every pick is now
+// scored. A failure is logged when it starts and then at most once per
+// scoreFailureLogInterval until scoring succeeds.
+func (r *Runner) scoreQuestionLogged(ctx context.Context, sess *Session, now time.Time) bool {
 	if err := r.scoreQuestion(ctx, sess); err != nil {
-		r.logger.WarnContext(
-			ctx,
-			"runner failed to score question",
-			slog.String(logSessionKey, sess.ID),
-			slog.Any("err", err),
-		)
+		if r.shouldLogScoreFailure(sess.ID, now) {
+			r.logger.WarnContext(
+				ctx,
+				"runner failed to score question",
+				slog.String(logSessionKey, sess.ID),
+				slog.Any("err", err),
+			)
+		}
 
 		return false
 	}
+	r.clearScoreFailure(sess.ID)
 
 	return true
 }
@@ -817,6 +830,25 @@ func (r *Runner) forget(sessionID string) {
 	defer r.mu.Unlock()
 	delete(r.phaseSince, sessionID)
 	delete(r.unscored, sessionID)
+	delete(r.scoreFailLoggedAt, sessionID)
+}
+
+func (r *Runner) shouldLogScoreFailure(sessionID string, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	last, ok := r.scoreFailLoggedAt[sessionID]
+	if ok && now.Sub(last) < scoreFailureLogInterval {
+		return false
+	}
+	r.scoreFailLoggedAt[sessionID] = now
+
+	return true
+}
+
+func (r *Runner) clearScoreFailure(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.scoreFailLoggedAt, sessionID)
 }
 
 func (r *Runner) markUnscored(sessionID string) {
@@ -860,6 +892,7 @@ func (r *Runner) forgetEnded(tracked, live []string) {
 		if _, ok := liveSet[id]; !ok {
 			delete(r.phaseSince, id)
 			delete(r.unscored, id)
+			delete(r.scoreFailLoggedAt, id)
 		}
 	}
 }

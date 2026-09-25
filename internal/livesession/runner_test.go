@@ -1660,8 +1660,13 @@ func (s *hookStore) takeHook(hook *func()) func() {
 // runnerOver builds a second runner sharing the harness clock, hub, and quiz
 // store but reading and writing through st.
 func (h *runnerHarness) runnerOver(st Store) *Runner {
-	logger := slog.New(slog.DiscardHandler)
-	r := NewRunner(st, h.quizzes, h.hub, game.NewService(nil, h.quizzes, logger), logger, runnerCfg)
+	return h.runnerOverLogged(st, slog.New(slog.DiscardHandler))
+}
+
+// runnerOverLogged is runnerOver with the runner logging to logger.
+func (h *runnerHarness) runnerOverLogged(st Store, logger *slog.Logger) *Runner {
+	discard := slog.New(slog.DiscardHandler)
+	r := NewRunner(st, h.quizzes, h.hub, game.NewService(nil, h.quizzes, discard), logger, runnerCfg)
 	r.SetClock(h.clock)
 
 	return r
@@ -1800,6 +1805,78 @@ func TestRunner_RetriesFailedScoring(t *testing.T) {
 	tick()
 	if got, want := h.phase(t), PhaseIntermission; got != want {
 		t.Errorf("phase after reveal beat = %q, want %q", got, want)
+	}
+}
+
+// TestRunner_ThrottlesScoringFailureLog pins that a scoring failure retried
+// every beat is logged when it starts, then at most once per log interval, and
+// logged afresh when a later failure starts after scoring recovered.
+func TestRunner_ThrottlesScoringFailureLog(t *testing.T) {
+	t.Parallel()
+
+	const failMsg = "runner failed to score question"
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true, true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	firstAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, firstAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	hooked := &hookStore{LiveSessionStore: h.store, failScores: 1000}
+	logs := newCaptureHandler()
+	r := h.runnerOverLogged(hooked, slog.New(logs))
+	tick := func() { ExportRunnerTick(ctx, r, h.clock.Now()) }
+	failLogs := func() int {
+		n := 0
+		for _, rec := range logs.snapshot() {
+			if rec.Message == failMsg {
+				n++
+			}
+		}
+
+		return n
+	}
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	for range 5 {
+		h.clock.advance(runnerCfg.BeatInterval)
+		tick()
+	}
+	if got, want := failLogs(), 1; got != want {
+		t.Errorf("failure logs within the interval = %d, want %d", got, want)
+	}
+	assertLog(t, logs, failMsg, slog.LevelWarn)
+
+	h.clock.advance(ExportScoreFailureLogInterval)
+	tick()
+	if got, want := failLogs(), 2; got != want {
+		t.Errorf("failure logs after the interval = %d, want %d", got, want)
+	}
+
+	hooked.mu.Lock()
+	hooked.failScores = 0
+	hooked.mu.Unlock()
+	tick()
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after recovered scoring = %q, want %q", got, want)
+	}
+	optNext := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	answerAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optNext, answerAt); err != nil {
+		t.Fatalf("second SubmitAnswer err = %v, want nil", err)
+	}
+	hooked.mu.Lock()
+	hooked.failScores = 1000
+	hooked.mu.Unlock()
+	next := h.reload(t)
+	h.clock.advance(next.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	if got, want := failLogs(), 3; got != want {
+		t.Errorf("failure logs after a new failure = %d, want %d", got, want)
 	}
 }
 
