@@ -60,7 +60,7 @@ const NETWORKS = [
     {
         key: 'x',
         label: 'X',
-        bgClass: 'bg-[#000000]',
+        bgClass: 'bg-black',
         icon: ICON_X,
         href: ({ text, url }) =>
             `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
