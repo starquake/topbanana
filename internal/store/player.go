@@ -363,9 +363,8 @@ func (s *PlayerStore) ClaimPlayerForOAuth(
 // row and, in the same transaction, treats the row's email as proven by the
 // provider: an unverified row is stamped verified, its unproven password is
 // dropped, and its sessions are invalidated (#1328). Returns the row as it
-// stands after the link, auth.ErrIdentityAlreadyLinked when the identity is
-// already linked (the caller re-reads it), and auth.ErrPlayerNotFound when no
-// row matches the id.
+// stands after the link, or auth.ErrIdentityAlreadyLinked when the identity is
+// already linked (the caller re-reads it).
 func (s *PlayerStore) LinkProviderIdentity(
 	ctx context.Context,
 	playerID int64,
@@ -433,11 +432,18 @@ func linkProviderIdentity(ctx context.Context, q *db.Queries, playerID int64, pr
 	return nil
 }
 
-// markEmailVerifiedByOAuth runs MarkPlayerEmailVerifiedByOAuth on q and returns
-// the row as it stands afterwards.
+// markEmailVerifiedByOAuth runs MarkPlayerEmailVerifiedByOAuth on q, revoking the
+// dropped password's reset links when it applied, and returns the row as it
+// stands afterwards.
 func markEmailVerifiedByOAuth(ctx context.Context, q *db.Queries, playerID int64) (db.Player, error) {
-	if _, err := q.MarkPlayerEmailVerifiedByOAuth(ctx, playerID); err != nil {
+	rows, err := q.MarkPlayerEmailVerifiedByOAuth(ctx, playerID)
+	if err != nil {
 		return db.Player{}, fmt.Errorf("failed to mark email verified by oauth: %w", err)
+	}
+	if rows > 0 {
+		if revokeErr := revokeTokensAfterPasswordChange(ctx, q, playerID); revokeErr != nil {
+			return db.Player{}, revokeErr
+		}
 	}
 	row, err := q.GetPlayer(ctx, playerID)
 	if err != nil {
@@ -551,7 +557,8 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 // successful consume. Register/resend rows stamp email_verified_at
 // when still NULL; email-change rows (pending_email non-empty) swap
 // players.email, re-stamp email_verified_at, and bump session_version
-// in a single UPDATE. Split out of ConsumeVerifyToken so the
+// in a single UPDATE, then revoke the links mailed to the old address. Split
+// out of ConsumeVerifyToken so the
 // transaction body stays under revive's function-length cap.
 func applyVerifyTokenSideEffect(
 	ctx context.Context, q *db.Queries, row db.ConsumeEmailVerifyTokenRow,
@@ -580,7 +587,7 @@ func applyVerifyTokenSideEffect(
 		return auth.ErrPlayerNotFound
 	}
 
-	return nil
+	return revokeTokensAfterEmailChange(ctx, q, row.PlayerID)
 }
 
 // classifyVerifyTokenMiss disambiguates the UPDATE-no-rows case. The
@@ -662,7 +669,7 @@ func (s *PlayerStore) LookupResetToken(ctx context.Context, tokenHash string) (i
 
 // ConsumeResetToken atomically marks the reset row consumed, rotates
 // password_hash, bumps session_version, and revokes the player's other live
-// verify and reset links - all in one transaction
+// reset and email-change links - all in one transaction
 // so a crash mid-flow cannot leave a player with a consumed token but
 // an old password, nor a new password with old sessions still live.
 // Returns the player id on success, auth.ErrResetTokenInvalid when no
@@ -697,7 +704,7 @@ func (s *PlayerStore) ConsumeResetToken(
 		}
 		playerID = id
 
-		return revokeLiveCredentialTokens(ctx, q, id)
+		return revokeTokensAfterPasswordChange(ctx, q, id)
 	})
 	if err != nil {
 		if errors.Is(err, auth.ErrResetTokenInvalid) {
@@ -722,8 +729,8 @@ func (s *PlayerStore) DeleteExpiredResetTokens(ctx context.Context) error {
 }
 
 // ChangePlayerPassword atomically rotates password_hash, bumps
-// session_version, and revokes every live verify and reset link on the row
-// identified by id. Shares the ResetPlayerPassword query with the
+// session_version, and revokes every live reset and email-change link on the
+// row identified by id. Shares the ResetPlayerPassword query with the
 // forgot-password flow: both paths want the same "new hash + invalidate other
 // cookies" semantics, only the auth proof differs (token vs current password
 // verified by the caller). Returns auth.ErrPlayerNotFound when no row matches
@@ -741,7 +748,7 @@ func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, 
 			return auth.ErrPlayerNotFound
 		}
 
-		return revokeLiveCredentialTokens(ctx, q, playerID)
+		return revokeTokensAfterPasswordChange(ctx, q, playerID)
 	})
 	if err != nil {
 		return fmt.Errorf("change player password: %w", err)
@@ -750,11 +757,27 @@ func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, 
 	return nil
 }
 
-// revokeLiveCredentialTokens deletes the player's unconsumed verify and reset
-// tokens on q, so a link mailed before a credential change stops working (#1329).
-func revokeLiveCredentialTokens(ctx context.Context, q *db.Queries, playerID int64) error {
+// revokeTokensAfterEmailChange deletes the player's unconsumed verify and reset
+// tokens on q: each was mailed to the old address, so none may act on the new
+// one (#1329).
+func revokeTokensAfterEmailChange(ctx context.Context, q *db.Queries, playerID int64) error {
 	if err := q.DeleteLiveEmailVerifyTokensForPlayer(ctx, playerID); err != nil {
 		return fmt.Errorf("failed to revoke verify tokens: %w", err)
+	}
+	if err := q.DeleteLivePasswordResetTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke reset tokens: %w", err)
+	}
+
+	return nil
+}
+
+// revokeTokensAfterPasswordChange deletes the player's unconsumed reset and
+// email-change tokens on q, so neither can undo or outlive the new credential
+// (#1329). A register-time verify link only re-proves the current address, so
+// it stays live.
+func revokeTokensAfterPasswordChange(ctx context.Context, q *db.Queries, playerID int64) error {
+	if err := q.DeleteLiveEmailChangeTokensForPlayer(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to revoke email-change tokens: %w", err)
 	}
 	if err := q.DeleteLivePasswordResetTokensForPlayer(ctx, playerID); err != nil {
 		return fmt.Errorf("failed to revoke reset tokens: %w", err)
@@ -1043,7 +1066,7 @@ func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email 
 			return auth.ErrPlayerNotFound
 		}
 
-		return revokeLiveCredentialTokens(ctx, q, playerID)
+		return revokeTokensAfterEmailChange(ctx, q, playerID)
 	})
 	if err != nil {
 		return fmt.Errorf("set player email: %w", err)

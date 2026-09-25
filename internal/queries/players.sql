@@ -489,11 +489,20 @@ DELETE FROM email_verify_tokens
 WHERE expires_at <= sqlc.arg('now');
 
 -- name: DeleteLiveEmailVerifyTokensForPlayer :exec
--- Revokes every unconsumed verify link for the player after a credential
--- change, so a link mailed before the change cannot be used after it (#1329).
+-- Revokes every unconsumed verify link for the player after an email change,
+-- so a link mailed before the change cannot be used after it (#1329).
 DELETE FROM email_verify_tokens
 WHERE player_id = sqlc.arg('player_id')
   AND consumed_at IS NULL;
+
+-- name: DeleteLiveEmailChangeTokensForPlayer :exec
+-- Revokes the player's unconsumed email-change links after a password change,
+-- so a change started on the old credential cannot finish on the new one
+-- (#1329). Register-time links only re-verify the current address and stay.
+DELETE FROM email_verify_tokens
+WHERE player_id = sqlc.arg('player_id')
+  AND consumed_at IS NULL
+  AND pending_email IS NOT NULL;
 
 -- name: CreatePasswordResetToken :exec
 -- Stores the sha256 hash of a freshly minted reset-password token. The

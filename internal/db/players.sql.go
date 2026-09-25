@@ -597,14 +597,29 @@ func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time
 	return err
 }
 
+const deleteLiveEmailChangeTokensForPlayer = `-- name: DeleteLiveEmailChangeTokensForPlayer :exec
+DELETE FROM email_verify_tokens
+WHERE player_id = ?1
+  AND consumed_at IS NULL
+  AND pending_email IS NOT NULL
+`
+
+// Revokes the player's unconsumed email-change links after a password change,
+// so a change started on the old credential cannot finish on the new one
+// (#1329). Register-time links only re-verify the current address and stay.
+func (q *Queries) DeleteLiveEmailChangeTokensForPlayer(ctx context.Context, playerID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLiveEmailChangeTokensForPlayer, playerID)
+	return err
+}
+
 const deleteLiveEmailVerifyTokensForPlayer = `-- name: DeleteLiveEmailVerifyTokensForPlayer :exec
 DELETE FROM email_verify_tokens
 WHERE player_id = ?1
   AND consumed_at IS NULL
 `
 
-// Revokes every unconsumed verify link for the player after a credential
-// change, so a link mailed before the change cannot be used after it (#1329).
+// Revokes every unconsumed verify link for the player after an email change,
+// so a link mailed before the change cannot be used after it (#1329).
 func (q *Queries) DeleteLiveEmailVerifyTokensForPlayer(ctx context.Context, playerID int64) error {
 	_, err := q.db.ExecContext(ctx, deleteLiveEmailVerifyTokensForPlayer, playerID)
 	return err

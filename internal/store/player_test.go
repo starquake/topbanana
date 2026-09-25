@@ -2019,56 +2019,74 @@ func TestPlayerStore_MarkPlayerEmailVerifiedByOAuth(t *testing.T) {
 	}
 }
 
-// seedLiveCredentialTokens mints one live verify token and one live reset
-// token for the player and returns their hashes.
-func seedLiveCredentialTokens(t *testing.T, ps *PlayerStore, playerID int64) (verifyHash, resetHash string) {
+// liveTokens holds the hashes of one live token of each kind for a player.
+type liveTokens struct {
+	registerVerify, changeVerify, reset string
+}
+
+// seedLiveCredentialTokens mints one live register-time verify token, one live
+// email-change verify token, and one live reset token for the player.
+func seedLiveCredentialTokens(t *testing.T, ps *PlayerStore, playerID int64) liveTokens {
 	t.Helper()
 
-	_, verifyHash, err := auth.GenerateVerifyToken()
-	if err != nil {
-		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	var toks liveTokens
+	for _, v := range []struct {
+		hash    *string
+		pending string
+	}{{&toks.registerVerify, ""}, {&toks.changeVerify, "changed@example.test"}} {
+		_, hash, err := auth.GenerateVerifyToken()
+		if err != nil {
+			t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+		}
+		if cerr := ps.CreateVerifyToken(
+			t.Context(),
+			hash,
+			playerID,
+			time.Now().Add(time.Hour),
+			v.pending,
+		); cerr != nil {
+			t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+		}
+		*v.hash = hash
 	}
-	if cerr := ps.CreateVerifyToken(t.Context(), verifyHash, playerID, time.Now().Add(time.Hour), ""); cerr != nil {
-		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
-	}
-	_, resetHash, err = auth.GenerateResetToken()
+	_, resetHash, err := auth.GenerateResetToken()
 	if err != nil {
 		t.Fatalf("GenerateResetToken err = %v, want nil", err)
 	}
 	if cerr := ps.CreateResetToken(t.Context(), resetHash, playerID, time.Now().Add(time.Hour)); cerr != nil {
 		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
 	}
+	toks.reset = resetHash
 
-	return verifyHash, resetHash
+	return toks
 }
 
-// assertCredentialTokensRevoked fails when either token still consumes.
-func assertCredentialTokensRevoked(t *testing.T, ps *PlayerStore, verifyHash, resetHash string) {
+// assertTokenLive fails when consuming the token errored.
+func assertTokenLive(t *testing.T, name string, err error) {
 	t.Helper()
-
-	if _, err := ps.ConsumeVerifyToken(t.Context(), verifyHash); !errors.Is(err, auth.ErrVerifyTokenInvalid) {
-		t.Errorf("ConsumeVerifyToken err = %v, want %v", err, auth.ErrVerifyTokenInvalid)
-	}
-	if _, err := ps.ConsumeResetToken(
-		t.Context(),
-		resetHash,
-		"attacker-hash",
-	); !errors.Is(
-		err,
-		auth.ErrResetTokenInvalid,
-	) {
-		t.Errorf("ConsumeResetToken err = %v, want %v", err, auth.ErrResetTokenInvalid)
+	if err != nil {
+		t.Errorf("%s consume err = %v, want nil (still live)", name, err)
 	}
 }
 
-// TestPlayerStore_CredentialChangesRevokeLiveTokens pins #1329: every credential
-// change revokes the verify and reset links mailed before it.
+// assertTokenRevoked fails unless consuming the token reported invalid.
+func assertTokenRevoked(t *testing.T, name string, err, invalid error) {
+	t.Helper()
+	if !errors.Is(err, invalid) {
+		t.Errorf("%s consume err = %v, want %v (revoked)", name, err, invalid)
+	}
+}
+
+// TestPlayerStore_CredentialChangesRevokeLiveTokens pins #1329: a password
+// change revokes reset and email-change links, and an email change revokes
+// every link mailed to the old address.
 func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		change func(t *testing.T, ps *PlayerStore, playerID int64)
+		name             string
+		change           func(t *testing.T, ps *PlayerStore, playerID int64)
+		wantRegisterLive bool
 	}{
 		{
 			name: "change password",
@@ -2078,15 +2096,7 @@ func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
 					t.Fatalf("ChangePlayerPassword err = %v, want nil", err)
 				}
 			},
-		},
-		{
-			name: "set email",
-			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
-				t.Helper()
-				if err := ps.SetPlayerEmail(t.Context(), playerID, "moved@example.test"); err != nil {
-					t.Fatalf("SetPlayerEmail err = %v, want nil", err)
-				}
-			},
+			wantRegisterLive: true,
 		},
 		{
 			name: "consume reset token",
@@ -2103,6 +2113,46 @@ func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
 					t.Fatalf("ConsumeResetToken err = %v, want nil", err)
 				}
 			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "google link drops unproven password",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if _, err := ps.LinkProviderIdentity(t.Context(), playerID, "google", "sub-tokens"); err != nil {
+					t.Fatalf("LinkProviderIdentity err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "admin set email",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				if err := ps.SetPlayerEmail(t.Context(), playerID, "moved@example.test"); err != nil {
+					t.Fatalf("SetPlayerEmail err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: false,
+		},
+		{
+			name: "confirm email change",
+			change: func(t *testing.T, ps *PlayerStore, playerID int64) {
+				t.Helper()
+				raw, hash, err := auth.GenerateVerifyToken()
+				if err != nil {
+					t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+				}
+				if err := ps.CreateVerifyToken(
+					t.Context(), hash, playerID, time.Now().Add(time.Hour), "swapped@example.test",
+				); err != nil {
+					t.Fatalf("CreateVerifyToken err = %v, want nil", err)
+				}
+				if _, err := ps.ConsumeVerifyToken(t.Context(), auth.HashVerifyToken(raw)); err != nil {
+					t.Fatalf("ConsumeVerifyToken err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: false,
 		},
 	}
 	for _, tt := range tests {
@@ -2115,11 +2165,20 @@ func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CreatePlayer err = %v, want nil", err)
 			}
-			verifyHash, resetHash := seedLiveCredentialTokens(t, ps, p.ID)
+			toks := seedLiveCredentialTokens(t, ps, p.ID)
 
 			tt.change(t, ps, p.ID)
 
-			assertCredentialTokensRevoked(t, ps, verifyHash, resetHash)
+			_, err = ps.ConsumeResetToken(t.Context(), toks.reset, "attacker-hash")
+			assertTokenRevoked(t, "reset", err, auth.ErrResetTokenInvalid)
+			_, err = ps.ConsumeVerifyToken(t.Context(), toks.registerVerify)
+			if tt.wantRegisterLive {
+				assertTokenLive(t, "register verify", err)
+			} else {
+				assertTokenRevoked(t, "register verify", err, auth.ErrVerifyTokenInvalid)
+			}
+			_, err = ps.ConsumeVerifyToken(t.Context(), toks.changeVerify)
+			assertTokenRevoked(t, "email-change verify", err, auth.ErrVerifyTokenInvalid)
 		})
 	}
 }
@@ -2139,16 +2198,15 @@ func TestPlayerStore_CredentialChangesKeepOtherPlayersTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	verifyHash, resetHash := seedLiveCredentialTokens(t, ps, bystander.ID)
+	toks := seedLiveCredentialTokens(t, ps, bystander.ID)
 
-	if err := ps.ChangePlayerPassword(t.Context(), changed.ID, "new-hash"); err != nil {
-		t.Fatalf("ChangePlayerPassword err = %v, want nil", err)
+	if setErr := ps.SetPlayerEmail(t.Context(), changed.ID, "changed-moved@example.test"); setErr != nil {
+		t.Fatalf("SetPlayerEmail err = %v, want nil", setErr)
 	}
 
-	if _, err := ps.ConsumeVerifyToken(t.Context(), verifyHash); err != nil {
-		t.Errorf("bystander ConsumeVerifyToken err = %v, want nil", err)
-	}
-	if _, err := ps.ConsumeResetToken(t.Context(), resetHash, "h2"); err != nil {
-		t.Errorf("bystander ConsumeResetToken err = %v, want nil", err)
-	}
+	// Each consume below revokes nothing the next one needs.
+	_, err = ps.ConsumeVerifyToken(t.Context(), toks.registerVerify)
+	assertTokenLive(t, "bystander register verify", err)
+	_, err = ps.ConsumeResetToken(t.Context(), toks.reset, "h2")
+	assertTokenLive(t, "bystander reset", err)
 }
