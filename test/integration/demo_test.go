@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -21,29 +22,7 @@ func TestDemo_EnterClearsHostGates(t *testing.T) {
 	// (startServer's getenv) rather than the process environment.
 	ctx, srv := startServer(t, map[string]string{"DEMO_MODE_ENABLED": "true"})
 	baseURL := srv.BaseURL
-
-	// Seed the demo baseline explicitly (the server no longer seeds at boot).
-	// APP_ENV=development lets config.Parse mint an ephemeral session key so the
-	// seed command needs no SESSION_KEY; DEMO_MODE_ENABLED turns demo mode on.
-	mediaDir := t.TempDir()
-	if err := app.SeedDemo(ctx, func(key string) string {
-		switch key {
-		case "APP_ENV":
-			return "development"
-		case "DEMO_MODE_ENABLED":
-			return "true"
-		case "DB_URI":
-			return srv.DBURI
-		case "MEDIA_DIR":
-			return mediaDir
-		case "DEMO_SEED_ARCHIVE_DIR":
-			return "../../dev/fixtures/demo"
-		default:
-			return ""
-		}
-	}, io.Discard); err != nil {
-		t.Fatalf("SeedDemo: %v", err)
-	}
+	seedDemo(ctx, t, srv.DBURI)
 
 	client := authClient(t)
 
@@ -73,6 +52,65 @@ func TestDemo_EnterClearsHostGates(t *testing.T) {
 	snap := doGet(ctx, t, client, baseURL+"/admin/quizzes")
 	if got, want := snap.StatusCode, http.StatusOK; got != want {
 		t.Errorf("GET /admin/quizzes after demo enter status = %d, want %d", got, want)
+	}
+}
+
+// TestDemo_HostCannotRenameItself pins #1358: the shared demo Host has no
+// password, but PATCH /api/players/me still refuses it, so the "Demo Host" name
+// stays put and the next visitor can still enter the demo.
+func TestDemo_HostCannotRenameItself(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"DEMO_MODE_ENABLED": "true"})
+	baseURL := srv.BaseURL
+	seedDemo(ctx, t, srv.DBURI)
+
+	client := authClient(t)
+	enterResp := httpPostEmpty(ctx, t, client, baseURL+"/demo/enter")
+	enterResp.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := enterResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("POST /demo/enter status = %d, want %d", got, want)
+	}
+
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, "x")
+	if got, want := status, http.StatusConflict; got != want {
+		t.Fatalf("PATCH /api/players/me status = %d, want %d (body=%q)", got, want, body)
+	}
+	if got, want := string(body), `"already_claimed"`; !strings.Contains(got, want) {
+		t.Errorf("PATCH body = %q, should contain %q", got, want)
+	}
+
+	nextResp := httpPostEmpty(ctx, t, authClient(t), baseURL+"/demo/enter")
+	nextResp.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := nextResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("second POST /demo/enter status = %d, want %d", got, want)
+	}
+}
+
+// seedDemo runs the -seed-demo command against dbURI (the server no longer
+// seeds at boot). APP_ENV=development lets config.Parse mint an ephemeral
+// session key so the seed command needs no SESSION_KEY.
+func seedDemo(ctx context.Context, t *testing.T, dbURI string) {
+	t.Helper()
+
+	mediaDir := t.TempDir()
+	if err := app.SeedDemo(ctx, func(key string) string {
+		switch key {
+		case "APP_ENV":
+			return "development"
+		case "DEMO_MODE_ENABLED":
+			return "true"
+		case "DB_URI":
+			return dbURI
+		case "MEDIA_DIR":
+			return mediaDir
+		case "DEMO_SEED_ARCHIVE_DIR":
+			return "../../dev/fixtures/demo"
+		default:
+			return ""
+		}
+	}, io.Discard); err != nil {
+		t.Fatalf("SeedDemo: %v", err)
 	}
 }
 
