@@ -236,7 +236,7 @@ func parseImportPayload(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
 	renderErr func(http.ResponseWriter, *http.Request, string, string, string),
 ) (parsedImport, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportFormSize)
 	if err := r.ParseForm(); err != nil {
 		logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
 		renderErr(w, r, "", "", "request body too large or malformed")

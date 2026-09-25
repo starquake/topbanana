@@ -581,11 +581,7 @@ func addAdminRoutes(
 	)
 	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))
 	mux.Handle("POST /admin/quizzes", formMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
-	mux.Handle("GET /admin/quizzes/import", requireGameHost(admin.HandleQuizImportForm(logger, csrfMgr)))
-	mux.Handle(
-		"POST /admin/quizzes/import",
-		formMW(requireGameHost(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
-	)
+	addAdminQuizImportRoutes(mux, logger, stores, csrfMgr, requireGameHost)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/edit",
 		requireGameHost(admin.HandleQuizEdit(logger, csrfMgr, stores.Quizzes)),
@@ -621,6 +617,24 @@ func addAdminRoutes(
 
 	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+}
+
+// addAdminQuizImportRoutes registers the pasted-JSON quiz import pair. The POST
+// takes the larger import form cap, since one paste carries a whole quiz.
+func addAdminQuizImportRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	csrfMgr *csrf.Manager,
+	requireGameHost func(http.Handler) http.Handler,
+) {
+	mux.Handle("GET /admin/quizzes/import", requireGameHost(admin.HandleQuizImportForm(logger, csrfMgr)))
+	mux.Handle(
+		"POST /admin/quizzes/import",
+		admin.MaxImportFormSizeMiddleware(
+			csrfMgr.Middleware(requireGameHost(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
+		),
+	)
 }
 
 // addMediaRoutes registers the media slice's HTTP surface (#936 slice 2): the

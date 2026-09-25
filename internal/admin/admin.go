@@ -212,6 +212,8 @@ type OptionData struct {
 const (
 	maxOptions  = 4
 	maxFormSize = 1 << 20 // 1 MB
+	// maxImportFormSize fits a quiz at the question and text-length caps.
+	maxImportFormSize = 5 << 20
 )
 
 // actionVariantAdmin selects the Edit/Delete action cluster in the shared
