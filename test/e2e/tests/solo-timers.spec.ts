@@ -102,3 +102,23 @@ test('double-clicking Start creates one game and fetches one question', async ({
   expect(createCount).toBe(1);
   expect(nextCount).toBe(1);
 });
+
+// #1344: playEffectThen registered once('end') and once('stop'); the unfired one
+// stayed on the shared question-show Howl, one more per question.
+test('the question-show sting leaves no stale end/stop listeners', async ({ page, browserName }) => {
+  test.setTimeout(45_000);
+
+  const quizTitle = `E2E 1344 sting ${browserName} ${Date.now()}`;
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
+  await startQuizAsAnonymous(page, quizTitle);
+  await expect(page.getByText(QUIZ_QUESTIONS[0].text)).toBeVisible({ timeout: 10_000 });
+
+  await expect.poll(() => page.evaluate(() => {
+    type HowlLike = { _src: string | string[]; _onend: unknown[]; _onstop: unknown[]; playing: () => boolean };
+    const howler = (window as unknown as { Howler?: { _howls: HowlLike[] } }).Howler;
+    const sting = howler?._howls.find((h) => String(h._src).includes('question-show'));
+    if (!sting || sting.playing()) return -1;
+    return sting._onend.length + sting._onstop.length;
+  }), { timeout: 10_000 }).toBe(0);
+});
