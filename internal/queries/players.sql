@@ -591,7 +591,7 @@ WHERE id = sqlc.arg('id');
 
 -- name: BumpPlayerSessionVersion :one
 -- Increments session_version so every cookie minted before the bump stops
--- validating ("sign out everywhere"). Returns the new version so the caller
+-- validating ("sign out other devices"). Returns the new version so the caller
 -- can re-issue the current cookie.
 UPDATE players
 SET session_version = session_version + 1

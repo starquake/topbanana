@@ -3,7 +3,7 @@
 //   - GET/POST /profile (display name editor, #410)
 //   - GET/POST /profile/email (email change, #111)
 //   - GET/POST /profile/password (password change, #112)
-//   - POST /profile/sign-out-everywhere (revoke every session, #1360)
+//   - POST /profile/sign-out-other-devices (revoke every other session, #1360)
 //
 // Every route is mounted behind auth.RequireAuthenticated, so the handlers can
 // assume a *Player is on the request context.

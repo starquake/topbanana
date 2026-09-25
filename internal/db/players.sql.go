@@ -62,7 +62,7 @@ RETURNING session_version
 `
 
 // Increments session_version so every cookie minted before the bump stops
-// validating ("sign out everywhere"). Returns the new version so the caller
+// validating ("sign out other devices"). Returns the new version so the caller
 // can re-issue the current cookie.
 func (q *Queries) BumpPlayerSessionVersion(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRowContext(ctx, bumpPlayerSessionVersion, id)

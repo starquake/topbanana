@@ -498,7 +498,7 @@ type PlayerStore interface {
 }
 
 // SessionRevoker invalidates every session cookie a player holds by bumping
-// their session_version ("sign out everywhere", #1360).
+// their session_version ("sign out other devices", #1360).
 type SessionRevoker interface {
 	// BumpSessionVersion increments the player's session_version and returns
 	// the new value. Returns ErrPlayerNotFound when no row matches.

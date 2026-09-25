@@ -47,11 +47,11 @@
                 <li><a href="/profile/email" class="text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "profile.changeEmail"}}</a></li>
                 <li><a href="/profile/password" class="text-text-dim hover:text-text underline-offset-2 hover:underline">{{t "profile.changePassword"}}</a></li>
             </ul>
-            <form action="/profile/sign-out-everywhere" method="POST" class="mt-4 pt-4 border-t border-border-soft">
+            <form action="/profile/sign-out-other-devices" method="POST" class="mt-4 pt-4 border-t border-border-soft">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
-                <button type="submit" class="btn-ghost" data-testid="sign-out-everywhere">{{t "profile.signOutEverywhere"}}</button>
-                <p class="mt-2 text-xs text-text-mute">{{t "profile.signOutEverywhereHint"}}</p>
+                <button type="submit" class="btn-ghost" data-testid="sign-out-other-devices">{{t "profile.signOutOtherDevices"}}</button>
+                <p class="mt-2 text-xs text-text-mute">{{t "profile.signOutOtherDevicesHint"}}</p>
             </form>
         </div>
     </div>
