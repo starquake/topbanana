@@ -734,3 +734,34 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 		t.Fatalf("StartQuiz after refused start err = %v, want nil (room must not be wedged)", err)
 	}
 }
+
+// TestService_SubmitAnswer_RejectedWhenCloseWins pins #1334: a pick that passed
+// the snapshot checks but lands after the runner closed the question is
+// rejected as closed rather than stored unscored.
+func TestService_SubmitAnswer_RejectedWhenCloseWins(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	hooked := &hookStore{LiveSessionStore: h.store}
+	hooked.beforeRecordAnswer = func() {
+		h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+		h.tick(ctx)
+	}
+	service := NewService(hooked, h.quizzes, slog.New(slog.DiscardHandler))
+
+	err := service.SubmitAnswer(ctx, h.code, h.players[0], optRight, *q.QuestionExpiresAt)
+	if got, want := err, ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("SubmitAnswer after close err = %v, want %v", got, want)
+	}
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Errorf("phase = %q, want %q", got, want)
+	}
+	if _, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); ok {
+		t.Error("late pick recorded, want none")
+	}
+}

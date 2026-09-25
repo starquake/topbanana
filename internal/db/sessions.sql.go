@@ -1069,25 +1069,30 @@ func (q *Queries) TouchSessionPlayerLastSeen(ctx context.Context, arg TouchSessi
 	return q.db.ExecContext(ctx, touchSessionPlayerLastSeen, arg.PlayerID, arg.JoinCode)
 }
 
-const upsertSessionAnswer = `-- name: UpsertSessionAnswer :exec
+const upsertSessionAnswer = `-- name: UpsertSessionAnswer :execresult
 INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at, game_seq)
-VALUES (?1,
-        ?2,
-        ?3,
-        ?4,
-        ?5,
-        (SELECT game_seq FROM sessions WHERE id = ?1))
+SELECT s.id,
+       s.current_question_id,
+       ?1,
+       ?2,
+       ?3,
+       s.game_seq
+FROM sessions s
+WHERE s.id = ?4
+  AND s.phase = 'question'
+  AND s.current_question_id = ?5
 ON CONFLICT (session_id, question_id, player_id, game_seq)
     DO UPDATE SET option_id   = excluded.option_id,
                   answered_at = excluded.answered_at
+    WHERE session_answers.score IS NULL
 `
 
 type UpsertSessionAnswerParams struct {
-	SessionID  string
-	QuestionID int64
 	PlayerID   int64
 	OptionID   int64
 	AnsweredAt time.Time
+	SessionID  string
+	QuestionID sql.NullInt64
 }
 
 // Records a player's pick for the current session question, tagged with the
@@ -1097,15 +1102,17 @@ type UpsertSessionAnswerParams struct {
 // player_id, game_seq): a re-submit within the same game overwrites the option
 // and timestamp rather than duplicating, so a double-tap before close is the
 // last pick rather than an error. score stays NULL until the question closes.
-func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnswerParams) error {
-	_, err := q.db.ExecContext(ctx, upsertSessionAnswer,
-		arg.SessionID,
-		arg.QuestionID,
+// The write happens only while the session is still in the question phase on
+// this question, and never replaces a scored pick, so a pick racing the close
+// writes no row (#1334) and the store reports it as closed.
+func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnswerParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, upsertSessionAnswer,
 		arg.PlayerID,
 		arg.OptionID,
 		arg.AnsweredAt,
+		arg.SessionID,
+		arg.QuestionID,
 	)
-	return err
 }
 
 const upsertSessionPlayer = `-- name: UpsertSessionPlayer :one

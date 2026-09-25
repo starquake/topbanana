@@ -381,7 +381,9 @@ type Store interface {
 	// running (mid-game) or the room is terminally finished.
 	RearmSession(ctx context.Context, sessionID string, quizID int64) error
 	// RecordAnswer records (or overwrites) a player's pick for the current
-	// session question. Idempotent on (session, question, player).
+	// session question. Idempotent on (session, question, player). Returns
+	// [ErrQuestionNotOpen] when the session is no longer on that question or
+	// the pick has already been scored.
 	RecordAnswer(
 		ctx context.Context,
 		sessionID string,
@@ -916,6 +918,12 @@ func (s *Service) SubmitAnswer(
 	}
 
 	if err = s.store.RecordAnswer(ctx, sess.ID, *sess.CurrentQuestionID, playerID, optionID, answeredAt); err != nil {
+		if errors.Is(err, ErrQuestionNotOpen) {
+			s.logAnswerNotOpen(ctx, sess, playerID, "closed")
+
+			return ErrQuestionNotOpen
+		}
+
 		return fmt.Errorf("failed to record session answer: %w", err)
 	}
 
