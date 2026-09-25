@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,6 +23,8 @@ func TestWriteBudget(t *testing.T) {
 		{name: "negative size gets the floor", size: -1, want: 10 * time.Second},
 		{name: "20 MB clip", size: 20 << 20, want: 10*time.Second + 320*time.Second},
 		{name: "huge body is capped", size: 1 << 40, want: 30 * time.Minute},
+		{name: "size that would overflow the duration is capped", size: 1 << 60, want: 30 * time.Minute},
+		{name: "max int64 is capped", size: math.MaxInt64, want: 30 * time.Minute},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
