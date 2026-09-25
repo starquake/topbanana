@@ -45,13 +45,13 @@ var requiredSQLitePragmas = []struct {
 	enabled   func(value string) bool
 }{
 	{name: "foreign_keys", shorthand: []string{"_foreign_keys", "_fk"}, enabled: func(v string) bool {
+		// SQLite reads odd spellings such as foreign_keys(256) and (-1) as off.
 		switch v {
-		case "on", "true", "yes":
+		case "1", "on", "true", "yes":
 			return true
 		}
-		n, err := strconv.Atoi(v)
 
-		return err == nil && n != 0
+		return false
 	}},
 	{name: "busy_timeout", shorthand: []string{"_busy_timeout", "_timeout"}, enabled: func(v string) bool {
 		n, err := strconv.Atoi(v)
