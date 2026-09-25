@@ -399,20 +399,9 @@ func TestSessionLobby_SecondCreateReturnsActiveRoom(t *testing.T) {
 	}
 	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "one-room-host", "one-room-host-pass-123")
 
-	if got, want := createSession(
-		ctx,
-		t,
-		host,
-		baseURL,
-		qz.ID,
-	), createSession(
-		ctx,
-		t,
-		host,
-		baseURL,
-		qz.ID,
-	); got != want {
-		t.Errorf("second create join code = %q, want the active room %q", want, got)
+	first := createSession(ctx, t, host, baseURL, qz.ID)
+	if got, want := createSession(ctx, t, host, baseURL, qz.ID), first; got != want {
+		t.Errorf("second create join code = %q, want the active room %q", got, want)
 	}
 }
 

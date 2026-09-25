@@ -52,7 +52,7 @@ func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 			`INSERT INTO sessions (id, host_player_id, join_code, phase, created_at) VALUES (?, ?, ?, ?, ?)`,
 			s.id, s.host, s.code, s.phase, s.createdAt,
 		); err != nil {
-			t.Fatalf("seed session %s err = %v, want nil", s.id, err)
+			t.Fatalf("seed session %q err = %v, want nil", s.id, err)
 		}
 	}
 
@@ -61,26 +61,27 @@ func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 	}
 
 	// The newest active room wins; a created_at tie falls to the higher id.
-	want := map[string]string{
+	wantPhases := map[string]string{
 		"uar-old":   "finished",
 		"uar-tie-a": "finished",
 		"uar-tie-b": "intermission",
 		"uar-done":  "finished",
 		"uar-other": "lobby",
 	}
-	for id, wantPhase := range want {
+	for id, wantPhase := range wantPhases {
 		var phase string
 		var finished bool
 		if err := db.QueryRowContext(
 			ctx, "SELECT phase, finished_at IS NOT NULL FROM sessions WHERE id = ?", id,
 		).Scan(&phase, &finished); err != nil {
-			t.Fatalf("read session %s err = %v, want nil", id, err)
+			t.Fatalf("read session %q err = %v, want nil", id, err)
 		}
-		if got := phase; got != wantPhase {
-			t.Errorf("session %s phase = %q, want %q", id, got, wantPhase)
+		if phase != wantPhase {
+			t.Errorf("session %q phase = %q, want %q", id, phase, wantPhase)
 		}
+		// uar-done was seeded finished without a finished_at.
 		if got, want := finished, wantPhase == "finished"; id != "uar-done" && got != want {
-			t.Errorf("session %s has finished_at = %v, want %v", id, got, want)
+			t.Errorf("session %q has finished_at = %v, want %v", id, got, want)
 		}
 	}
 
