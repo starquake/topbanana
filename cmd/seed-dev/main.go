@@ -14,7 +14,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -219,18 +218,18 @@ func run(logger *slog.Logger, cfg seedConfig) error {
 	}
 
 	database.SetupGoose()
-	conn, err := sql.Open("sqlite", cfg.dbURI)
+	conn, err := database.OpenMigrated(
+		ctx, config.DBDriverDefault, cfg.dbURI,
+		config.DBMaxOpenConnsDefault, config.DBMaxIdleConnsDefault, config.DBConnMaxLifetimeDefault,
+	)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return fmt.Errorf("open and migrate db: %w", err)
 	}
 	defer func() {
 		if cerr := conn.Close(); cerr != nil {
 			logger.Warn("db close", slog.Any("err", cerr))
 		}
 	}()
-	if mErr := database.Migrate(conn); mErr != nil {
-		return fmt.Errorf("migrate: %w", mErr)
-	}
 	stores := store.New(conn, logger)
 
 	// The media service writes audio + image files under mediaDir, so ensure the

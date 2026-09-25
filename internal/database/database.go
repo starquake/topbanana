@@ -149,10 +149,9 @@ func hasPragma(pragmas []string, name string) bool {
 	return false
 }
 
-// Migrate runs database migrations against conn. Safe for concurrent callers:
-// goose.Up reads goose's package-level state (the migration registry, the
-// dialect, the BaseFS) which is not goroutine-safe, so we serialise. See the
-// migrateMu comment above for why this is necessary.
+// Migrate runs database migrations against conn, which must be held to one
+// open connection (see [OpenMigrated]). Safe for concurrent callers: goose.Up
+// reads goose's package-level state, so we serialise (see migrateMu).
 func Migrate(conn *sql.DB) error {
 	migrateMu.Lock()
 	defer migrateMu.Unlock()
@@ -162,6 +161,35 @@ func Migrate(conn *sql.DB) error {
 	}
 
 	return nil
+}
+
+// OpenMigrated opens a database like [Open] and migrates it while the pool is
+// held to one connection, since the NO TRANSACTION migrations spread PRAGMA,
+// BEGIN and a temp table over separate statements (#1347). The given pool
+// limits apply once migration succeeds.
+func OpenMigrated(
+	ctx context.Context,
+	driver, uri string,
+	dbMaxOpenConns, dbMaxIdleConns int,
+	dbConnMaxLifetime time.Duration,
+) (*sql.DB, error) {
+	conn, err := Open(ctx, driver, uri, 1, 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err = Migrate(conn); err != nil {
+		if cerr := conn.Close(); cerr != nil {
+			return nil, errors.Join(err, fmt.Errorf("error closing database: %w", cerr))
+		}
+
+		return nil, err
+	}
+
+	conn.SetMaxOpenConns(dbMaxOpenConns)
+	conn.SetMaxIdleConns(dbMaxIdleConns)
+	conn.SetConnMaxLifetime(dbConnMaxLifetime)
+
+	return conn, nil
 }
 
 // MustRowsAffected returns the number of rows affected by res, panicking if the driver returns an error.

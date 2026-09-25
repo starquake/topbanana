@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
 	. "github.com/starquake/topbanana/cmd/server/app"
@@ -35,6 +36,73 @@ func TestCheck_FreshDB_Succeeds(t *testing.T) {
 	}
 	if got, want := stdout.String(), "startup ok"; !strings.Contains(got, want) {
 		t.Errorf("stdout = %q, want substring %q", got, want)
+	}
+}
+
+// TestCheck_ZeroIdleConns_RebuildKeepsChildRows pins that the NO TRANSACTION
+// parent-table rebuilds run on one connection even when the app pool keeps no
+// idle connections: otherwise PRAGMA foreign_keys = OFF and BEGIN land on
+// connections that are closed straight away, and DROP TABLE media fires
+// ON DELETE SET NULL on questions (#1347).
+//
+//nolint:paralleltest // goose.UpTo touches goose globals; sequential tests finish before parallel ones start.
+func TestCheck_ZeroIdleConns_RebuildKeepsChildRows(t *testing.T) {
+	const beforeMediaRebuild = 20260618120000
+
+	dbURI := dbtest.UnmigratedDSN(t)
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	conn.SetMaxOpenConns(1)
+	if err = goose.UpTo(conn, ".", beforeMediaRebuild); err != nil {
+		t.Fatalf("goose.UpTo err = %v, want nil", err)
+	}
+	for _, stmt := range []string{
+		"INSERT INTO players (id, display_name) VALUES (100, 'host')",
+		"INSERT INTO quizzes (id, title, slug, created_by_player_id) VALUES (1, 'Quiz', 'quiz', 100)",
+		"INSERT INTO rounds (id, quiz_id, position) VALUES (1, 1, 1)",
+		"INSERT INTO media (id, quiz_id, mime, path, size_bytes, sha256, created_by_player_id) " +
+			"VALUES (7, 1, 'image/png', 'a.png', 1, 'x', 100)",
+		"INSERT INTO questions (id, quiz_id, round_id, position, media_id) VALUES (1, 1, 1, 1, 7)",
+	} {
+		if _, err = conn.ExecContext(t.Context(), stmt); err != nil {
+			t.Fatalf("seed %q err = %v, want nil", stmt, err)
+		}
+	}
+	if err = conn.Close(); err != nil {
+		t.Fatalf("conn.Close err = %v, want nil", err)
+	}
+
+	getenv := func(key string) string {
+		return map[string]string{
+			"APP_ENV":           "development",
+			"DB_URI":            dbURI,
+			"DB_MAX_IDLE_CONNS": "0",
+			"PORT":              "0",
+		}[key]
+	}
+	var stdout bytes.Buffer
+	if err = Check(t.Context(), getenv, &stdout); err != nil {
+		t.Fatalf("Check err = %v, want nil; log:\n%s", err, stdout.String())
+	}
+
+	conn, err = sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	var mediaID int64
+	if err = conn.QueryRowContext(t.Context(), "SELECT image_media_id FROM questions WHERE id = 1").
+		Scan(&mediaID); err != nil {
+		t.Fatalf("read image_media_id err = %v, want nil", err)
+	}
+	if got, want := mediaID, int64(7); got != want {
+		t.Errorf("questions.image_media_id = %d, want %d", got, want)
 	}
 }
 
