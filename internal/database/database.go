@@ -35,6 +35,10 @@ var ErrMissingSQLitePragma = errors.New("DB_URI is missing a required SQLite pra
 // required setting with a value that switches it off, such as foreign_keys(0).
 var ErrDisabledSQLitePragma = errors.New("DB_URI disables a required SQLite pragma")
 
+// ErrMigratePoolNotSingleConn is returned by [Migrate] when its pool is not
+// held to exactly one open connection.
+var ErrMigratePoolNotSingleConn = errors.New("migrate needs a pool held to one open connection")
+
 // requiredSQLitePragmas lists the pragmas a sqlite DB_URI must enable, with the
 // driver's shorthand DSN keys for each.
 //
@@ -198,9 +202,14 @@ func parsePragmas(raw []string) map[string][]string {
 }
 
 // Migrate runs database migrations against conn, which must be held to one
-// open connection (see [OpenMigrated]). Safe for concurrent callers: goose.Up
-// reads goose's package-level state, so we serialise (see migrateMu).
+// open connection (see [OpenMigrated]); otherwise it returns
+// [ErrMigratePoolNotSingleConn]. Safe for concurrent callers: goose.Up reads
+// goose's package-level state, so we serialise (see migrateMu).
 func Migrate(conn *sql.DB) error {
+	if n := conn.Stats().MaxOpenConnections; n != 1 {
+		return fmt.Errorf("%w: max open connections is %d", ErrMigratePoolNotSingleConn, n)
+	}
+
 	migrateMu.Lock()
 	defer migrateMu.Unlock()
 
