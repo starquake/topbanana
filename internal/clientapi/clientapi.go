@@ -626,7 +626,8 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 // Returns the ID of the created game.
 // Returns 201 if the game was created successfully.
 // Returns 400 if the request body is invalid.
-// Returns 404 if the quiz does not exist.
+// Returns 404 if the quiz does not exist or the player may not read it (see
+// canReadQuiz; an unlisted quiz needs its slug in the body).
 // Returns 409 if the player already has a game for the quiz (in-progress or
 // completed); the client should call GET /api/quizzes/{slugID}/my-game to
 // resolve.
