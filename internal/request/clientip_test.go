@@ -214,9 +214,8 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
-// TestClientIP_MultipleXFFLines pins #1354: a proxy that appends its hop as a
-// separate X-Forwarded-For line (HAProxy's option forwardfor) leaves the
-// client-supplied line first, so every line must be read, not just the first.
+// TestClientIP_MultipleXFFLines pins #1354: a proxy's hop on its own header line
+// must be read, not only the client-supplied first line.
 func TestClientIP_MultipleXFFLines(t *testing.T) {
 	t.Parallel()
 
