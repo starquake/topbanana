@@ -20,6 +20,7 @@
 // alpine:init event.
 
 import { runAnim } from '@shared/anim.js';
+import { isLoginRedirect, SESSION_EXPIRED_MESSAGE } from '@shared/loginRedirect.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
@@ -724,7 +725,9 @@ function hostBigScreen(joinCode, hasQuiz) {
                 // fetch follows transparently to a 200. The runner advances
                 // the page into play off the SSE tick, so there is nothing to
                 // do here on success beyond clearing the disabled state.
-                if (!response.ok) {
+                if (isLoginRedirect(response.url)) {
+                    this.startMessage = SESSION_EXPIRED_MESSAGE;
+                } else if (!response.ok) {
                     this.startMessage = 'Could not start the game. Try again.';
                 }
             } catch (err) {
