@@ -32,7 +32,8 @@ async function holdStateReads(page: Page, joinCode: string): Promise<{ count: ()
   await page.route(`**/api/sessions/${joinCode}/state`, async (route) => {
     count++;
     await held;
-    await route.continue();
+    // An aborted request can no longer be continued.
+    await route.continue().catch(() => {});
   });
   return { count: () => count, release };
 }
@@ -91,16 +92,21 @@ test.describe('state read coalescing', () => {
     await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
 
     const reads = await holdStateReads(page, joinCode);
+    let aborted = 0;
+    page.on('requestfailed', (request) => {
+      if (new URL(request.url()).pathname === `/api/sessions/${joinCode}/state`) aborted++;
+    });
     await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
     await expect.poll(() => reads.count()).toBe(1);
     // Within the stale window a new tick joins the hung read.
     await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
     await page.waitForTimeout(300);
     expect(reads.count()).toBe(1);
-    // Past it, a tick starts a fresh read instead of waiting on the hung one.
+    // Past it, a tick starts a fresh read and aborts the hung one.
     await page.waitForTimeout(5_500);
     await fireRefreshes(page, '[x-data="joinApp"]', 'refreshState', 1);
     await expect.poll(() => reads.count()).toBe(2);
+    await expect.poll(() => aborted).toBe(1);
     reads.release();
   });
 

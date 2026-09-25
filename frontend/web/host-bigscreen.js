@@ -175,7 +175,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         rootEl: null,
 
         init() {
-            this.stateReads = createCoalescedRead(() => this.readState());
+            this.stateReads = createCoalescedRead((signal) => this.readState(signal));
             // Capture the component root so the standings FLIP can scope its row
             // queries to this island. $root resolves here because init() runs in
             // Alpine context; the later SSE-driven syncStandings path does not,
@@ -285,12 +285,12 @@ function hostBigScreen(joinCode, hasQuiz) {
             return this.stateReads.run();
         },
 
-        async readState() {
+        async readState(signal) {
             const seq = ++this.stateSeq;
             try {
                 const response = await fetch(
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/state`,
-                    { headers: { Accept: 'application/json' } },
+                    { headers: { Accept: 'application/json' }, signal },
                 );
                 if (!response.ok) {
                     // A 404 means the session is gone (terminal), not a
@@ -311,6 +311,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.connectionTrouble = false;
                 this.applyState(state);
             } catch (err) {
+                if (signal?.aborted) return;
                 // Count every failure, even a superseded one: seq-gating this
                 // would drop a fast-superseded run of failures and never trip
                 // the trouble banner (#1178). Transient anyway - the next tick

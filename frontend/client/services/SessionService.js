@@ -102,8 +102,8 @@ export class SessionService {
     // (the session vanished, or the caller is no longer a participant). The
     // component treats null as "the lobby is gone" and surfaces it rather
     // than throwing on every poll.
-    async getState(code) {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(code)}/state`);
+    async getState(code, { signal } = {}) {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(code)}/state`, { signal });
         if (response.status === 404) {
             return null;
         }
