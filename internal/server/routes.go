@@ -1069,7 +1069,7 @@ func addAPIRoutes(
 ) {
 	expectedOrigin := originFromBaseURL(cfg.BaseURL)
 	ensurePlayer := func(h http.Handler) http.Handler {
-		return sameOriginCheck(expectedOrigin, auth.EnsurePlayer(h, stores.Players, sessions, logger))
+		return sameOriginCheck(expectedOrigin, noStore(auth.EnsurePlayer(h, stores.Players, sessions, logger)))
 	}
 
 	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
