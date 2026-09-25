@@ -213,3 +213,19 @@ func TestClientIP(t *testing.T) {
 		})
 	}
 }
+
+// TestClientIP_MultipleXFFLines pins #1354: a proxy that appends its hop as a
+// separate X-Forwarded-For line (HAProxy's option forwardfor) leaves the
+// client-supplied line first, so every line must be read, not just the first.
+func TestClientIP_MultipleXFFLines(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/anything", nil)
+	req.RemoteAddr = "127.0.0.1:55555"
+	req.Header.Add("X-Forwarded-For", "6.6.6.6")
+	req.Header.Add("X-Forwarded-For", "1.2.3.4")
+
+	if got, want := ClientIP(req, mustCIDRs(t, "127.0.0.1/32")), "1.2.3.4"; got != want {
+		t.Errorf("ClientIP = %q, want %q", got, want)
+	}
+}
