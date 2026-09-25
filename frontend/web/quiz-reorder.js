@@ -50,6 +50,13 @@ function csrfToken(root) {
     return root.dataset.csrf || '';
 }
 
+// A drag dropped mid-save would race the pending POST, so dragging is off until it settles.
+function setDragDisabled(disabled) {
+    for (const inst of instances) {
+        inst.option('disabled', disabled);
+    }
+}
+
 function destroyInstances() {
     for (const inst of instances) {
         inst.destroy();
@@ -76,12 +83,9 @@ function showError(root, message) {
 // failure, including a redirect to the login page, it restores the pre-drop
 // snapshot. Either way Sortable is rebuilt against the resulting DOM.
 async function postReorder(url, body, snapshotHTML) {
-    if (saving) {
-        restoreSnapshot(snapshotHTML);
-
-        return;
-    }
+    if (saving) return;
     saving = true;
+    setDragDisabled(true);
     let message = 'Could not save the new order. Please try again.';
     try {
         const response = await fetch(url, {
@@ -109,6 +113,7 @@ async function postReorder(url, body, snapshotHTML) {
         }
     } finally {
         saving = false;
+        setDragDisabled(false);
     }
 }
 
