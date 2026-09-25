@@ -94,8 +94,8 @@ func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 		).Scan(&phase, &finished); err != nil {
 			t.Fatalf("read session %q err = %v, want nil", id, err)
 		}
-		if phase != wantPhase {
-			t.Errorf("session %q phase = %q, want %q", id, phase, wantPhase)
+		if got, want := phase, wantPhase; got != want {
+			t.Errorf("session %q phase = %q, want %q", id, got, want)
 		}
 		// uar-done was seeded finished without a finished_at.
 		if got, want := finished, wantPhase == "finished"; id != "uar-done" && got != want {
