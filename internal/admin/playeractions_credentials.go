@@ -240,7 +240,7 @@ func HandlePlayerCreateSubmit(
 
 		player, err := store.CreatePlayerByAdmin(r.Context(), input.DisplayName, input.Email, hash, auth.RolePlayer)
 		if err != nil {
-			renderCreatePlayerError(w, r, renderer, input, err)
+			renderCreatePlayerError(w, r, logger, renderer, input, err)
 
 			return
 		}
@@ -292,11 +292,10 @@ func newPlayerInput(r *http.Request) newPlayerCreateInput {
 }
 
 // renderCreatePlayerError maps the store-level conflict sentinels onto
-// the form's re-render path. Anything else is a 500 from the
-// renderer's perspective; the caller logs the underlying err
-// separately for ops.
+// the form's re-render path. Anything else is logged and rendered as a 500.
 func renderCreatePlayerError(
-	w http.ResponseWriter, r *http.Request, renderer *render.Renderer, in newPlayerCreateInput, err error,
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	renderer *render.Renderer, in newPlayerCreateInput, err error,
 ) {
 	status := http.StatusInternalServerError
 	msg := "Could not create player. Try again."
@@ -308,7 +307,7 @@ func renderCreatePlayerError(
 		status = http.StatusConflict
 		msg = "Another account already uses that email."
 	default:
-		// Fall through to the generic 500 message; err is logged by the caller.
+		logger.ErrorContext(r.Context(), "error creating player by admin", slog.Any("err", err))
 	}
 	renderer.Render(w, r, status, playerCreatePageData{
 		Title:       "Admin Dashboard - New Player",
