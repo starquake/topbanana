@@ -554,20 +554,6 @@ func TestHomeStore_EmptyDB(t *testing.T) {
 	}
 }
 
-// queryRecorder is a dbgen.DBTX that records the SQL of a sqlc query instead of
-// running it, so a test can EXPLAIN the exact generated statement.
-type queryRecorder struct {
-	*sql.DB
-
-	query string
-}
-
-func (r *queryRecorder) QueryContext(_ context.Context, query string, _ ...any) (*sql.Rows, error) {
-	r.query = query
-
-	return nil, errors.ErrUnsupported
-}
-
 // TestHomeStore_RankingQueriesSeekRecentGames pins that the home rankings
 // start from the 30-day range on games_created_at_idx instead of scanning
 // every game or participant ever recorded (#1348).
@@ -600,12 +586,12 @@ func TestHomeStore_RankingQueriesSeekRecentGames(t *testing.T) {
 			t.Parallel()
 
 			conn := dbtest.Open(t)
-			rec := &queryRecorder{DB: conn}
+			rec := &dbtest.QueryRecorder{DB: conn}
 			if got, want := tt.call(t.Context(), dbgen.New(rec)), errors.ErrUnsupported; !errors.Is(got, want) {
 				t.Fatalf("%s err = %v, want %v", tt.name, got, want)
 			}
 
-			plan := dbtest.QueryPlan(t, conn, rec.query)
+			plan := dbtest.QueryPlan(t, conn, rec.Query, rec.Args...)
 			joined := strings.Join(plan, "\n")
 			if got, want := joined, "games_created_at_idx"; !strings.Contains(got, want) {
 				t.Errorf("plan = %q, should contain %q", got, want)

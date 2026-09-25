@@ -2,7 +2,9 @@
 package dbtest
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -200,11 +202,35 @@ func UnmigratedDSN(t *testing.T) string {
 	)
 }
 
-// QueryPlan returns the detail column of each EXPLAIN QUERY PLAN row for query.
-func QueryPlan(t *testing.T, db *sql.DB, query string) []string {
+// QueryRecorder is a sqlc DBTX that records the SQL and arguments of a query or
+// exec instead of running it, so a test can EXPLAIN the exact generated statement.
+type QueryRecorder struct {
+	*sql.DB
+
+	Query string
+	Args  []any
+}
+
+// ExecContext records query and args and returns [errors.ErrUnsupported].
+func (r *QueryRecorder) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
+	r.Query, r.Args = query, args
+
+	return nil, errors.ErrUnsupported
+}
+
+// QueryContext records query and args and returns [errors.ErrUnsupported].
+func (r *QueryRecorder) QueryContext(_ context.Context, query string, args ...any) (*sql.Rows, error) {
+	r.Query, r.Args = query, args
+
+	return nil, errors.ErrUnsupported
+}
+
+// QueryPlan returns the detail column of each EXPLAIN QUERY PLAN row for query
+// bound to args.
+func QueryPlan(t *testing.T, db *sql.DB, query string, args ...any) []string {
 	t.Helper()
 
-	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query)
+	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN %q err = %v", query, err)
 	}
