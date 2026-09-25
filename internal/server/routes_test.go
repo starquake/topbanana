@@ -449,8 +449,12 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 	}
 }
 
-// formBodyCap mirrors admin.MaxFormSizeMiddleware's 1 MB cap.
-const formBodyCap = 1 << 20
+// formBodyCap mirrors admin.MaxFormSizeMiddleware's 1 MB cap, and
+// importBodyCap admin.MaxImportFormSizeMiddleware's 5 MB one.
+const (
+	formBodyCap   = 1 << 20
+	importBodyCap = 5 << 20
+)
 
 // countingReader yields an endless urlencoded value up to limit bytes and
 // records how many bytes the handler chain consumed.
@@ -511,7 +515,7 @@ func registeredPOSTPatterns(t *testing.T) []string {
 
 // TestAddRoutes_POSTBodiesAreBounded sends an oversized urlencoded body to every
 // registered POST route and fails if any layer before the handler's own limit
-// reads past the 1 MB form cap (#1350).
+// reads past the route's form cap (#1350).
 func TestAddRoutes_POSTBodiesAreBounded(t *testing.T) {
 	t.Parallel()
 
@@ -537,7 +541,11 @@ func TestAddRoutes_POSTBodiesAreBounded(t *testing.T) {
 		t.Run(pattern, func(t *testing.T) {
 			t.Parallel()
 			path := wildcard.ReplaceAllString(strings.TrimPrefix(pattern, http.MethodPost+" "), "1")
-			body := &countingReader{limit: 4 * formBodyCap}
+			limit := int64(formBodyCap)
+			if pattern == "POST /admin/quizzes/import" {
+				limit = importBodyCap
+			}
+			body := &countingReader{limit: 2 * importBodyCap}
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, body)
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			// Any nonce gets CSRF validation as far as ParseForm; an attacker picks it.
@@ -549,8 +557,58 @@ func TestAddRoutes_POSTBodiesAreBounded(t *testing.T) {
 
 			mux.ServeHTTP(rec, req)
 
-			if got, want := body.read, int64(formBodyCap+1); got > want {
+			if got, want := body.read, limit+1; got > want {
 				t.Errorf("POST %s read %d body bytes, want at most %d", path, got, want)
+			}
+		})
+	}
+}
+
+// TestAddRoutes_OversizedFormIs413 pins that a form whose declared length is
+// over its route's cap gets a 413, not the CSRF layer's misleading 403, while
+// the JSON import accepts a body the ordinary form cap would refuse.
+func TestAddRoutes_OversizedFormIs413(t *testing.T) {
+	t.Parallel()
+
+	mux := newRouter(t, dbtest.Open(t), &config.Config{SessionKey: "test-session-key"})
+
+	tests := []struct {
+		name string
+		path string
+		size int
+		want int
+	}{
+		{
+			name: "quiz save over the form cap",
+			path: "/admin/quizzes",
+			size: formBodyCap + 1,
+			want: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name: "import under its own cap reaches CSRF",
+			path: "/admin/quizzes/import",
+			size: 2 * formBodyCap,
+			want: http.StatusForbidden,
+		},
+		{
+			name: "import over its cap",
+			path: "/admin/quizzes/import",
+			size: importBodyCap + 1,
+			want: http.StatusRequestEntityTooLarge,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := strings.NewReader("json=" + strings.Repeat("a", tc.size))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, body)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := rec.Code, tc.want; got != want {
+				t.Errorf("POST %s (%d bytes) status = %d, want %d", tc.path, tc.size, got, want)
 			}
 		})
 	}
