@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -477,14 +478,36 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 // registeredPOSTPatterns returns every "POST ..." pattern literal passed to a
-// Handle call in routes.go, so a newly added route is covered automatically.
+// Handle call in the package's non-test sources, so a newly added route is
+// covered wherever it is registered. *http.ServeMux cannot list its patterns.
 func registeredPOSTPatterns(t *testing.T) []string {
 	t.Helper()
 
-	f, err := parser.ParseFile(token.NewFileSet(), "routes.go", nil, parser.SkipObjectResolution)
+	files, err := filepath.Glob("*.go")
 	if err != nil {
-		t.Fatalf("parser.ParseFile(routes.go) err = %v, want nil", err)
+		t.Fatalf("filepath.Glob(*.go) err = %v, want nil", err)
 	}
+	fset := token.NewFileSet()
+	var patterns []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parser.ParseFile(%s) err = %v, want nil", name, err)
+		}
+		patterns = append(patterns, postPatternsIn(t, f)...)
+	}
+
+	return patterns
+}
+
+// postPatternsIn returns the "POST ..." pattern literals passed to Handle
+// calls in f.
+func postPatternsIn(t *testing.T, f *ast.File) []string {
+	t.Helper()
+
 	var patterns []string
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
