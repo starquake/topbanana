@@ -936,6 +936,27 @@ func (q *Queries) ListPlayerFinishStats(ctx context.Context, playerIds []int64) 
 	return items, nil
 }
 
+const markPlayerEmailVerifiedByOAuth = `-- name: MarkPlayerEmailVerifiedByOAuth :execrows
+UPDATE players
+SET email_verified_at = CURRENT_TIMESTAMP,
+    password_hash = NULL,
+    session_version = session_version + 1
+WHERE id = ?1
+  AND email_verified_at IS NULL
+`
+
+// Stamps email_verified_at when an OAuth provider has just attested the
+// address. A row that was still unverified had its password set by someone who
+// never proved the mailbox, so the password is dropped and every live cookie is
+// invalidated (#1328). A row already verified is left untouched.
+func (q *Queries) MarkPlayerEmailVerifiedByOAuth(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markPlayerEmailVerifiedByOAuth, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markPlayerEmailVerifiedIfNew = `-- name: MarkPlayerEmailVerifiedIfNew :execrows
 UPDATE players
 SET email_verified_at = CURRENT_TIMESTAMP

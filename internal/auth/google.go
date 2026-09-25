@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -502,11 +501,11 @@ func linkOrCreateGooglePlayer(
 		// callback that reaches us, so stamping here is safe and
 		// idempotent. See #471.
 		if email != "" && existing.EmailVerifiedAt == nil {
-			if markErr := identities.MarkPlayerEmailVerifiedIfNew(ctx, existing.ID); markErr != nil {
+			marked, markErr := identities.MarkPlayerEmailVerifiedByOAuth(ctx, existing.ID)
+			if markErr != nil {
 				return nil, false, fmt.Errorf("mark email verified on existing identity: %w", markErr)
 			}
-			now := time.Now().UTC()
-			existing.EmailVerifiedAt = &now
+			existing = marked
 		}
 
 		return existing, false, nil
@@ -564,58 +563,50 @@ func claimAnonymousSessionPlayer(
 	sessionPlayerID int64,
 	subject, email string,
 ) (*Player, error) {
-	claimed, err := identities.ClaimPlayerForOAuth(ctx, sessionPlayerID, email)
-	if err != nil {
-		if errors.Is(err, ErrPlayerNotFound) {
-			// The session row is no longer claimable. Before reporting
-			// "fall through to create", check whether a concurrent
-			// callback for the same (provider, subject) already linked
-			// the identity onto another row. The window opens when two
-			// OAuth callbacks for the same anonymous session race and
-			// the loser arrives here AFTER the winner finished claiming
-			// + linking; without this re-read the loser would create a
-			// duplicate row and then fail at LinkProviderIdentity with
-			// ErrIdentityAlreadyLinked. Mirrors the recovery branch in
-			// linkExistingPlayerByEmail.
-			if existing, lookupErr := identities.GetPlayerByProviderSubject(
-				ctx, ProviderGoogle, subject,
-			); lookupErr == nil {
-				return existing, nil
-			} else if !errors.Is(lookupErr, ErrPlayerNotFound) {
-				return nil, fmt.Errorf("lookup after claim race: %w", lookupErr)
-			}
-
-			return nil, ErrPlayerNotFound
+	claimed, err := identities.ClaimPlayerForOAuth(ctx, sessionPlayerID, email, ProviderGoogle, subject)
+	if err == nil {
+		return claimed, nil
+	}
+	switch {
+	case errors.Is(err, ErrPlayerNotFound):
+		// The session row is no longer claimable. Before reporting
+		// "fall through to create", check whether a concurrent
+		// callback for the same (provider, subject) already linked
+		// the identity onto another row. The window opens when two
+		// OAuth callbacks for the same anonymous session race and
+		// the loser arrives here AFTER the winner finished claiming
+		// + linking; without this re-read the loser would create a
+		// duplicate row and then fail with ErrIdentityAlreadyLinked.
+		existing, lookupErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+		if lookupErr == nil {
+			return existing, nil
+		}
+		if !errors.Is(lookupErr, ErrPlayerNotFound) {
+			return nil, fmt.Errorf("lookup after claim race: %w", lookupErr)
 		}
 
+		return nil, ErrPlayerNotFound
+	case errors.Is(err, ErrIdentityAlreadyLinked):
+		// Lost a race with a concurrent callback that already linked
+		// this (provider, subject) onto a different row; the claim was
+		// rolled back. Return the canonical OAuth-linked row instead.
+		refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+		if refetchErr != nil {
+			return nil, fmt.Errorf("refetch after link race: %w", refetchErr)
+		}
+
+		return refetched, nil
+	default:
 		return nil, fmt.Errorf("claim anonymous player for oauth: %w", err)
 	}
-
-	if linkErr := identities.LinkProviderIdentity(ctx, claimed.ID, ProviderGoogle, subject); linkErr != nil {
-		if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
-			// Lost a race with a concurrent callback that already
-			// linked this (provider, subject) onto a different row.
-			// Re-read by subject and return that row instead so the
-			// session ends up pointing at the canonical OAuth-linked
-			// player.
-			refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
-			if refetchErr != nil {
-				return nil, fmt.Errorf("refetch after link race: %w", refetchErr)
-			}
-
-			return refetched, nil
-		}
-
-		return nil, fmt.Errorf("link identity to claimed anonymous player: %w", linkErr)
-	}
-
-	return claimed, nil
 }
 
 // linkExistingPlayerByEmail looks up a player by verified email and,
-// if one is found, links the supplied (provider, subject) onto it.
-// Returns ErrPlayerNotFound when no row matches the email; the
-// caller treats that sentinel as "no email match, create instead".
+// if one is found, links the supplied (provider, subject) onto it. The
+// store treats the address as proven by the link, so an unverified row
+// loses the password someone set without proving the mailbox (#1328).
+// Returns ErrPlayerNotFound when no row matches the email; the caller
+// treats that sentinel as "no email match, create instead".
 func linkExistingPlayerByEmail(
 	ctx context.Context,
 	identities OAuthIdentityStore,
@@ -630,8 +621,9 @@ func linkExistingPlayerByEmail(
 		return nil, fmt.Errorf("get player by email: %w", err)
 	}
 
-	if linkErr := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject); linkErr != nil {
-		if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
+	linked, err := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject)
+	if err != nil {
+		if errors.Is(err, ErrIdentityAlreadyLinked) {
 			// Lost a race with a concurrent callback for the same
 			// (provider, subject). Re-read by subject and return that
 			// row.
@@ -643,19 +635,10 @@ func linkExistingPlayerByEmail(
 			return refetched, nil
 		}
 
-		return nil, fmt.Errorf("link identity to existing player: %w", linkErr)
+		return nil, fmt.Errorf("link identity to existing player: %w", err)
 	}
 
-	// Google attests the address; stamp email_verified_at if not already set.
-	if err := identities.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
-		return nil, fmt.Errorf("mark email verified after link: %w", err)
-	}
-	if player.EmailVerifiedAt == nil {
-		now := time.Now().UTC()
-		player.EmailVerifiedAt = &now
-	}
-
-	return player, nil
+	return linked, nil
 }
 
 // createGooglePlayer creates a fresh players row + linked identity,
@@ -666,34 +649,24 @@ func createGooglePlayer(
 	subject, email string,
 ) (*Player, error) {
 	player, err := CreateWithPetnameFallback(GeneratePetname(), func(name string) (*Player, error) {
-		created, createErr := identities.CreatePlayerFromOAuth(ctx, name, email)
-		if createErr != nil {
+		created, createErr := identities.CreatePlayerFromOAuth(ctx, name, email, ProviderGoogle, subject)
+		if createErr == nil {
+			return created, nil
+		}
+		if !errors.Is(createErr, ErrIdentityAlreadyLinked) {
 			return nil, fmt.Errorf("create player from oauth: %w", createErr)
 		}
-		if linkErr := identities.LinkProviderIdentity(ctx, created.ID, ProviderGoogle, subject); linkErr != nil {
-			if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
-				// Symmetric race recovery to claimAnonymousSessionPlayer
-				// and linkExistingPlayerByEmail: a concurrent callback
-				// for the same (provider, subject) linked the identity
-				// onto a different row between our identity-miss and
-				// our LinkProviderIdentity call. Return that row so the
-				// session points at the canonical OAuth-linked player.
-				// The row we just created stays in the DB as an unlinked
-				// orphan; harmless but visible to operators.
-				refetched, refetchErr := identities.GetPlayerByProviderSubject(
-					ctx, ProviderGoogle, subject,
-				)
-				if refetchErr != nil {
-					return nil, fmt.Errorf("refetch after create race: %w", refetchErr)
-				}
-
-				return refetched, nil
-			}
-
-			return nil, fmt.Errorf("link identity to new player: %w", linkErr)
+		// Symmetric race recovery to claimAnonymousSessionPlayer and
+		// linkExistingPlayerByEmail: a concurrent callback for the same
+		// (provider, subject) linked the identity onto a different row
+		// between our identity-miss and our create, which rolled back.
+		// Return that row so the session points at the canonical player.
+		refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+		if refetchErr != nil {
+			return nil, fmt.Errorf("refetch after create race: %w", refetchErr)
 		}
 
-		return created, nil
+		return refetched, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create google player: %w", err)
