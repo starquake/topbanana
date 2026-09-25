@@ -75,3 +75,30 @@ test('a prefetched question keeps the clock offset from when it arrived', async 
   await page.clock.runFor(300);
   await expect(page.getByRole('button', { name: QUIZ_QUESTIONS[1].options[0] })).toBeVisible({ timeout: 1_000 });
 });
+
+// #1341: a double tap on Start used to bootstrap two games, leaking a reveal
+// interval that replayed the answers-show sound and fired an early "Time up".
+test('double-clicking Start creates one game and fetches one question', async ({ page, browserName }) => {
+  test.setTimeout(30_000);
+
+  const quizTitle = `E2E 1341 ${browserName} ${Date.now()}`;
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
+
+  let createCount = 0;
+  let nextCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/games') createCount++;
+    if (request.method() === 'GET' && NEXT_PATH.test(new URL(request.url()).pathname)) nextCount++;
+  });
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).dblclick();
+
+  await expect(page.getByText(QUIZ_QUESTIONS[0].text)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: QUIZ_QUESTIONS[0].options[0] })).toBeVisible({ timeout: 10_000 });
+  expect(createCount).toBe(1);
+  expect(nextCount).toBe(1);
+});
