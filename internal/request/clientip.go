@@ -101,6 +101,18 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	return host
 }
 
+// FromTrustedProxy reports whether r arrived directly from a peer inside
+// trustedCIDRs, so its X-Forwarded-* headers were set by that proxy rather
+// than by the client. An empty list trusts nothing.
+func FromTrustedProxy(r *http.Request, trustedCIDRs []*net.IPNet) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	return ipInCIDRs(host, trustedCIDRs)
+}
+
 // ipInCIDRs reports whether ip parses as an IP literal and is contained
 // in any of cidrs. Non-IP strings (e.g. "unknown", a hostname) read as
 // "not in any CIDR" so a malformed XFF segment is treated as an external
