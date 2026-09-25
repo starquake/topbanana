@@ -17,6 +17,11 @@ async function openQuizView(page: Page, title: string): Promise<string> {
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: title }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  // The deferred modules may not have run yet when the URL settles.
+  await page.waitForFunction(() => {
+    const w = window as unknown as { openModal?: unknown; openImageViewer?: unknown };
+    return typeof w.openModal === 'function' && typeof w.openImageViewer === 'function';
+  });
   return new URL(page.url()).pathname;
 }
 
