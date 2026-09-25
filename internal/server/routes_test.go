@@ -3,6 +3,9 @@ package server_test
 import (
 	"database/sql"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"net/http"
@@ -443,5 +446,112 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 
 	if got, want := rec.Code, http.StatusForbidden; got != want {
 		t.Errorf("status = %d, want %d (CSRF must reject before the auth layer redirects)", got, want)
+	}
+}
+
+// formBodyCap mirrors admin.MaxFormSizeMiddleware's 1 MB cap.
+const formBodyCap = 1 << 20
+
+// countingReader yields an endless urlencoded value up to limit bytes and
+// records how many bytes the handler chain consumed.
+type countingReader struct {
+	read  int64
+	limit int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	if c.read >= c.limit {
+		return 0, io.EOF
+	}
+	n := min(int64(len(p)), c.limit-c.read)
+	for i := range n {
+		p[i] = 'a'
+	}
+	c.read += n
+
+	return int(n), nil
+}
+
+// registeredPOSTPatterns returns every "POST ..." pattern literal passed to a
+// Handle call in routes.go, so a newly added route is covered automatically.
+func registeredPOSTPatterns(t *testing.T) []string {
+	t.Helper()
+
+	f, err := parser.ParseFile(token.NewFileSet(), "routes.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parser.ParseFile(routes.go) err = %v, want nil", err)
+	}
+	var patterns []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Handle" {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		pattern, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			t.Fatalf("strconv.Unquote(%s) err = %v, want nil", lit.Value, err)
+		}
+		if strings.HasPrefix(pattern, http.MethodPost+" ") {
+			patterns = append(patterns, pattern)
+		}
+
+		return true
+	})
+
+	return patterns
+}
+
+// TestAddRoutes_POSTBodiesAreBounded sends an oversized urlencoded body to every
+// registered POST route and fails if any layer before the handler's own limit
+// reads past the 1 MB form cap (#1350).
+func TestAddRoutes_POSTBodiesAreBounded(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		SessionKey:          "test-session-key",
+		RegistrationEnabled: true,
+		DemoMode:            true,
+		ProfileEnabled:      true,
+		SMTPHost:            "smtp.example.com",
+		SMTPPort:            587,
+		SMTPFrom:            "quiz@example.com",
+		MediaDir:            t.TempDir(),
+	}
+	mux := newRouter(t, dbtest.Open(t), cfg)
+
+	patterns := registeredPOSTPatterns(t)
+	if got, want := len(patterns), 40; got < want {
+		t.Fatalf("len(POST patterns) = %d, want at least %d", got, want)
+	}
+	wildcard := regexp.MustCompile(`\{[^}]+\}`)
+
+	for _, pattern := range patterns {
+		t.Run(pattern, func(t *testing.T) {
+			t.Parallel()
+			path := wildcard.ReplaceAllString(strings.TrimPrefix(pattern, http.MethodPost+" "), "1")
+			body := &countingReader{limit: 4 * formBodyCap}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, body)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			// Any nonce gets CSRF validation as far as ParseForm; an attacker picks it.
+			req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "attacker-nonce"})
+			if _, got := mux.Handler(req); got != pattern {
+				t.Fatalf("mux.Handler(POST %s) pattern = %q, want %q", path, got, pattern)
+			}
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := body.read, int64(formBodyCap+1); got > want {
+				t.Errorf("POST %s read %d body bytes, want at most %d", path, got, want)
+			}
+		})
 	}
 }

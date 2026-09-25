@@ -322,7 +322,7 @@ func addAuthRoutes(
 		mux.Handle("GET /register", auth.HandleRegisterForm(logger, csrfMgr, stores.Players, sessions, googleEnabled))
 		mux.Handle(
 			"POST /register",
-			csrfMW(auth.HandleRegisterSubmit(
+			admin.MaxFormSizeMiddleware(csrfMW(auth.HandleRegisterSubmit(
 				logger, csrfMgr, stores.Players, sessions,
 				auth.RegisterDeps{
 					GoogleEnabled: googleEnabled,
@@ -331,7 +331,7 @@ func addAuthRoutes(
 					BaseURL:       cfg.BaseURL,
 					Tasks:         mail.Tasks,
 				},
-			)),
+			))),
 		)
 	}
 	addLoginRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail, googleEnabled)
@@ -402,7 +402,7 @@ func addLoginRoutes(
 	)
 	mux.Handle(
 		"POST /login",
-		csrfMW(auth.HandleLoginSubmit(
+		admin.MaxFormSizeMiddleware(csrfMW(auth.HandleLoginSubmit(
 			logger, csrfMgr, auth.LoginDeps{
 				Players:               stores.Players,
 				Sessions:              sessions,
@@ -419,9 +419,9 @@ func addLoginRoutes(
 				LoginApprovalRequired: cfg.LoginApprovalRequired,
 				Tasks:                 mail.Tasks,
 			},
-		)),
+		))),
 	)
-	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+	mux.Handle("POST /logout", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleLogout(sessions))))
 	// Shared awaiting-approval page every sign-in path redirects an unapproved
 	// account to under LOGIN_APPROVAL_REQUIRED (#1227). Public GET; the redirect
 	// is what gates, not this page.
@@ -434,10 +434,8 @@ func addLoginRoutes(
 // unverified session is bounced before the handler runs; POST routes
 // additionally pass through csrfMW.
 //
-// MaxFormSizeMiddleware fronts the email-change POST in front of
-// csrfMW so the CSRF validator's ParseForm sees a bounded body. The
-// rest of the profile POSTs already cap the body in-handler via
-// [http.MaxBytesReader].
+// MaxFormSizeMiddleware fronts every POST in front of csrfMW so the CSRF
+// validator's ParseForm sees a bounded body.
 func addProfileRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -455,12 +453,16 @@ func addProfileRoutes(
 	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
 	mux.Handle(
 		"POST /profile/display-name",
-		csrfMW(requireAuthn(profile.HandleProfileDisplayName(logger, csrfMgr, stores.Players))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireAuthn(profile.HandleProfileDisplayName(logger, csrfMgr, stores.Players))),
+		),
 	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
 	mux.Handle(
 		"POST /profile/password",
-		csrfMW(requireAuthn(profile.HandleProfilePasswordChange(logger, csrfMgr, stores.Players, sessions))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireAuthn(profile.HandleProfilePasswordChange(logger, csrfMgr, stores.Players, sessions))),
+		),
 	)
 
 	emailFlash := auth.NewSignedFlash(
@@ -487,9 +489,10 @@ func addProfileRoutes(
 }
 
 // addAdminRoutes registers every /admin/* route. Each unsafe (POST/PUT/...)
-// route is wrapped as csrfMW(requireAdmin(handler)): the CSRF middleware runs
-// first so an unauthenticated request without a valid token is rejected with
-// 403 before any auth-state-leaking 303 to /login.
+// route is wrapped as MaxFormSizeMiddleware(csrfMW(requireAdmin(handler))): the
+// size cap bounds the body CSRF's ParseForm reads, and the CSRF middleware runs
+// before auth so an unauthenticated request without a valid token is rejected
+// with 403 before any auth-state-leaking 303 to /login.
 // adminEmailDeps bundles the email-diagnostics handler deps so
 // addAdminRoutes stays inside revive's 8-argument limit.
 type adminEmailDeps struct {
@@ -549,6 +552,7 @@ func addAdminRoutes(
 	playerDeps adminPlayerDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
+	formMW := func(h http.Handler) http.Handler { return admin.MaxFormSizeMiddleware(csrfMW(h)) }
 	// requireGameHost gates the dashboard + quiz/round routes to Hosts and
 	// Admins (#538). A signed-in Player gets a 403 access-denied page (the
 	// dashboard's existence is not secret).
@@ -581,11 +585,11 @@ func addAdminRoutes(
 		),
 	)
 	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))
-	mux.Handle("POST /admin/quizzes", csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
+	mux.Handle("POST /admin/quizzes", formMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
 	mux.Handle("GET /admin/quizzes/import", requireGameHost(admin.HandleQuizImportForm(logger, csrfMgr)))
 	mux.Handle(
 		"POST /admin/quizzes/import",
-		csrfMW(requireGameHost(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
+		formMW(requireGameHost(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/edit",
@@ -593,15 +597,15 @@ func addAdminRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}",
-		csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
+		formMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/mode/{mode}",
-		csrfMW(requireGameHost(admin.HandleQuizSetMode(logger, csrfMgr, stores.Quizzes))),
+		formMW(requireGameHost(admin.HandleQuizSetMode(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/delete",
-		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes, gameDeps.mediaSvc))),
+		formMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes, gameDeps.mediaSvc))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/publish",
@@ -609,15 +613,15 @@ func addAdminRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/publish",
-		csrfMW(requireGameHost(admin.HandleQuizPublish(logger, csrfMgr, stores.Quizzes))),
+		formMW(requireGameHost(admin.HandleQuizPublish(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/unpublish",
-		csrfMW(requireGameHost(admin.HandleQuizUnpublish(logger, csrfMgr, stores.Quizzes))),
+		formMW(requireGameHost(admin.HandleQuizUnpublish(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
-		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameDeps.gameService))),
+		formMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameDeps.gameService))),
 	)
 
 	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
@@ -704,9 +708,9 @@ func addMediaRoutes(
 	// delete from, any quiz).
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media/{mediaID}/delete",
-		csrfMgr.Middleware(requireGameHost(
+		admin.MaxFormSizeMiddleware(csrfMgr.Middleware(requireGameHost(
 			mediahttp.HandleMediaDelete(logger, svc, stores.Quizzes),
-		)),
+		))),
 	)
 
 	// The audio description edit is an ordinary urlencoded form (csrf_token plus
@@ -780,7 +784,9 @@ func addAdminQuestionRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions",
-		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
+		),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
@@ -788,11 +794,15 @@ func addAdminQuestionRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
-		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
+		),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
-		csrfMW(requireGameHost(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
+		),
 	)
 }
 
@@ -1013,7 +1023,7 @@ func addAdminRoundRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/rounds",
-		csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes)))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/rounds/{roundID}/edit",
@@ -1021,23 +1031,29 @@ func addAdminRoundRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/rounds/{roundID}",
-		csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes)))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/rounds/{roundID}/delete",
-		csrfMW(requireGameHost(admin.HandleRoundDelete(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(admin.HandleRoundDelete(logger, csrfMgr, stores.Quizzes)))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/rounds/{roundID}/position",
-		csrfMW(requireGameHost(admin.HandleRoundPosition(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleRoundPosition(logger, csrfMgr, stores.Quizzes))),
+		),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/round",
-		csrfMW(requireGameHost(admin.HandleQuestionMoveToRound(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleQuestionMoveToRound(logger, csrfMgr, stores.Quizzes))),
+		),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/position",
-		csrfMW(requireGameHost(admin.HandleQuestionPosition(logger, csrfMgr, stores.Quizzes))),
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireGameHost(admin.HandleQuestionPosition(logger, csrfMgr, stores.Quizzes))),
+		),
 	)
 }
 
@@ -1186,10 +1202,19 @@ func addHostRoutes(
 	// rest of /admin.
 	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
-	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
+	mux.Handle("POST /host", admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(http.HandlerFunc(handlers.Create)))))
 	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.Picker)))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.BigScreen)))
-	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
-	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))
-	mux.Handle("POST /host/{code}/end", csrfMW(requireGameHost(http.HandlerFunc(handlers.End))))
+	mux.Handle(
+		"POST /host/{code}/start",
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(http.HandlerFunc(handlers.Start)))),
+	)
+	mux.Handle(
+		"POST /host/{code}/next-quiz",
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz)))),
+	)
+	mux.Handle(
+		"POST /host/{code}/end",
+		admin.MaxFormSizeMiddleware(csrfMW(requireGameHost(http.HandlerFunc(handlers.End)))),
+	)
 }
