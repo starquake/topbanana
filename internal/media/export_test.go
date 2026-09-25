@@ -27,6 +27,10 @@ var ExportDefaultDescription = defaultDescription
 // tests.
 var ExportSanitizeFilename = sanitizeFilename
 
+// ExportJPEGOrientation re-exports the unexported EXIF Orientation reader for
+// tests.
+var ExportJPEGOrientation = jpegOrientation
+
 // FillDecodeSlotsForTest occupies every decode slot and returns the func that
 // frees them.
 func FillDecodeSlotsForTest() func() {
