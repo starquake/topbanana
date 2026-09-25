@@ -2,6 +2,7 @@ package media_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
@@ -11,6 +12,7 @@ import (
 	"image/png"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/media"
 )
@@ -69,7 +71,7 @@ func TestProcessAcceptedFormats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+			got, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 			if err != nil {
 				t.Fatalf("Process(%s) err = %v, want nil", name, err)
 			}
@@ -93,7 +95,7 @@ func TestProcessRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	raw := encodePNG(t, gradient(800, 600))
-	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+	got, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -132,7 +134,7 @@ func TestProcessDownscalesLongEdge(t *testing.T) {
 
 	// 3200x1600: long edge double MaxLongEdge, 2:1 aspect ratio.
 	raw := encodePNG(t, gradient(3200, 1600))
-	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+	got, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -162,7 +164,7 @@ func TestProcessNeverUpscales(t *testing.T) {
 	t.Parallel()
 
 	raw := encodePNG(t, gradient(100, 60))
-	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+	got, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -180,11 +182,11 @@ func TestProcessSHA256Deterministic(t *testing.T) {
 
 	raw := encodePNG(t, gradient(640, 480))
 
-	first, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+	first, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process #1 err = %v, want nil", err)
 	}
-	second, err := Process(bytes.NewReader(raw), MaxUploadBytes)
+	second, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process #2 err = %v, want nil", err)
 	}
@@ -206,7 +208,7 @@ func TestProcessRejectsOversize(t *testing.T) {
 	t.Parallel()
 
 	oversize := bytes.Repeat([]byte{0xff}, MaxUploadBytes+1)
-	_, err := Process(bytes.NewReader(oversize), MaxUploadBytes)
+	_, err := Process(t.Context(), bytes.NewReader(oversize), MaxUploadBytes)
 	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -222,12 +224,12 @@ func TestProcessHonorsCustomCap(t *testing.T) {
 		t.Fatalf("test input %d bytes exceeds the default cap %d", len(raw), MaxUploadBytes)
 	}
 
-	if _, err := Process(bytes.NewReader(raw), MaxUploadBytes); err != nil {
+	if _, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes); err != nil {
 		t.Fatalf("Process under default cap err = %v, want nil", err)
 	}
 
 	tinyCap := int64(len(raw) - 1)
-	_, err := Process(bytes.NewReader(raw), tinyCap)
+	_, err := Process(t.Context(), bytes.NewReader(raw), tinyCap)
 	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
 		t.Errorf("err under tiny cap = %v, want %v", got, want)
 	}
@@ -237,7 +239,7 @@ func TestProcessHonorsCustomCap(t *testing.T) {
 func TestProcessRejectsEmpty(t *testing.T) {
 	t.Parallel()
 
-	_, err := Process(bytes.NewReader(nil), MaxUploadBytes)
+	_, err := Process(t.Context(), bytes.NewReader(nil), MaxUploadBytes)
 	if got, want := err, ErrEmptyUpload; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -249,7 +251,7 @@ func TestProcessRejectsEmpty(t *testing.T) {
 func TestProcessRejectsNonImage(t *testing.T) {
 	t.Parallel()
 
-	_, err := Process(bytes.NewReader([]byte("this is plainly not an image at all")), MaxUploadBytes)
+	_, err := Process(t.Context(), bytes.NewReader([]byte("this is plainly not an image at all")), MaxUploadBytes)
 	if got, want := err, ErrUnsupportedImage; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -275,7 +277,7 @@ func TestProcess_Concurrent(t *testing.T) {
 	for range workers {
 		go func() {
 			defer wg.Done()
-			if _, err := Process(bytes.NewReader(inputPNG), MaxUploadBytes); err != nil {
+			if _, err := Process(t.Context(), bytes.NewReader(inputPNG), MaxUploadBytes); err != nil {
 				t.Errorf("Process err = %v, want nil", err)
 			}
 		}()
@@ -288,14 +290,21 @@ func TestProcess_Concurrent(t *testing.T) {
 // report the declared dimensions - the basis of a decode bomb: a tiny file that
 // claims an enormous size.
 func pngHeader(w, h uint32) []byte {
+	return pngHeaderWith(w, h, 8, 2, 0)
+}
+
+// pngHeaderWith is pngHeader with an explicit bit depth, colour type, and
+// interlace method.
+func pngHeaderWith(w, h uint32, depth, colourType, interlace byte) []byte {
 	var b bytes.Buffer
 	b.WriteString("\x89PNG\r\n\x1a\n")
 
 	ihdr := make([]byte, 13)
 	binary.BigEndian.PutUint32(ihdr[0:], w)
 	binary.BigEndian.PutUint32(ihdr[4:], h)
-	ihdr[8] = 8 // bit depth
-	ihdr[9] = 2 // colour type: truecolour
+	ihdr[8] = depth
+	ihdr[9] = colourType
+	ihdr[12] = interlace
 
 	_ = binary.Write(&b, binary.BigEndian, uint32(len(ihdr)))
 	b.WriteString("IHDR")
@@ -321,8 +330,235 @@ func TestProcess_RejectsDecodeBomb(t *testing.T) {
 		t.Fatalf("bomb header = %d bytes, want a tiny file", got)
 	}
 
-	_, err := Process(bytes.NewReader(bomb), MaxUploadBytes)
+	_, err := Process(t.Context(), bytes.NewReader(bomb), MaxUploadBytes)
 	if got, want := err, ErrImageTooLarge; !errors.Is(got, want) {
 		t.Errorf("Process(decode bomb) err = %v, want %v", got, want)
+	}
+}
+
+// TestProcess_RejectsOversizedDecodedBuffer pins the decoded-size guard: a
+// 16-bit png within MaxPixels still decodes at 8 bytes per pixel (gray too, as
+// a tRNS chunk would promote it), and an interlaced png holds its Adam7 pass
+// images on top of the full one, so the header alone is enough to reject
+// either, while the same area at 8 bits non-interlaced passes the guard (and
+// then fails to decode, having no pixel data).
+func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 6000, 6000
+	if got, want := int64(w)*h, int64(MaxPixels); got > want {
+		t.Fatalf("area = %d, want at most MaxPixels %d", got, want)
+	}
+
+	cases := map[string]struct {
+		depth, colourType, interlace byte
+		want                         error
+	}{
+		"16-bit rgba":           {16, 6, 0, ErrImageTooLarge},
+		"16-bit rgb":            {16, 2, 0, ErrImageTooLarge},
+		"8-bit rgba":            {8, 6, 0, ErrUnsupportedImage},
+		"16-bit gray":           {16, 0, 0, ErrImageTooLarge},
+		"8-bit gray":            {8, 0, 0, ErrUnsupportedImage},
+		"8-bit rgba interlaced": {8, 6, 1, ErrImageTooLarge},
+		"8-bit gray interlaced": {8, 0, 1, ErrImageTooLarge},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := pngHeaderWith(w, h, tc.depth, tc.colourType, tc.interlace)
+			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+			if got, want := err, tc.want; !errors.Is(got, want) {
+				t.Errorf("Process(%s png header) err = %v, want %v", name, got, want)
+			}
+		})
+	}
+}
+
+// jfifAPP0 is a minimal JFIF APP0 segment. image/jpeg's DecodeConfig returns
+// at the frame only after one.
+func jfifAPP0() []byte {
+	return seg(0xE0, []byte("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")...)
+}
+
+// jpegFrame builds a start-of-frame segment (marker sof) declaring w x h with
+// one 1x1-sampled component per byte of ids.
+func jpegFrame(sof byte, w, h uint16, ids string) []byte {
+	frame := make([]byte, 0, 6+3*len(ids))
+	frame = append(frame, 8, byte(h>>8), byte(h), byte(w>>8), byte(w), byte(len(ids)))
+	for i := range len(ids) {
+		frame = append(frame, ids[i], 0x11, 0)
+	}
+
+	return seg(sof, frame...)
+}
+
+// TestProcess_RejectsOversizedProgressiveJPEG pins that a progressive jpeg is
+// charged for its coefficient buffer: the same area passes the guard as a
+// baseline jpeg (then fails to decode, having no scan data). Bytes image/jpeg
+// skips ahead of the frame must not hide a progressive frame.
+func TestProcess_RejectsOversizedProgressiveJPEG(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 7000, 7000
+	cases := map[string]struct {
+		sof  byte
+		gap  []byte
+		want error
+	}{
+		"baseline":                  {0xC0, nil, ErrUnsupportedImage},
+		"progressive":               {0xC2, nil, ErrImageTooLarge},
+		"progressive after junk":    {0xC2, []byte{0x42}, ErrImageTooLarge},
+		"progressive after stuffed": {0xC2, []byte{0xFF, 0x00}, ErrImageTooLarge},
+		"progressive after RST0":    {0xC2, []byte{0xFF, 0xD0}, ErrImageTooLarge},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := jpegStream(jfifAPP0(), tc.gap, jpegFrame(tc.sof, w, h, "\x01\x02\x03"))
+			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+			if got, want := err, tc.want; !errors.Is(got, want) {
+				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
+			}
+		})
+	}
+}
+
+// TestProcess_RejectsOversizedConvertedJPEG pins that a 4-component (CMYK or
+// YCCK) jpeg is charged for its sample planes plus the converted output, as is
+// an RGB jpeg, while a YCbCr jpeg of the same area passes the guard.
+func TestProcess_RejectsOversizedConvertedJPEG(t *testing.T) {
+	t.Parallel()
+
+	const ycc, cmyk, rgb = "\x01\x02\x03", "\x01\x02\x03\x04", "RGB"
+	cases := map[string]struct {
+		sof  byte
+		side uint16
+		ids  string
+		want error
+	}{
+		"ycbcr":             {0xC0, 6000, ycc, ErrUnsupportedImage},
+		"cmyk":              {0xC0, 6000, cmyk, ErrImageTooLarge},
+		"rgb":               {0xC0, 6000, rgb, ErrImageTooLarge},
+		"progressive ycbcr": {0xC2, 3000, ycc, ErrUnsupportedImage},
+		"progressive cmyk":  {0xC2, 3000, cmyk, ErrImageTooLarge},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			frame := jpegFrame(tc.sof, tc.side, tc.side, tc.ids)
+			raw := jpegStream(jfifAPP0(), frame)
+			if tc.ids == rgb {
+				// image/jpeg reports RGB only without a JFIF APP0, reading on to the scan header.
+				raw = jpegStream(frame, seg(0xDA, 0))
+			}
+			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+			if got, want := err, tc.want; !errors.Is(got, want) {
+				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
+			}
+		})
+	}
+}
+
+// TestProcess_DecodeSlotHonoursContext pins that a Process waiting for a decode
+// slot returns the context error once the caller goes away.
+//
+//nolint:paralleltest // occupies the package-wide decode slots
+func TestProcess_DecodeSlotHonoursContext(t *testing.T) {
+	release := FillDecodeSlotsForTest()
+	defer release()
+
+	raw := encodePNG(t, gradient(8, 8))
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := Process(ctx, bytes.NewReader(raw), MaxUploadBytes)
+	if got, want := err, context.DeadlineExceeded; !errors.Is(got, want) {
+		t.Errorf("Process(deadline passes while waiting) err = %v, want %v", got, want)
+	}
+}
+
+// TestProcess_WaitsForDecodeSlot pins that a Process blocked on a full decode
+// semaphore waits, then completes once a slot frees.
+//
+//nolint:paralleltest // occupies the package-wide decode slots
+func TestProcess_WaitsForDecodeSlot(t *testing.T) {
+	release := FillDecodeSlotsForTest()
+
+	raw := encodePNG(t, gradient(8, 8))
+	errc := make(chan error, 1)
+	go func() {
+		_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+		errc <- err
+	}()
+
+	select {
+	case err := <-errc:
+		release()
+		t.Fatalf("Process returned %v while every decode slot was held, want it to wait", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+
+	if err := <-errc; err != nil {
+		t.Errorf("Process err = %v, want nil", err)
+	}
+}
+
+// TestPreshrink pins that a source more than twice the target long edge is
+// halved until it is at most twice the target, and a smaller one is untouched.
+func TestPreshrink(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		w, h, target  int
+		wantW, wantH  int
+		wantUnchanged bool
+	}{
+		"wide":         {5000, 100, 1200, 1250, 25, false},
+		"tall":         {100, 5000, 1200, 25, 1250, false},
+		"square":       {3000, 3000, 1200, 1500, 1500, false},
+		"thumb target": {3000, 3000, 480, 750, 750, false},
+		"within twice": {2400, 1000, 1200, 2400, 1000, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := image.NewGray(image.Rect(0, 0, tc.w, tc.h))
+			got := ExportPreshrink(src, tc.target)
+			if gotW, gotH := got.Bounds().Dx(), got.Bounds().Dy(); gotW != tc.wantW || gotH != tc.wantH {
+				t.Errorf("preshrink(%dx%d, %d) = %dx%d, want %dx%d",
+					tc.w, tc.h, tc.target, gotW, gotH, tc.wantW, tc.wantH)
+			}
+			if got, want := got == image.Image(src), tc.wantUnchanged; got != want {
+				t.Errorf("preshrink returned the source = %t, want %t", got, want)
+			}
+		})
+	}
+}
+
+// TestPreshrinkAveragesBlocks pins that each halving averages 2x2 blocks: a
+// one-pixel checkerboard halves to flat mid-grey rather than aliasing.
+func TestPreshrinkAveragesBlocks(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 4 * MaxLongEdge, 2
+	src := image.NewGray(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			src.SetGray(x, y, color.Gray{Y: uint8(255 * ((x + y) % 2))})
+		}
+	}
+
+	got := ExportPreshrink(src, MaxLongEdge)
+	bounds := got.Bounds()
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		r, _, _, _ := got.At(x, bounds.Min.Y).RGBA()
+		if got := r >> 8; got < 126 || got > 129 {
+			t.Fatalf("pixel %d red = %d, want about 128 (2x2 average)", x, got)
+		}
 	}
 }

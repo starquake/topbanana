@@ -26,3 +26,31 @@ var ExportDefaultDescription = defaultDescription
 // ExportSanitizeFilename re-exports the unexported upload-filename sanitizer for
 // tests.
 var ExportSanitizeFilename = sanitizeFilename
+
+// ExportJPEGOrientation re-exports the unexported EXIF Orientation reader for
+// tests.
+var ExportJPEGOrientation = jpegOrientation
+
+// FillDecodeSlotsForTest occupies every decode slot and returns the func that
+// frees them.
+func FillDecodeSlotsForTest() func() {
+	for range cap(decodeSlots) {
+		decodeSlots <- struct{}{}
+	}
+
+	return func() {
+		for range cap(decodeSlots) {
+			<-decodeSlots
+		}
+	}
+}
+
+// ExportJPEGSegments re-exports the unexported jpeg marker walker for tests.
+var ExportJPEGSegments = jpegSegments
+
+// ExportJPEGProgressive re-exports the unexported progressive-frame check for
+// tests.
+var ExportJPEGProgressive = jpegProgressive
+
+// ExportPreshrink re-exports the unexported pre-resize halving step for tests.
+var ExportPreshrink = preshrink
