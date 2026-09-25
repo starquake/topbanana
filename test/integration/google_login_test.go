@@ -280,12 +280,7 @@ func TestGoogleLogin_CallbackClaimsAnonymousSession(t *testing.T) {
 
 	client := authClient(t)
 
-	// Touch the public API once so EnsurePlayer creates an anonymous
-	// players row and sets the session cookie on the client's jar.
-	priming := doGet(ctx, t, client, srv.BaseURL+"/api/players/me")
-	if got, want := priming.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("priming GET /api/players/me status = %d, want %d", got, want)
-	}
+	primeAnonymousPlayer(ctx, t, client, srv.BaseURL)
 
 	preID := lookupOnlyPlayerID(t, srv.DBURI)
 

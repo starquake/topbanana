@@ -13,6 +13,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/session"
 )
 
 // TestAnonMigration_Integration covers #406: an anonymous visitor's
@@ -78,15 +79,15 @@ func TestAnonMigration_Integration(t *testing.T) {
 	requirePlayerGameCount(t, setup.DBURI, destPlayer.ID, 1)
 }
 
-// primeAnonymousPlayer touches GET /api/players/me so EnsurePlayer
-// mints an anonymous row + sets the session cookie on the client's
-// jar. The body is drained + closed inside.
+// primeAnonymousPlayer makes the client's first unsafe /api call so
+// EnsurePlayer mints an anonymous row + sets the session cookie on the
+// client's jar. quizId 0 matches no quiz, so no game is created.
 func primeAnonymousPlayer(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
 	t.Helper()
-	resp := httpGet(ctx, t, client, baseURL+"/api/players/me")
+	resp := httpPostJSON(ctx, t, client, baseURL+"/api/games", `{"quizId": 0}`)
 	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("prime /api/players/me status = %d, want %d", got, want)
+	if !slices.ContainsFunc(resp.Cookies(), func(c *http.Cookie) bool { return c.Name == session.CookieName }) {
+		t.Fatalf("prime POST /api/games set no %s cookie (status %d)", session.CookieName, resp.StatusCode)
 	}
 }
 

@@ -76,10 +76,6 @@ func TestClaimName_TooLongRejected(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	// GET /api/players/me mints an anonymous player + session cookie, so the
-	// follow-up PATCH lands on a claimable row.
-	_ = fetchPlayerMe(ctx, t, client, baseURL)
-
 	// 51 runes is one over the MaxDisplayNameLength cap.
 	tooLong := strings.Repeat("a", 51)
 	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, tooLong)
