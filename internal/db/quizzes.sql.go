@@ -532,6 +532,7 @@ const listOptionIDsByQuestionID = `-- name: ListOptionIDsByQuestionID :many
 SELECT id
 FROM options
 WHERE question_id = ?
+ORDER BY id
 `
 
 func (q *Queries) ListOptionIDsByQuestionID(ctx context.Context, questionID int64) ([]int64, error) {
@@ -561,6 +562,7 @@ const listOptionsByQuestionID = `-- name: ListOptionsByQuestionID :many
 SELECT id, question_id, text, is_correct
 FROM options
 WHERE question_id = ?
+ORDER BY id
 `
 
 func (q *Queries) ListOptionsByQuestionID(ctx context.Context, questionID int64) ([]Option, error) {
