@@ -78,7 +78,9 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 		return host
 	}
 
-	xff := r.Header.Get("X-Forwarded-For")
+	// A proxy may append its hop as a separate header line rather than
+	// extending the client's, so the client-supplied line is not always last.
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
 	if xff == "" {
 		return host
 	}
