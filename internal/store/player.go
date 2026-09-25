@@ -392,9 +392,10 @@ func (s *PlayerStore) CreateVerifyToken(
 // auth.ErrVerifyTokenAlreadyUsed if the row exists but was already
 // consumed (duplicate click on a stale link), auth.ErrEmailTaken when
 // the email-change branch hits the UNIQUE players.email constraint,
-// and auth.ErrVerifyTokenInvalid when no row matches. The token row
-// is consumed regardless of which branch runs; expired-but-consumed
-// cleanup happens via the sweep query at startup.
+// and auth.ErrVerifyTokenInvalid when no row matches. The token stays
+// unconsumed when the side effect fails (auth.ErrEmailTaken,
+// auth.ErrPlayerNotFound), since the whole transaction rolls back;
+// expired-but-consumed cleanup happens via the sweep query at startup.
 func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) (int64, error) {
 	var playerID int64
 	now := time.Now().UTC()
