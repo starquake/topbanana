@@ -65,15 +65,15 @@ func TestQuizVisibility_Integration(t *testing.T) {
 		t.Fatalf("CreateQuiz private err = %v", err)
 	}
 
-	// Anonymous client. EnsurePlayer mints a session row on first
-	// /api/players/me round-trip; reusing a jar across the subtests
-	// keeps the same auto-petname player so the visibility gate sees a
-	// consistent caller.
+	// Anonymous client, primed with a guest row up front; reusing a jar
+	// across the subtests keeps the same auto-petname player so the
+	// visibility gate sees a consistent caller.
 	anonJar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("cookiejar.New err = %v", err)
 	}
 	anonClient := &http.Client{Jar: anonJar}
+	primeAnonymousPlayer(ctx, t, anonClient, baseURL)
 
 	t.Run("public list omits unlisted and private quizzes", func(t *testing.T) {
 		t.Parallel()

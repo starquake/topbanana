@@ -247,6 +247,40 @@ func TestAcceptInvite_TakenDisplayNameKeepsInviteLive(t *testing.T) {
 	}
 }
 
+// TestAcceptInvite_ValidatesDisplayName pins #1357 on the invite path: a name
+// with a bidi override is rejected and keeps the invite live, and a padded name
+// is stored trimmed.
+func TestAcceptInvite_ValidatesDisplayName(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	raw := mintInvite(ctx, t, stores.Invites, "validate@example.test", time.Now().Add(time.Hour))
+
+	resp := postAcceptInvite(ctx, t, authClient(t), srv.BaseURL, raw, "\u202eInvited")
+	body := readAllClose(t, resp)
+	if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+		t.Fatalf("bidi-name status = %d, want %d", got, want)
+	}
+	if got, want := body, "Display name contains characters that are not allowed."; !strings.Contains(got, want) {
+		t.Errorf("bidi-name body missing %q", want)
+	}
+	if _, err := stores.Invites.GetLiveInvite(ctx, auth.HashInviteToken(raw)); err != nil {
+		t.Errorf("invite must stay live after a rejected name: err = %v", err)
+	}
+
+	retry := postAcceptInvite(ctx, t, authClient(t), srv.BaseURL, raw, "  Invited  ")
+	defer retry.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := retry.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("padded-name status = %d, want %d", got, want)
+	}
+	if _, err := stores.Players.GetPlayerByDisplayName(ctx, "Invited"); err != nil {
+		t.Errorf("GetPlayerByDisplayName(%q) err = %v, want nil (name stored trimmed)", "Invited", err)
+	}
+}
+
 // TestAdminInvite_Resend rotates a pending invite's token via the resend
 // action and asserts the previously emailed link is dead while a fresh link
 // is live. The integration server's no-op mailer drops the new raw token, so

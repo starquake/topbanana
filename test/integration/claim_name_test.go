@@ -76,10 +76,6 @@ func TestClaimName_TooLongRejected(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	// GET /api/players/me mints an anonymous player + session cookie, so the
-	// follow-up PATCH lands on a claimable row.
-	_ = fetchPlayerMe(ctx, t, client, baseURL)
-
 	// 51 runes is one over the MaxDisplayNameLength cap.
 	tooLong := strings.Repeat("a", 51)
 	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, tooLong)
@@ -94,6 +90,35 @@ func TestClaimName_TooLongRejected(t *testing.T) {
 		t.Fatalf("decode body err = %v (raw=%q)", err, body)
 	}
 	if got, want := payload.Code, "display_name_too_long"; got != want {
+		t.Errorf("body.code = %q, want %q (raw=%q)", got, want, body)
+	}
+}
+
+// TestClaimName_InvalidCharactersRejected pins that the claim-name endpoint
+// rejects a name with a bidi override with a 400 and the display_name_invalid
+// code. The PATCH itself mints the guest row.
+func TestClaimName_InvalidCharactersRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, srv.BaseURL, "\u202eecilA")
+	if got, want := status, http.StatusBadRequest; got != want {
+		t.Fatalf("PATCH status = %d, want %d (body=%q)", got, want, body)
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode body err = %v (raw=%q)", err, body)
+	}
+	if got, want := payload.Code, "display_name_invalid"; got != want {
 		t.Errorf("body.code = %q, want %q (raw=%q)", got, want, body)
 	}
 }

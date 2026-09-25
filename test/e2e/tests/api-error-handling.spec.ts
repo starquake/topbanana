@@ -136,9 +136,8 @@ test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserNam
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
 
-  // Navigate via the public list (#284) so /api/players/me mints an
-  // anonymous player and the resulting /play/{slug-id} pre-selects the
-  // quiz. Wait for Alpine init's checkAlreadyPlayed to finish (its
+  // Navigate via the public list (#284) so the resulting /play/{slug-id}
+  // pre-selects the quiz. Wait for Alpine init's checkAlreadyPlayed to finish (its
   // /my-game + /leaderboard calls would otherwise hit the route stubs
   // set up below and corrupt the counts the test asserts on); the
   // Leaderboard heading is visible only AFTER the leaderboard fetch

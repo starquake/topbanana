@@ -106,7 +106,8 @@ export class GameApp {
         // later switch re-hides until the new probe lands.
         this.startStateResolved = false;
         // Current player as returned by GET /api/players/me. Stays null
-        // until init() resolves; templates guard with `player &&`. When
+        // until init() resolves, and for a fresh guest until their first
+        // action creates a player; templates guard with `player &&`. When
         // the player renames, the PATCH response replaces this object
         // so player.displayName and player.hasCustomName flow through every
         // bound template at once.
@@ -624,9 +625,7 @@ export class GameApp {
         if (slugId) this.deepLinkUnavailable = false;
         // Only tear down the prior leaderboard view when the selected
         // quiz actually changed. checkAlreadyPlayed is also re-entered
-        // from startGame() for the same quiz; closing + reopening the
-        // SSE there shows up as a spurious NS_ERROR_PARTIAL_TRANSFER
-        // in Firefox even though the round-trip is intentional.
+        // from startGame() for the same quiz.
         if (slugId !== this.quizSlugId) {
             this.finished = false;
             this.leaderboard = null;
@@ -838,18 +837,12 @@ export class GameApp {
             // top — but only if the player has not already chosen a
             // display name. On a successful claim the modal handler
             // re-fetches the leaderboard so the row updates from the
-            // auto-petname to the chosen name. The SSE stream was
-            // already opened in checkAlreadyPlayed() (#244), so this
-            // fetch is just a defensive snapshot for the case where
-            // SSE never connected — re-subscribing here would tear
-            // down the live connection and produce a spurious
-            // NS_ERROR_PARTIAL_TRANSFER in Firefox.
+            // auto-petname to the chosen name.
             //
             // A 5xx / network blip on this fetch used to escape past
             // finished=true and leave the player stuck on the
             // "Loading leaderboard..." fallback; degrade gracefully
-            // to an empty board so the SSE event (or the next page
-            // load) can repaint it (#361).
+            // to an empty board so the next page load can repaint it (#361).
             try {
                 this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
             } catch (err) {

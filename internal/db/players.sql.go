@@ -54,6 +54,23 @@ func (q *Queries) AdminRenamePlayer(ctx context.Context, arg AdminRenamePlayerPa
 	return i, err
 }
 
+const bumpPlayerSessionVersion = `-- name: BumpPlayerSessionVersion :one
+UPDATE players
+SET session_version = session_version + 1
+WHERE id = ?1
+RETURNING session_version
+`
+
+// Increments session_version so every cookie minted before the bump stops
+// validating ("sign out other devices"). Returns the new version so the caller
+// can re-issue the current cookie.
+func (q *Queries) BumpPlayerSessionVersion(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, bumpPlayerSessionVersion, id)
+	var session_version int64
+	err := row.Scan(&session_version)
+	return session_version, err
+}
+
 const claimPlayer = `-- name: ClaimPlayer :one
 UPDATE players
 SET display_name = ?1,
@@ -1150,7 +1167,7 @@ const updatePlayerDisplayName = `-- name: UpdatePlayerDisplayName :one
 UPDATE players
 SET display_name = ?1,
     display_name_claimed = 1
-WHERE id = ?2 AND password_hash IS NULL
+WHERE id = ?2 AND password_hash IS NULL AND role = 'player'
 RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at, approved_at
 `
 
@@ -1161,7 +1178,8 @@ type UpdatePlayerDisplayNameParams struct {
 
 // Updates the display_name on an anonymous player row in place. The WHERE
 // clause refuses the update when the player has already claimed a
-// non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
+// non-anonymous identity (password_hash IS NOT NULL) or holds a higher role
+// (a passwordless Host such as the shared demo Host), so the SQL is the
 // atomic guard against a stale anonymous check in the service layer.
 // Returns the updated row when one was affected; the wrapper distinguishes
 // "not anonymous anymore" (sql.ErrNoRows) from "display_name collision"

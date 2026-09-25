@@ -361,3 +361,215 @@ func countLegacyAnonDisplayNames(ctx context.Context, t *testing.T, dbConn *sql.
 
 	return n
 }
+
+// guestFixture is a started server plus a direct DB handle and one published
+// quiz, for the guest-minting tests below.
+type guestFixture struct {
+	baseURL string
+	db      *sql.DB
+	quiz    *quiz.Quiz
+}
+
+func newGuestFixture(t *testing.T, extraEnv map[string]string) (context.Context, guestFixture) {
+	t.Helper()
+
+	ctx, srv := startServer(t, extraEnv)
+	dbConn, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := dbConn.Close(); cerr != nil {
+			t.Errorf("dbConn.Close err = %v, want nil", cerr)
+		}
+	})
+
+	qz := &quiz.Quiz{
+		Title:             "Guest Quiz",
+		Published:         true,
+		Slug:              "guest-quiz",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if cerr := store.New(dbConn, slog.Default()).Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	return ctx, guestFixture{baseURL: srv.BaseURL, db: dbConn, quiz: qz}
+}
+
+// apiResult is the part of a response the guest-minting tests assert on.
+type apiResult struct {
+	status     int
+	retryAfter string
+	setSession bool
+}
+
+// sendAPI issues one request with an optional JSON body and reports its
+// status, Retry-After header, and whether it set the session cookie.
+func sendAPI(ctx context.Context, t *testing.T, client *http.Client, method, target, body string) apiResult {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do %s %s err = %v, want nil", method, target, err)
+	}
+	defer closeBody(t, resp.Body)
+
+	res := apiResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
+	for _, c := range resp.Cookies() {
+		if c.Name == session.CookieName {
+			res.setSession = true
+		}
+	}
+
+	return res
+}
+
+// TestAnonymous_SafeRequestsDoNotMint pins #1359: cookieless GET/HEAD API
+// reads run with no player, create no players row and set no session cookie,
+// and each answers the way it does for a guest who has not played yet.
+func TestAnonymous_SafeRequestsDoNotMint(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, nil)
+	slugID := fmt.Sprintf("%s-%d", fx.quiz.Slug, fx.quiz.ID)
+	client := newCookieJarClient(t)
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodGet, "/api/quizzes", http.StatusOK},
+		{http.MethodHead, "/api/quizzes", http.StatusOK},
+		{http.MethodGet, "/api/players/me", http.StatusNoContent},
+		{http.MethodGet, "/api/quizzes/" + slugID, http.StatusOK},
+		{http.MethodGet, "/api/quizzes/" + slugID + "/leaderboard", http.StatusOK},
+		{http.MethodGet, "/api/quizzes/" + slugID + "/my-game", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/questions/next", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/audio", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/results", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/state", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/audio", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/events", http.StatusNotFound},
+	} {
+		res := sendAPI(ctx, t, client, tc.method, fx.baseURL+tc.path, "")
+		if got, want := res.status, tc.want; got != want {
+			t.Errorf("%s %s status = %d, want %d", tc.method, tc.path, got, want)
+		}
+		if res.setSession {
+			t.Errorf("%s %s set the session cookie, want none", tc.method, tc.path)
+		}
+	}
+
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 0; got != want {
+		t.Errorf("anonymous players added by safe requests = %d, want %d", got, want)
+	}
+
+	// The first unsafe request still mints the guest and sets the cookie.
+	gameID, setCookie := postCreateGame(ctx, t, client, fx.baseURL, fx.quiz.ID)
+	if gameID == "" {
+		t.Fatal("POST /api/games returned an empty game ID")
+	}
+	if !setCookie {
+		t.Error("POST /api/games did not set the session cookie")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 1; got != want {
+		t.Errorf("anonymous players added after POST /api/games = %d, want %d", got, want)
+	}
+	if got := fetchPlayerMe(ctx, t, client, fx.baseURL); !got.IsAnonymous || got.ID == 0 {
+		t.Errorf("GET /api/players/me after minting = %+v, want an anonymous player with an id", got)
+	}
+}
+
+// TestAnonymous_SessionJoinMints pins that joining a live room is an unsafe
+// first request that mints the guest, so the join page needs no prior GET.
+func TestAnonymous_SessionJoinMints(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, nil)
+	client := newCookieJarClient(t)
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+
+	res := sendAPI(ctx, t, client, http.MethodPost, fx.baseURL+"/api/sessions/NOPE/join", "")
+	if got, want := res.status, http.StatusNotFound; got != want {
+		t.Errorf("POST join status = %d, want %d", got, want)
+	}
+	if !res.setSession {
+		t.Error("POST join did not set the session cookie")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 1; got != want {
+		t.Errorf("anonymous players added by POST join = %d, want %d", got, want)
+	}
+}
+
+// TestAnonymous_MintBudgetPerIP pins that minting past GUEST_MINT_BUDGET
+// from one IP answers 429 with Retry-After and creates no row.
+func TestAnonymous_MintBudgetPerIP(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, map[string]string{"GUEST_MINT_BUDGET": "2"})
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+	body := fmt.Sprintf(`{"quizId": %d}`, fx.quiz.ID)
+
+	for i := range 2 {
+		res := sendAPI(ctx, t, newCookieJarClient(t), http.MethodPost, fx.baseURL+"/api/games", body)
+		if got, want := res.status, http.StatusCreated; got != want {
+			t.Fatalf("mint #%d status = %d, want %d", i+1, got, want)
+		}
+	}
+
+	res := sendAPI(ctx, t, newCookieJarClient(t), http.MethodPost, fx.baseURL+"/api/games", body)
+	if got, want := res.status, http.StatusTooManyRequests; got != want {
+		t.Errorf("mint over budget status = %d, want %d", got, want)
+	}
+	if res.retryAfter == "" {
+		t.Error("mint over budget carried no Retry-After header")
+	}
+	if res.setSession {
+		t.Error("mint over budget set the session cookie, want none")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 2; got != want {
+		t.Errorf("anonymous players added = %d, want %d (none past the budget)", got, want)
+	}
+}
+
+// TestAnonymous_RenameBudgetPerIP pins that PATCH /api/players/me past
+// GUEST_RENAME_BUDGET from one IP answers 429 with Retry-After and leaves the
+// name unchanged.
+func TestAnonymous_RenameBudgetPerIP(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, map[string]string{"GUEST_RENAME_BUDGET": "2"})
+	client := newCookieJarClient(t)
+
+	for i, name := range []string{"guest-one", "guest-two"} {
+		if got, want := patchPlayerDisplayName(ctx, t, client, fx.baseURL, name), http.StatusOK; got != want {
+			t.Fatalf("rename #%d status = %d, want %d", i+1, got, want)
+		}
+	}
+
+	res := sendAPI(
+		ctx, t, client, http.MethodPatch, fx.baseURL+"/api/players/me", `{"displayName": "guest-three"}`,
+	)
+	if got, want := res.status, http.StatusTooManyRequests; got != want {
+		t.Errorf("rename over budget status = %d, want %d", got, want)
+	}
+	if res.retryAfter == "" {
+		t.Error("rename over budget carried no Retry-After header")
+	}
+	if got, want := fetchPlayerMe(ctx, t, client, fx.baseURL).DisplayName, "guest-two"; got != want {
+		t.Errorf("displayName after blocked rename = %q, want %q", got, want)
+	}
+}

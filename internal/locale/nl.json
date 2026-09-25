@@ -129,6 +129,9 @@
   "profile.account": "Account",
   "profile.changeEmail": "E-mailadres wijzigen",
   "profile.changePassword": "Wachtwoord wijzigen",
+  "profile.signOutOtherDevices": "Andere apparaten uitloggen",
+  "profile.signOutOtherDevicesHint": "Logt dit account uit op alle andere browsers en apparaten. Deze browser blijft ingelogd.",
+  "profile.signedOutOtherDevices": "Uitgelogd op alle andere browsers en apparaten.",
   "profile.displayNameRequired": "Weergavenaam is verplicht.",
   "profile.displayNameTaken": "Die naam is al bezet. Kies een andere.",
   "profile.backToAdmin": "Terug naar beheer",
@@ -155,6 +158,8 @@
   "validation.passwordTooLong": "Wachtwoord mag hoogstens {n} tekens bevatten.",
   "validation.passwordsNoMatch": "De wachtwoorden komen niet overeen.",
   "validation.displayNameRequired": "Kies een weergavenaam.",
+  "validation.displayNameTooLong": "Weergavenaam mag hoogstens {n} tekens bevatten.",
+  "validation.displayNameInvalid": "Weergavenaam bevat tekens die niet zijn toegestaan.",
 
   "login.rateLimited": "Te veel pogingen. Probeer het zo weer.",
   "login.invalidCredentials": "Onjuist e-mailadres of wachtwoord.",
@@ -265,6 +270,7 @@
   "claim.enterName": "Voer een naam in.",
   "claim.saveError": "Je naam kon niet worden opgeslagen. Probeer het later opnieuw.",
   "claim.nameTaken": "Die naam is al bezet.",
+  "claim.nameInvalid": "Die naam is te lang of bevat tekens die niet zijn toegestaan.",
   "claim.alreadyNamed": "Dit account heeft al een naam.",
 
   "join.heading": "Doe mee met een spel",

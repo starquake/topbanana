@@ -516,6 +516,46 @@ func TestPlayerStore_ClaimPlayer_DisplayNameTaken(t *testing.T) {
 	}
 }
 
+func TestPlayerStore_BumpSessionVersion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("increments and returns the new version", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		player, err := ps.CreateAnonymousPlayer(t.Context(), "bump-me")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+
+		version, err := ps.BumpSessionVersion(t.Context(), player.ID)
+		if err != nil {
+			t.Fatalf("BumpSessionVersion err = %v, want nil", err)
+		}
+		if got, want := version, player.SessionVersion+1; got != want {
+			t.Errorf("BumpSessionVersion = %d, want %d", got, want)
+		}
+		refetched, err := ps.GetPlayerByID(t.Context(), player.ID)
+		if err != nil {
+			t.Fatalf("GetPlayerByID err = %v, want nil", err)
+		}
+		if got, want := refetched.SessionVersion, version; got != want {
+			t.Errorf("refetched.SessionVersion = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("unknown player ID returns ErrPlayerNotFound", func(t *testing.T) {
+		t.Parallel()
+		ps := NewPlayerStore(dbtest.Open(t), slog.Default())
+
+		_, err := ps.BumpSessionVersion(t.Context(), 99999)
+		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestPlayerStore_UpdatePlayerDisplayName(t *testing.T) {
 	t.Parallel()
 
@@ -643,6 +683,25 @@ func TestPlayerStore_UpdatePlayerDisplayName(t *testing.T) {
 		}
 
 		_, err = ps.UpdatePlayerDisplayName(t.Context(), credentialled.ID, "newname")
+		if got, want := err, auth.ErrPlayerNotAnonymous; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("passwordless host returns ErrPlayerNotAnonymous", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		host, err := ps.CreateAnonymousPlayer(t.Context(), "Demo Host")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+		if err = ps.SetPlayerRole(t.Context(), host.ID, auth.RoleHost); err != nil {
+			t.Fatalf("SetPlayerRole err = %v, want nil", err)
+		}
+
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), host.ID, "x")
 		if got, want := err, auth.ErrPlayerNotAnonymous; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}

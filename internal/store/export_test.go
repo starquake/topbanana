@@ -8,8 +8,8 @@ import "context"
 var ParseSQLiteTimestamp = parseSQLiteTimestamp
 
 // SweepPlayerBatchForTest exposes sweepPlayerBatch to drive it with a fixed id set.
-func (s *RetentionStore) SweepPlayerBatchForTest(ctx context.Context, playerIDs []int64) error {
-	return s.sweepPlayerBatch(ctx, playerIDs)
+func (s *RetentionStore) SweepPlayerBatchForTest(ctx context.Context, playerIDs []int64, days int) error {
+	return s.sweepPlayerBatch(ctx, playerIDs, days)
 }
 
 // SetSessionIDForTest forces the store to mint the given session primary key so

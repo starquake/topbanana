@@ -496,3 +496,11 @@ type PlayerStore interface {
 	// exist.
 	RenamePlayer(ctx context.Context, playerID int64, displayName string) (*Player, error)
 }
+
+// SessionRevoker invalidates every session cookie a player holds by bumping
+// their session_version ("sign out other devices", #1360).
+type SessionRevoker interface {
+	// BumpSessionVersion increments the player's session_version and returns
+	// the new value. Returns ErrPlayerNotFound when no row matches.
+	BumpSessionVersion(ctx context.Context, playerID int64) (int64, error)
+}

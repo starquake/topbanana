@@ -82,7 +82,7 @@ func HandleProfilePasswordChange(
 
 		if msg, ok := validatePasswordChangeInput(loc, newPassword, confirm); !ok {
 			logger.InfoContext(r.Context(), "profile password change rejected: invalid input",
-				slog.Int64("player_id", player.ID))
+				slog.Int64(logPlayerIDKey, player.ID))
 			render.renderAny(w, r, http.StatusBadRequest, passwordPageData{
 				Title: title, Message: msg,
 			})
@@ -92,7 +92,7 @@ func HandleProfilePasswordChange(
 
 		if player.PasswordHash == "" || auth.CheckPassword(player.PasswordHash, current) != nil {
 			logger.InfoContext(r.Context(), "profile password change rejected: current password incorrect",
-				slog.Int64("player_id", player.ID))
+				slog.Int64(logPlayerIDKey, player.ID))
 			render.renderAny(w, r, http.StatusUnauthorized, passwordPageData{
 				Title: title, Message: locale.Translate(loc, "profile.currentPasswordIncorrect"),
 			})
@@ -142,7 +142,7 @@ func rotateAndRefresh(
 	if rotateErr := players.ChangePlayerPassword(r.Context(), playerID, hashed); rotateErr != nil {
 		if errors.Is(rotateErr, auth.ErrPlayerNotFound) {
 			logger.ErrorContext(r.Context(), "change password: player vanished mid-request",
-				slog.Int64("player_id", playerID))
+				slog.Int64(logPlayerIDKey, playerID))
 		} else {
 			logger.ErrorContext(r.Context(), "error rotating password", slog.Any("err", rotateErr))
 		}

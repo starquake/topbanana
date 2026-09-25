@@ -341,7 +341,8 @@ GROUP BY gp.player_id;
 -- name: UpdatePlayerDisplayName :one
 -- Updates the display_name on an anonymous player row in place. The WHERE
 -- clause refuses the update when the player has already claimed a
--- non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
+-- non-anonymous identity (password_hash IS NOT NULL) or holds a higher role
+-- (a passwordless Host such as the shared demo Host), so the SQL is the
 -- atomic guard against a stale anonymous check in the service layer.
 -- Returns the updated row when one was affected; the wrapper distinguishes
 -- "not anonymous anymore" (sql.ErrNoRows) from "display_name collision"
@@ -354,7 +355,7 @@ GROUP BY gp.player_id;
 UPDATE players
 SET display_name = sqlc.arg('display_name'),
     display_name_claimed = 1
-WHERE id = sqlc.arg('id') AND password_hash IS NULL
+WHERE id = sqlc.arg('id') AND password_hash IS NULL AND role = 'player'
 RETURNING *;
 
 -- name: RenamePlayer :one
@@ -587,3 +588,12 @@ UPDATE players
 SET password_hash = sqlc.arg('password_hash'),
     session_version = session_version + 1
 WHERE id = sqlc.arg('id');
+
+-- name: BumpPlayerSessionVersion :one
+-- Increments session_version so every cookie minted before the bump stops
+-- validating ("sign out other devices"). Returns the new version so the caller
+-- can re-issue the current cookie.
+UPDATE players
+SET session_version = session_version + 1
+WHERE id = sqlc.arg('id')
+RETURNING session_version;

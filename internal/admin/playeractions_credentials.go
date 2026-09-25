@@ -10,6 +10,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/render"
 )
 
@@ -84,9 +85,10 @@ func HandlePlayerSetDisplayName(
 			return
 		}
 
-		name := strings.TrimSpace(r.PostFormValue("display_name"))
-
-		_, err := store.AdminRenamePlayer(r.Context(), playerID, name)
+		name, err := auth.CleanDisplayName(r.PostFormValue("display_name"))
+		if err == nil {
+			_, err = store.AdminRenamePlayer(r.Context(), playerID, name)
+		}
 		switch {
 		case err == nil:
 			writeAudit(r.Context(), logger, store, actor.ID, playerID,
@@ -94,6 +96,8 @@ func HandlePlayerSetDisplayName(
 			flash.SetNotice(w, "Display name updated.")
 		case errors.Is(err, auth.ErrDisplayNameEmpty):
 			flash.SetError(w, "Enter a display name.", 0)
+		case errors.Is(err, auth.ErrDisplayNameTooLong), errors.Is(err, auth.ErrDisplayNameInvalid):
+			flash.SetError(w, auth.DisplayNameErrorMessage(locale.LocaleEN, err), 0)
 		case errors.Is(err, auth.ErrDisplayNameTaken):
 			flash.SetError(w, "That display name is already taken.", 0)
 		case errors.Is(err, auth.ErrPlayerNotFound):
@@ -273,6 +277,10 @@ func newPlayerInput(r *http.Request) newPlayerCreateInput {
 	}
 	if in.DisplayName == "" {
 		in.DisplayName = auth.GeneratePetname()
+	} else if _, err := auth.CleanDisplayName(in.DisplayName); err != nil {
+		in.errMsg = auth.DisplayNameErrorMessage(locale.LocaleEN, err)
+
+		return in
 	}
 	if !auth.LooksLikeEmail(in.Email) {
 		in.errMsg = "Enter a valid email address."

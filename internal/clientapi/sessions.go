@@ -490,8 +490,7 @@ func HandleSessionState(service *livesession.Service) http.Handler {
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for session state")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.NotFound(w, r)
 
 			return
 		}
@@ -532,8 +531,7 @@ func HandleSessionAudio(service *livesession.Service) http.Handler {
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for session audio")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.NotFound(w, r)
 
 			return
 		}
@@ -920,8 +918,7 @@ func HandleSessionEvents(
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for session events")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.NotFound(w, r)
 
 			return
 		}

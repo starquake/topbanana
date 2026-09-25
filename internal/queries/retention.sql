@@ -13,7 +13,9 @@
 -- guest with a finished game is kept regardless of age so the sweep never
 -- erases a leaderboard score (#626); "finished" is every question of the
 -- quiz issued as a game_question, the same finisher predicate the
--- leaderboard uses.
+-- leaderboard uses. A guest who plays hosted rooms is kept too: any
+-- session_answers row, or a session_players last_seen_at inside the window,
+-- so a regular room player is not swept, nor a guest mid-game.
 SELECT p.id
 FROM players p
 WHERE p.role = 'player'
@@ -29,18 +31,35 @@ WHERE p.role = 'player'
           AND (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
           AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
               (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+  )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
+  AND NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
   );
 
 -- name: FilterAnonymousPlayerIDs :many
--- Returns the subset of the given ids still anonymous, so the sweep spares a
--- guest claimed after the snapshot (#1175).
+-- Returns the subset of the given ids still anonymous and still without
+-- hosted-room activity, so the sweep spares a guest who claimed a name or
+-- joined a room after the snapshot (#1175). The room predicates match
+-- ListStaleAnonymousPlayerIDs. days sits before the slice so sqlc numbers it
+-- ?1; after the slice its ?N would alias an expanded slice id.
 SELECT p.id
 FROM players p
-WHERE p.id IN (sqlc.slice('ids'))
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
+  )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
   AND p.role = 'player'
   AND p.email IS NULL
   AND p.password_hash IS NULL
-  AND p.display_name_claimed = 0;
+  AND p.display_name_claimed = 0
+  AND p.id IN (sqlc.slice('ids'));
 
 -- name: ListGameIDsForPlayers :many
 -- Lists every distinct game id any of the given players participates in.

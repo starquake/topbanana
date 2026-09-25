@@ -280,12 +280,7 @@ func TestGoogleLogin_CallbackClaimsAnonymousSession(t *testing.T) {
 
 	client := authClient(t)
 
-	// Touch the public API once so EnsurePlayer creates an anonymous
-	// players row and sets the session cookie on the client's jar.
-	priming := doGet(ctx, t, client, srv.BaseURL+"/api/players/me")
-	if got, want := priming.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("priming GET /api/players/me status = %d, want %d", got, want)
-	}
+	primeAnonymousPlayer(ctx, t, client, srv.BaseURL)
 
 	preID := lookupOnlyPlayerID(t, srv.DBURI)
 
@@ -299,6 +294,46 @@ func TestGoogleLogin_CallbackClaimsAnonymousSession(t *testing.T) {
 	postID := lookupPlayerIDByEmail(t, srv.DBURI, mock.email)
 	if got, want := postID, preID; got != want {
 		t.Errorf("player id after Google sign-in = %d, want %d (anonymous row reused, not replaced)", got, want)
+	}
+}
+
+// TestGoogleLogin_PlayerCanClaimName pins that a Google-only player, who has
+// no password and still carries a petname, can pick a display name through
+// PATCH /api/players/me.
+func TestGoogleLogin_PlayerCanClaimName(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "google-claimer@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServer(t, mock)
+	// A credentialled row first, so this sign-in is not bootstrapped to admin.
+	seedCredentialledPlayer(t, srv.DBURI, "Resident", "resident@example.test")
+
+	client := authClient(t)
+	finalResp := driveGoogleFlow(ctx, t, client, srv.BaseURL, mock)
+	if got, want := finalResp.Location, "/"; got != want {
+		t.Fatalf("callback Location = %q, want %q (player sign-in)", got, want)
+	}
+
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, srv.BaseURL, "Google Claimer")
+	if got, want := status, http.StatusOK; got != want {
+		t.Fatalf("PATCH status = %d, want %d (body=%q)", got, want, body)
+	}
+
+	var payload struct {
+		DisplayName   string `json:"displayName"`
+		HasCustomName bool   `json:"hasCustomName"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode body err = %v (raw=%q)", err, body)
+	}
+	if got, want := payload.DisplayName, "Google Claimer"; got != want {
+		t.Errorf("body.displayName = %q, want %q", got, want)
+	}
+	if got, want := payload.HasCustomName, true; got != want {
+		t.Errorf("body.hasCustomName = %v, want %v", got, want)
 	}
 }
 

@@ -59,23 +59,39 @@ func (q *Queries) DeleteStaleAuditLog(ctx context.Context, days int64) (sql.Resu
 const filterAnonymousPlayerIDs = `-- name: FilterAnonymousPlayerIDs :many
 SELECT p.id
 FROM players p
-WHERE p.id IN (/*SLICE:ids*/?)
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(?1 AS INTEGER) || ' days')
+  )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
   AND p.role = 'player'
   AND p.email IS NULL
   AND p.password_hash IS NULL
   AND p.display_name_claimed = 0
+  AND p.id IN (/*SLICE:ids*/?)
 `
 
-// Returns the subset of the given ids still anonymous, so the sweep spares a
-// guest claimed after the snapshot (#1175).
-func (q *Queries) FilterAnonymousPlayerIDs(ctx context.Context, ids []int64) ([]int64, error) {
+type FilterAnonymousPlayerIDsParams struct {
+	Days int64
+	Ids  []int64
+}
+
+// Returns the subset of the given ids still anonymous and still without
+// hosted-room activity, so the sweep spares a guest who claimed a name or
+// joined a room after the snapshot (#1175). The room predicates match
+// ListStaleAnonymousPlayerIDs. days sits before the slice so sqlc numbers it
+// ?1; after the slice its ?N would alias an expanded slice id.
+func (q *Queries) FilterAnonymousPlayerIDs(ctx context.Context, arg FilterAnonymousPlayerIDsParams) ([]int64, error) {
 	query := filterAnonymousPlayerIDs
 	var queryParams []interface{}
-	if len(ids) > 0 {
-		for _, v := range ids {
+	queryParams = append(queryParams, arg.Days)
+	if len(arg.Ids) > 0 {
+		for _, v := range arg.Ids {
 			queryParams = append(queryParams, v)
 		}
-		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(arg.Ids))[1:], 1)
 	} else {
 		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
 	}
@@ -204,6 +220,13 @@ WHERE p.role = 'player'
           AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
               (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
   )
+  AND NOT EXISTS (SELECT 1 FROM session_answers sa WHERE sa.player_id = p.id)
+  AND NOT EXISTS (
+        SELECT 1
+        FROM session_players sp
+        WHERE sp.player_id = p.id
+          AND sp.last_seen_at >= datetime('now', '-' || CAST(?1 AS INTEGER) || ' days')
+  )
 `
 
 // Lists ids of anonymous players minted more than 90 days ago that hold no
@@ -220,7 +243,9 @@ WHERE p.role = 'player'
 // guest with a finished game is kept regardless of age so the sweep never
 // erases a leaderboard score (#626); "finished" is every question of the
 // quiz issued as a game_question, the same finisher predicate the
-// leaderboard uses.
+// leaderboard uses. A guest who plays hosted rooms is kept too: any
+// session_answers row, or a session_players last_seen_at inside the window,
+// so a regular room player is not swept, nor a guest mid-game.
 func (q *Queries) ListStaleAnonymousPlayerIDs(ctx context.Context, days int64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listStaleAnonymousPlayerIDs, days)
 	if err != nil {

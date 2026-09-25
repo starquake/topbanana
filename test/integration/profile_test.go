@@ -109,6 +109,29 @@ func TestProfile_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("POST /profile/display-name with an over-long value returns 400", func(t *testing.T) {
+		snap := profilePOST(ctx, t, authn, srv.BaseURL, strings.Repeat("a", 51))
+		if got, want := snap.status, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+		if got, want := snap.body, "Display name must be at most 50 characters."; !strings.Contains(got, want) {
+			t.Errorf("body missing %q", want)
+		}
+	})
+
+	t.Run("POST /profile/display-name with a format character returns 400", func(t *testing.T) {
+		snap := profilePOST(ctx, t, authn, srv.BaseURL, "profile\u200dadmin")
+		if got, want := snap.status, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+		if got, want := snap.body, "Display name contains characters that are not allowed."; !strings.Contains(
+			got,
+			want,
+		) {
+			t.Errorf("body missing %q", want)
+		}
+	})
+
 	t.Run("POST /profile/display-name with a fresh value renames the player", func(t *testing.T) {
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "renamed-admin")
 		if got, want := snap.status, http.StatusOK; got != want {

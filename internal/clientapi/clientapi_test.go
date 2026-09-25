@@ -442,7 +442,7 @@ func TestHandleGameForQuiz(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 when player missing from context", func(t *testing.T) {
+	t.Run("returns 404 when no player on context", func(t *testing.T) {
 		t.Parallel()
 
 		env := newTestEnv(t)
@@ -458,7 +458,7 @@ func TestHandleGameForQuiz(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
@@ -969,7 +969,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 when player missing on context", func(t *testing.T) {
+	t.Run("returns 404 when no player on context", func(t *testing.T) {
 		t.Parallel()
 
 		env := newTestEnv(t)
@@ -989,7 +989,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
@@ -1360,16 +1360,16 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 when player missing from context", func(t *testing.T) {
+	t.Run("returns 200 with no current player when no player on context", func(t *testing.T) {
 		t.Parallel()
 
 		env := newTestEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		alice := env.seedPlayer(t, "alice")
+		env.playCorrectly(t, qz, alice, 1)
 
 		handler := HandleQuizLeaderboard(env.logger, env.service)
 
-		// No withPlayer wrapper - simulate a misconfigured route that
-		// forgot to wrap the handler in EnsurePlayer.
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodGet,
 			fmt.Sprintf("/api/quizzes/quiz-%d/leaderboard", qz.ID), nil,
@@ -1378,8 +1378,21 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if got, want := rec.Code, http.StatusInternalServerError; got != want {
-			t.Errorf("status code = %v, want %v", got, want)
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
+		}
+		var body leaderboardTestResponse
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if got, want := len(body.Entries), 1; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := body.Entries[0].IsCurrentPlayer, false; got != want {
+			t.Errorf("entries[0].IsCurrentPlayer = %v, want %v", got, want)
+		}
+		if body.CurrentPlayer != nil {
+			t.Errorf("currentPlayer = %+v, want nil", body.CurrentPlayer)
 		}
 	})
 

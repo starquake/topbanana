@@ -36,7 +36,7 @@ type sessionStateQuizRes struct {
 
 // newAnonClient returns a cookie-jar-backed client so EnsurePlayer mints a
 // distinct anonymous players row per client (each gets its own session
-// cookie on the first /api call).
+// cookie on the first unsafe /api call).
 func newAnonClient(t *testing.T) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)

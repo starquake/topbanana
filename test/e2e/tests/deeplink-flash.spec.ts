@@ -208,8 +208,8 @@ test('deep-link to a not-completed quiz paints the header and leaderboard togeth
   await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="leaderboard-section"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
-  // The claim / display-name block is gated on startStateResolved too.
-  await expect(page.getByTestId('claim-cta-name')).toHaveCount(0);
+  // The claim block is gated on startStateResolved too.
+  await expect(page.locator('.claim-cta')).toHaveCount(0);
 
   release();
 
@@ -220,7 +220,7 @@ test('deep-link to a not-completed quiz paints the header and leaderboard togeth
   await expect(header).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
   await expect(page.locator('[data-testid="leaderboard-section"]')).toBeVisible();
-  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
+  await expect(page.locator('.claim-cta')).toBeVisible();
   const headerBox = await header.boundingBox();
   const tableBox = await page.locator('[data-testid="leaderboard-section"]').boundingBox();
   expect(headerBox).not.toBeNull();

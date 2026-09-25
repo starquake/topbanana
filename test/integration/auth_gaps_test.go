@@ -61,6 +61,52 @@ func TestRegister_DuplicateDisplayNameRejected(t *testing.T) {
 	}
 }
 
+// TestRegister_InvalidDisplayNameRejected pins #1357: register runs the shared
+// display-name validator, so an over-long name or one with a hidden format
+// character is rejected with a 400 and no account is created.
+func TestRegister_InvalidDisplayNameRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	tests := []struct {
+		name        string
+		displayName string
+		email       string
+		wantMsg     string
+	}{
+		{
+			name: "too long", displayName: strings.Repeat("a", 51), email: "reg-long@example.test",
+			wantMsg: "Display name must be at most 50 characters.",
+		},
+		{
+			name: "zero-width space", displayName: "reg\u200bname", email: "reg-zw@example.test",
+			wantMsg: "Display name contains characters that are not allowed.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			status, body := registerRaw(
+				ctx, t, authClient(t), srv.BaseURL, tt.displayName, tt.email, "correct-battery-14",
+			)
+			if got, want := status, http.StatusBadRequest; got != want {
+				t.Errorf("register status = %d, want %d", got, want)
+			}
+			if got, want := body, tt.wantMsg; !strings.Contains(got, want) {
+				t.Errorf("register body missing %q; body=%.300q", want, got)
+			}
+
+			dbConn, stores := openStores(t, srv.DBURI)
+			defer dbConn.Close() //nolint:errcheck // cleanup.
+			if _, err := stores.Players.GetPlayerByDisplayName(ctx, tt.displayName); err == nil {
+				t.Error("GetPlayerByDisplayName err = nil, want not-found (an invalid name must not create an account)")
+			}
+		})
+	}
+}
+
 // TestRegister_DisabledReturns404 pins the reg-disabled case: with
 // REGISTRATION_ENABLED unset the /register routes are never registered,
 // so both the form and the submit 404 from the mux.
