@@ -82,7 +82,7 @@ func ParseIDFromSlugPath(w http.ResponseWriter, r *http.Request, logger *slog.Lo
 	id, err := IDFromSlugID(pathValue)
 	if err != nil {
 		msg := "error parsing " + s
-		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+		logger.InfoContext(r.Context(), msg, slog.Any("err", err))
 		http.Error(w, msg, http.StatusBadRequest)
 
 		return 0, false
@@ -107,7 +107,7 @@ func ParseIDFromPath(w http.ResponseWriter, r *http.Request, logger *slog.Logger
 	id, err := IDFromString(pathValue)
 	if err != nil || id <= 0 {
 		msg := "error parsing " + s
-		logger.ErrorContext(r.Context(), msg, slog.String("value", pathValue), slog.Any("err", err))
+		logger.InfoContext(r.Context(), msg, slog.String("value", pathValue), slog.Any("err", err))
 		http.Error(w, msg, http.StatusBadRequest)
 
 		return 0, false

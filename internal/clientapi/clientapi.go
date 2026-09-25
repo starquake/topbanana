@@ -650,7 +650,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		var req createGameRequest
 		req, err = handlers.DecodeJSON[createGameRequest](w, r)
 		if err != nil {
-			logger.ErrorContext(ctx, "error decoding createGameRequest", slog.Any("err", err))
+			logger.InfoContext(ctx, "error decoding createGameRequest", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -1253,7 +1253,7 @@ func HandlePlayerClaimName(
 
 		req, err := handlers.DecodeJSON[claimNameRequest](w, r)
 		if err != nil {
-			logger.ErrorContext(ctx, "error decoding claimNameRequest", slog.Any("err", err))
+			logger.InfoContext(ctx, "error decoding claimNameRequest", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
