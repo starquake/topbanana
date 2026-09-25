@@ -120,21 +120,19 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code := r.PathValue("code")
+	code, ok := h.authorizeHost(w, r, player.ID)
+	if !ok {
+		return
+	}
 	state, err := h.service.GetSessionState(ctx, code, player.ID)
 	if err != nil {
-		if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
+		if errors.Is(err, livesession.ErrSessionNotFound) {
 			http.NotFound(w, r)
 
 			return
 		}
 		h.logger.ErrorContext(ctx, "error loading host big-screen state", slog.Any("err", err))
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
-
-		return
-	}
-	if state.Session.HostPlayerID != player.ID {
-		http.NotFound(w, r)
 
 		return
 	}
@@ -175,6 +173,33 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.bigScreen.Render(w, r, http.StatusOK, data)
+}
+
+// authorizeHost checks on the bare session row, before any state is loaded,
+// that playerID hosts the room named in the path, returning its canonical code.
+// On false it has already written the response: 404 for an unknown or foreign
+// room, 500 for a lookup failure.
+func (h *Handlers) authorizeHost(w http.ResponseWriter, r *http.Request, playerID int64) (string, bool) {
+	ctx := r.Context()
+	view, err := h.service.AuthorizeView(ctx, r.PathValue("code"), playerID)
+	if err != nil {
+		if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
+			http.NotFound(w, r)
+
+			return "", false
+		}
+		h.logger.ErrorContext(ctx, "error authorizing host big screen", slog.Any("err", err))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return "", false
+	}
+	if !view.IsHost {
+		http.NotFound(w, r)
+
+		return "", false
+	}
+
+	return view.Code, true
 }
 
 // parseTemplate parses the host layout plus the named page. Placeholder
