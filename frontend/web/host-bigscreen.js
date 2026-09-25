@@ -128,6 +128,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         startMessage: '',
         source: null,
         timer: null,
+        readBeat: {},
         // Backoff timer + current delay for the SSE hard-close recovery (#1179).
         reconnectTimer: null,
         reconnectDelay: RECONNECT_BASE_DELAY,
@@ -601,6 +602,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 },
                 setTimer: (handle) => { this.timer = handle; },
                 clearTimer: () => this.stopCountdown(),
+                readBeat: this.readBeat,
             });
         },
 
