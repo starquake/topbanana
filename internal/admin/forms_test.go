@@ -418,10 +418,6 @@ func TestQuizForm_Valid_Caps(t *testing.T) {
 			mutate: func(q *quiz.Quiz) { q.Title = strings.Repeat("a", MaxTitleLength+1) },
 		},
 		{
-			name: "slug over cap", wantKey: "slug", wantBad: true,
-			mutate: func(q *quiz.Quiz) { q.Slug = strings.Repeat("a", MaxSlugLength+1) },
-		},
-		{
 			name: "description over cap", wantKey: "description", wantBad: true,
 			mutate: func(q *quiz.Quiz) { q.Description = strings.Repeat("a", MaxDescriptionLength+1) },
 		},
@@ -519,5 +515,51 @@ func TestQuestionForm_Valid_Caps(t *testing.T) {
 				t.Errorf("problems[%q] missing, want present (problems=%v)", tc.wantKey, problems)
 			}
 		})
+	}
+}
+
+// TestTitleSlug pins that a title whose transliteration outgrows the slug cap
+// is cut back at a word boundary rather than left for validation to reject.
+func TestTitleSlug(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{name: "short title", title: "Capital Cities", want: "capital-cities"},
+		{name: "exactly at cap", title: strings.Repeat("a", MaxSlugLength), want: strings.Repeat("a", MaxSlugLength)},
+		{
+			name:  "one word over cap is hard cut",
+			title: strings.Repeat("a", MaxSlugLength+5),
+			want:  strings.Repeat("a", MaxSlugLength),
+		},
+		{
+			name:  "cut at the last word boundary",
+			title: strings.Repeat("abcd ", 60),
+			want:  strings.TrimSuffix(strings.Repeat("abcd-", MaxSlugLength/5), "-"),
+		},
+		{
+			name:  "boundary right after the cap keeps the full word",
+			title: strings.Repeat("a", MaxSlugLength) + " b",
+			want:  strings.Repeat("a", MaxSlugLength),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := TitleSlug(tc.title), tc.want; got != want {
+				t.Errorf("TitleSlug(%q) = %q, want %q", tc.title, got, want)
+			}
+		})
+	}
+
+	for _, title := range []string{strings.Repeat("\u53cc", 45), strings.Repeat("\u0449", 60)} {
+		got := TitleSlug(title)
+		if got == "" || len(got) > MaxSlugLength || strings.HasSuffix(got, "-") {
+			t.Errorf("TitleSlug(%q) = %q (len %d), want non-empty, <= %d, no trailing '-'",
+				title, got, len(got), MaxSlugLength)
+		}
 	}
 }

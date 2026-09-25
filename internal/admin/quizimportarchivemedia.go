@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"path"
 
-	"github.com/gosimple/slug"
-
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -208,7 +206,7 @@ func quizFromArchiveManifest(
 	}
 	qz := &quiz.Quiz{
 		Title:            m.Title,
-		Slug:             slug.Make(m.Title),
+		Slug:             titleSlug(m.Title),
 		Description:      m.Description,
 		TimeLimitSeconds: timeLimit,
 		Visibility:       visibility,

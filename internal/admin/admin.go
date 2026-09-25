@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gosimple/slug"
-
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
@@ -618,7 +616,7 @@ func fillQuizFromForm(
 		return nil, false
 	}
 	qz.Title = r.PostFormValue("title")
-	qz.Slug = slug.Make(qz.Title)
+	qz.Slug = titleSlug(qz.Title)
 	qz.Description = r.PostFormValue("description")
 	// Per-quiz default time limit (#99). Empty input falls back to the
 	// migration default so a host that never touched the field still

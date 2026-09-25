@@ -3453,3 +3453,47 @@ func TestHandleQuestionSave_QuestionCountCap(t *testing.T) {
 		t.Errorf("body should contain %q", want)
 	}
 }
+
+// TestHandleQuizSave_LongTransliteratedTitle pins that a non-Latin title within
+// the title cap saves even though its transliterated slug would outgrow the
+// slug cap: the slug is truncated instead of rejected with an unshown error.
+func TestHandleQuizSave_LongTransliteratedTitle(t *testing.T) {
+	t.Parallel()
+
+	titles := map[string]string{
+		"chinese":  strings.Repeat("\u53cc", 45),
+		"cyrillic": strings.Repeat("\u0449", 60),
+	}
+	for name, title := range titles {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			env := newAdminEnv(t)
+			form := url.Values{"title": {title}, "description": {"d"}}
+			req := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, "/admin/quizzes", strings.NewReader(form.Encode()),
+			)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rr := httptest.NewRecorder()
+
+			HandleQuizSave(slog.New(slog.DiscardHandler), nil, env.quizzes).ServeHTTP(rr, withTestAdmin(req))
+
+			if got, want := rr.Code, http.StatusSeeOther; got != want {
+				t.Fatalf("status = %d, want %d", got, want)
+			}
+			quizzes, err := env.quizzes.ListQuizzes(t.Context())
+			if err != nil {
+				t.Fatalf("ListQuizzes err = %v, want nil", err)
+			}
+			if got, want := len(quizzes), 1; got != want {
+				t.Fatalf("len(quizzes) = %d, want %d", got, want)
+			}
+			if got, want := quizzes[0].Title, title; got != want {
+				t.Errorf("stored title = %q, want %q", got, want)
+			}
+			if got := quizzes[0].Slug; got == "" || len(got) > MaxSlugLength {
+				t.Errorf("stored slug = %q (len %d), want non-empty and <= %d", got, len(got), MaxSlugLength)
+			}
+		})
+	}
+}

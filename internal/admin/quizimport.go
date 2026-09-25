@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gosimple/slug"
-
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -351,7 +349,7 @@ func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, error) {
 	}
 	qz := &quiz.Quiz{
 		Title:            p.Title,
-		Slug:             slug.Make(p.Title),
+		Slug:             titleSlug(p.Title),
 		Description:      p.Description,
 		TimeLimitSeconds: timeLimit,
 		// Empty maps to LanguageEN in the store; unrecognised is caught by

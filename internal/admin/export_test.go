@@ -141,6 +141,10 @@ func ValidateQuestionForm(ctx context.Context, q *quiz.Question) map[string]stri
 // payload one over the limit without hard-coding the value.
 const MaxOptions = maxOptions
 
+// TitleSlug exposes the title-to-slug derivation so its truncation can be
+// pinned directly.
+var TitleSlug = titleSlug
+
 // Input caps exposed so the validation tests can build values just past them.
 const (
 	MaxTitleLength        = maxTitleLength
