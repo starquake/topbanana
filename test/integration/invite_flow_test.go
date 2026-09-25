@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,6 +65,80 @@ func TestAdminInvite_CreatesPendingInvite(t *testing.T) {
 	if !strings.Contains(listBody, "new-invitee@example.test") {
 		t.Error("invite list missing the newly created invitee email")
 	}
+}
+
+// TestAdminInvite_SendFailureReportsCreatedInvite pins that an SMTP failure
+// after the invite row is committed reports the invite as created with the
+// email unsent, rather than "Could not create the invite".
+func TestAdminInvite_SendFailureReportsCreatedInvite(t *testing.T) {
+	t.Parallel()
+
+	port := startHangUpSMTP(t)
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"BASE_URL":             "https://topbanana.example",
+		"SMTP_HOST":            "127.0.0.1",
+		"SMTP_PORT":            port,
+		"SMTP_FROM":            "noreply@topbanana.example",
+		"SMTP_TLS":             "false",
+	})
+	admin := registerAdminClient(ctx, t, srv.BaseURL, srv.DBURI, "invite-smtp-admin")
+
+	dbConn, _ := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	token := fetchCSRFToken(ctx, t, admin, srv.BaseURL+"/admin/invites")
+	status, location, _ := postForm(ctx, t, admin, srv.BaseURL+"/admin/invites", url.Values{
+		"csrf_token": {token},
+		"email":      {"unsent@example.test"},
+	})
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("POST /admin/invites status = %d, want %d", got, want)
+	}
+	if got, want := location, "/admin/invites"; got != want {
+		t.Errorf("POST /admin/invites Location = %q, want %q", got, want)
+	}
+	if got, want := pendingInviteCount(ctx, t, dbConn, "unsent@example.test"), 1; got != want {
+		t.Errorf("pending invite count = %d, want %d", got, want)
+	}
+
+	listResp := getWith(ctx, t, admin, srv.BaseURL+"/admin/invites")
+	listBody := readAllClose(t, listResp)
+	if got, want := listResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /admin/invites status = %d, want %d", got, want)
+	}
+	if got, want := listBody, "but the email could not be sent"; !strings.Contains(got, want) {
+		t.Errorf("invite list body should contain %q", want)
+	}
+}
+
+// startHangUpSMTP binds a loopback listener that closes every connection
+// before the SMTP greeting, so each send fails fast, and returns its port.
+func startHangUpSMTP(t *testing.T) string {
+	t.Helper()
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen err = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() }) // best-effort; the listener is test-local.
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close() // hanging up is the point; its error is irrelevant.
+		}
+	}()
+
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort err = %v, want nil", err)
+	}
+
+	return port
 }
 
 // TestAdminInvite_RejectsExistingAccount pins that inviting an email that
