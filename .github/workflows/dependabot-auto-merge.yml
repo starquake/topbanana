@@ -6,7 +6,8 @@ on:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # Both: a Dependabot PR a maintainer pushed to must not re-enable auto-merge.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
     permissions:
       contents: write
       pull-requests: write
