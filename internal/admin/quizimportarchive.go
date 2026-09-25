@@ -50,6 +50,14 @@ var ErrArchiveUnsupportedVersion = errors.New("archive format version is newer t
 // archive does not contain.
 var ErrArchiveMediaMissing = errors.New("archive references a media file it does not contain")
 
+// ErrArchiveMediaRejected is returned when the media pipeline rejects an archive
+// media file (undecodable, oversized, or empty). The wrapped error names the file.
+var ErrArchiveMediaRejected = errors.New("archive media file was rejected")
+
+// ErrArchiveTooManyMedia is returned when an archive carries more unique images
+// or sounds than the per-quiz media ceiling allows.
+var ErrArchiveTooManyMedia = errors.New("archive exceeds the per-quiz media limit")
+
 // ErrArchiveInvalidQuiz is returned by [ImportQuizArchive] when an archive's
 // manifest decodes but the quiz it describes is invalid: either structurally
 // (neither or both of questions / rounds, a round with no title, no questions at all)
@@ -77,23 +85,28 @@ type MediaImporter interface {
 
 // ArchiveImportLimits bundles the size guards the importer applies to an
 // untrusted archive: the per-entry image / audio uncompressed caps (reusing the
-// media upload caps) and the total uncompressed budget across all entries.
+// media upload caps), the total uncompressed budget across all entries, and the
+// per-quiz media ceiling.
 type ArchiveImportLimits struct {
-	imageMaxBytes int64
-	audioMaxBytes int64
-	totalMaxBytes int64
+	imageMaxBytes  int64
+	audioMaxBytes  int64
+	totalMaxBytes  int64
+	quizMediaLimit int
 }
 
 // NewArchiveImportLimits builds the zip-bomb size guards for the archive
 // importer from the configured caps (#1113): the per-entry image and audio
 // uncompressed caps reuse the media upload caps, and totalMaxBytes bounds the
-// summed uncompressed size of every entry. A zero in any field disables that
-// guard. Exported so the server wiring can build it from config.
-func NewArchiveImportLimits(imageMaxBytes, audioMaxBytes, totalMaxBytes int64) ArchiveImportLimits {
+// summed uncompressed size of every entry. quizMediaLimit is the per-quiz,
+// per-type media ceiling the upload routes enforce (MEDIA_QUIZ_IMAGE_LIMIT). A
+// zero in any field disables that guard. Exported so the server wiring can build
+// it from config.
+func NewArchiveImportLimits(imageMaxBytes, audioMaxBytes, totalMaxBytes int64, quizMediaLimit int) ArchiveImportLimits {
 	return ArchiveImportLimits{
-		imageMaxBytes: imageMaxBytes,
-		audioMaxBytes: audioMaxBytes,
-		totalMaxBytes: totalMaxBytes,
+		imageMaxBytes:  imageMaxBytes,
+		audioMaxBytes:  audioMaxBytes,
+		totalMaxBytes:  totalMaxBytes,
+		quizMediaLimit: quizMediaLimit,
 	}
 }
 
@@ -136,6 +149,10 @@ func ImportQuizArchive(
 	// rejected before anything is persisted.
 	if problems := (&quizForm{quiz: built.quiz}).Valid(ctx); len(problems) > 0 {
 		return nil, fmt.Errorf("%w: %v", ErrArchiveInvalidQuiz, problems)
+	}
+
+	if err = checkArchiveMediaCount(built.plan, limits.quizMediaLimit); err != nil {
+		return nil, err
 	}
 
 	if err = importQuizWithMedia(ctx, logger, quizStore, mediaSvc, archive, built, creatorID); err != nil {
@@ -216,6 +233,12 @@ func HandleQuizImportArchive(
 		// before anything is persisted.
 		if problems := (&quizForm{quiz: built.quiz}).Valid(r.Context()); len(problems) > 0 {
 			renderErr(w, r, http.StatusBadRequest, fmt.Sprintf("the archive is not a valid quiz: %v", problems))
+
+			return
+		}
+
+		if err = checkArchiveMediaCount(built.plan, limits.quizMediaLimit); err != nil {
+			renderErr(w, r, http.StatusBadRequest, fmt.Sprintf("invalid archive: %v", err))
 
 			return
 		}

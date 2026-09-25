@@ -363,6 +363,7 @@ func seedDemoQuiz(
 ) (*quiz.Quiz, error) {
 	limits := admin.NewArchiveImportLimits(
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, config.MediaImportMaxBytesDefault,
+		config.MediaQuizImageLimitDefault,
 	)
 	qz, err := admin.ImportQuizArchive(ctx, logger, stores.Quizzes, mediaSvc, archive, seededAdminID, limits)
 	if err != nil {
