@@ -106,6 +106,23 @@ func TestCheck_ZeroIdleConns_RebuildKeepsChildRows(t *testing.T) {
 	}
 }
 
+// openMigrated opens and migrates the DB at dbURI, closing it when t ends.
+func openMigrated(t *testing.T, dbURI string) *sql.DB {
+	t.Helper()
+
+	conn, err := database.OpenMigrated(t.Context(), config.DBDriverDefault, dbURI, 1, 1, 0)
+	if err != nil {
+		t.Fatalf("OpenMigrated err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+
+	return conn
+}
+
 // seedOldPassword is the value seedPlayer hashes into the row before each
 // ResetPassword test runs. Tests assert the hash changed (or didn't) by
 // re-checking this exact string against the on-disk hash afterwards, so the
@@ -123,18 +140,7 @@ func seedPlayer(t *testing.T, dbURI, displayName string) string {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
 
-	conn, err := sql.Open("sqlite", dbURI)
-	if err != nil {
-		t.Fatalf("sql.Open err = %v, want nil", err)
-	}
-	t.Cleanup(func() {
-		if cerr := conn.Close(); cerr != nil {
-			t.Errorf("conn.Close err = %v, want nil", cerr)
-		}
-	})
-	if err := database.Migrate(conn); err != nil {
-		t.Fatalf("Migrate err = %v, want nil", err)
-	}
+	conn := openMigrated(t, dbURI)
 
 	players := store.NewPlayerStore(conn, slog.Default())
 	if _, err := players.CreatePlayer(
@@ -668,18 +674,7 @@ func TestSeedDemo_EmptyArchiveDir_ReturnsError(t *testing.T) {
 func openMigratedPlayerStore(t *testing.T, dbURI string) *store.PlayerStore {
 	t.Helper()
 
-	conn, err := sql.Open("sqlite", dbURI)
-	if err != nil {
-		t.Fatalf("sql.Open err = %v, want nil", err)
-	}
-	t.Cleanup(func() {
-		if cerr := conn.Close(); cerr != nil {
-			t.Errorf("conn.Close err = %v, want nil", cerr)
-		}
-	})
-	if err := database.Migrate(conn); err != nil {
-		t.Fatalf("Migrate err = %v, want nil", err)
-	}
+	conn := openMigrated(t, dbURI)
 
 	return store.NewPlayerStore(conn, slog.Default())
 }
@@ -854,18 +849,7 @@ func TestBootstrapInitialAdmin_EmptyEnv_NoOp(t *testing.T) {
 func seedNonAdminWithEmail(t *testing.T, dbURI, displayName, email string) {
 	t.Helper()
 
-	conn, err := sql.Open("sqlite", dbURI)
-	if err != nil {
-		t.Fatalf("sql.Open err = %v, want nil", err)
-	}
-	t.Cleanup(func() {
-		if cerr := conn.Close(); cerr != nil {
-			t.Errorf("conn.Close err = %v, want nil", cerr)
-		}
-	})
-	if err := database.Migrate(conn); err != nil {
-		t.Fatalf("Migrate err = %v, want nil", err)
-	}
+	conn := openMigrated(t, dbURI)
 	if _, err := conn.ExecContext(
 		t.Context(),
 		"INSERT INTO players (display_name, email, role) VALUES (?, ?, ?)",

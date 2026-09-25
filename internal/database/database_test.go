@@ -244,6 +244,49 @@ func TestOpen_AcceptedForeignKeysValuesEnableEnforcement(t *testing.T) {
 	}
 }
 
+func TestMigrate_RejectsMultiConnectionPool(t *testing.T) {
+	t.Parallel()
+
+	for _, maxOpen := range []int{0, 2} {
+		conn, err := database.Open(t.Context(), "sqlite", dbtest.UnmigratedDSN(t), maxOpen, 1, 0)
+		if err != nil {
+			t.Fatalf("Open err = %v, want nil", err)
+		}
+		t.Cleanup(func() {
+			if cerr := conn.Close(); cerr != nil {
+				t.Errorf("conn.Close err = %v", cerr)
+			}
+		})
+
+		if got, want := database.Migrate(conn), database.ErrMigratePoolNotSingleConn; !errors.Is(got, want) {
+			t.Errorf("Migrate with max open %d err = %v, want %v", maxOpen, got, want)
+		}
+	}
+}
+
+func TestOpenMigrated_AppliesPoolLimitsAfterMigrating(t *testing.T) {
+	t.Parallel()
+
+	database.SetupGoose()
+	conn, err := database.OpenMigrated(t.Context(), "sqlite", dbtest.UnmigratedDSN(t), 4, 2, time.Minute)
+	if err != nil {
+		t.Fatalf("OpenMigrated err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v", cerr)
+		}
+	})
+
+	if got, want := conn.Stats().MaxOpenConnections, 4; got != want {
+		t.Errorf("MaxOpenConnections = %d, want %d", got, want)
+	}
+	var quizzes int
+	if err = conn.QueryRowContext(t.Context(), "SELECT count(*) FROM quizzes").Scan(&quizzes); err != nil {
+		t.Errorf("query migrated quizzes table err = %v, want nil", err)
+	}
+}
+
 // TestExecTx_PanicReleasesTransaction pins that a panicking fn does not leave
 // its transaction holding the pool's only connection.
 func TestExecTx_PanicReleasesTransaction(t *testing.T) {
