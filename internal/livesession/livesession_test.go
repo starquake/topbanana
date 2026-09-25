@@ -739,6 +739,26 @@ func TestService_StartRejectsQuizlessRoom(t *testing.T) {
 	}
 }
 
+// TestService_SubmitAnswer_HostRejected pins #1336: the host is not on the
+// roster, so they cannot record a live answer.
+func TestService_SubmitAnswer_HostRejected(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+
+	err := h.service.SubmitAnswer(ctx, h.code, 1, optRight, *q.QuestionStartedAt)
+	if got, want := err, ErrNotParticipant; !errors.Is(got, want) {
+		t.Errorf("host SubmitAnswer err = %v, want %v", got, want)
+	}
+	if _, ok := h.answerScore(t, q.ID, *q.CurrentQuestionID, 1); ok {
+		t.Error("host pick recorded, want none")
+	}
+}
+
 // TestService_SubmitAnswer_RejectedWhenCloseWins pins #1334: a pick that passed
 // the snapshot checks but lands after the runner closed the question is
 // rejected as closed rather than stored unscored.
