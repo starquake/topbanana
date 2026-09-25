@@ -471,7 +471,7 @@ type PlayerStore interface {
 		displayName, email, passwordHash, requestedRole string,
 	) (*Player, error)
 	// SetPlayerPasswordHash overwrites the password_hash on the row identified
-	// by email. Used by the operator-only -reset-password tool to rotate a
+	// by email and revokes its live reset and email-change links. Used by the operator-only -reset-password tool to rotate a
 	// forgotten admin password; matching by email lines the operator's reset
 	// target up with the post-#446 login credential. Returns ErrPlayerNotFound
 	// when no row matches.

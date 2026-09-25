@@ -963,6 +963,16 @@ func TestPlayerStore_SetPlayerPasswordHash_BumpsSessionVersion(t *testing.T) {
 	}
 }
 
+func TestPlayerStore_SetPlayerPasswordHash_UnknownEmail(t *testing.T) {
+	t.Parallel()
+	ps := NewPlayerStore(dbtest.Open(t), slog.Default())
+
+	err := ps.SetPlayerPasswordHash(t.Context(), "nobody@example.test", "h")
+	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("SetPlayerPasswordHash err = %v, want %v", got, want)
+	}
+}
+
 // TestPlayerStore_RenamePlayer_MarksClaimed pins that the player's own
 // rename (profile self-claim path) marks the name as player-claimed.
 func TestPlayerStore_RenamePlayer_MarksClaimed(t *testing.T) {
@@ -2111,6 +2121,16 @@ func TestPlayerStore_CredentialChangesRevokeLiveTokens(t *testing.T) {
 				}
 				if _, err := ps.ConsumeResetToken(t.Context(), auth.HashResetToken(raw), "new-hash"); err != nil {
 					t.Fatalf("ConsumeResetToken err = %v, want nil", err)
+				}
+			},
+			wantRegisterLive: true,
+		},
+		{
+			name: "operator reset password",
+			change: func(t *testing.T, ps *PlayerStore, _ int64) {
+				t.Helper()
+				if err := ps.SetPlayerPasswordHash(t.Context(), "tokens@example.test", "new-hash"); err != nil {
+					t.Fatalf("SetPlayerPasswordHash err = %v, want nil", err)
 				}
 			},
 			wantRegisterLive: true,

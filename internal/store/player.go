@@ -786,22 +786,31 @@ func revokeTokensAfterPasswordChange(ctx context.Context, q *db.Queries, playerI
 	return nil
 }
 
-// SetPlayerPasswordHash overwrites the password_hash on the row identified
-// by email. Returns auth.ErrPlayerNotFound when no row matches; intended
-// for the cmd/server -reset-password operator tool, not the public auth flow.
+// SetPlayerPasswordHash atomically overwrites the password_hash on the row
+// identified by email and revokes its live reset and email-change links.
+// Returns auth.ErrPlayerNotFound when no row matches; intended for the
+// cmd/server -reset-password operator tool, not the public auth flow.
 // The lookup matches how the post-#446 login flow finds the row, so the
 // reset target equals what the player types into /login.
 func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, email, passwordHash string) error {
 	cleaned := strings.ToLower(strings.TrimSpace(email))
-	rows, err := s.q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
-		Email:        sql.NullString{String: cleaned, Valid: cleaned != ""},
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		id, err := q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+			Email:        sql.NullString{String: cleaned, Valid: cleaned != ""},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return auth.ErrPlayerNotFound
+			}
+
+			return fmt.Errorf("failed to set password hash: %w", err)
+		}
+
+		return revokeTokensAfterPasswordChange(ctx, q, id)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to set password hash: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return fmt.Errorf("set player password hash: %w", err)
 	}
 
 	return nil
