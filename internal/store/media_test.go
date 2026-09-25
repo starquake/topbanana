@@ -495,6 +495,10 @@ func TestMediaStore_MarkMediaReadyWithinLimit(t *testing.T) {
 		t.Errorf("ready image count = %d, want %d", got, want)
 	}
 
+	if err = s.MarkMediaReadyWithinLimit(t.Context(), ids[0], limit); err != nil {
+		t.Errorf("re-flipping a ready row at the cap err = %v, want nil", err)
+	}
+
 	audio, err := s.CreateMedia(t.Context(), newAudioMediaRow(quizID))
 	if err != nil {
 		t.Fatalf("CreateMedia(audio) err = %v, want nil", err)

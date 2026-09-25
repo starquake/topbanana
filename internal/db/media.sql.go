@@ -294,6 +294,7 @@ WHERE media.id = ?1
     WHERE other.quiz_id = media.quiz_id
       AND other.type = media.type
       AND other.ready = 1
+      AND other.id <> media.id
   ) < CAST(?2 AS INTEGER)
 `
 
@@ -302,11 +303,8 @@ type MarkMediaReadyWithinLimitParams struct {
 	MaxReady int64
 }
 
-// Flips a media row ready like MarkMediaReady, but only while its quiz holds
-// fewer than max_ready ready rows of the same type. One statement, so the count
-// and the flip are atomic: concurrent uploads that each passed the up-front cap
-// check cannot all land (#1355). Zero rows affected means the row is missing or
-// the cap is reached; the caller tells the two apart.
+// MarkMediaReady that flips only while the quiz holds fewer than max_ready other
+// ready rows of the type; one statement, so concurrent uploads cannot overshoot.
 func (q *Queries) MarkMediaReadyWithinLimit(ctx context.Context, arg MarkMediaReadyWithinLimitParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, markMediaReadyWithinLimit, arg.ID, arg.MaxReady)
 }
