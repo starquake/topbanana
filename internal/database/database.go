@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ import (
 const sqliteDriverName = "sqlite"
 
 // ErrMissingSQLitePragma is returned by [Open] when a sqlite DB_URI is missing
-// one of the pragmas the application relies on for correct behaviour. SQLite
+// one of the settings the application relies on for correct behaviour. SQLite
 // pragmas are per-connection, so they have to ride in the DSN (which the driver
 // applies to every pooled connection); a one-off PRAGMA exec on the pool would
 // only configure a single connection. Validating the DSN at startup turns a
@@ -30,14 +31,34 @@ const sqliteDriverName = "sqlite"
 // failure (#790).
 var ErrMissingSQLitePragma = errors.New("DB_URI is missing a required SQLite pragma")
 
-// requiredSQLitePragmas names the pragmas a sqlite DB_URI must carry. These are
-// matched against the prefix of each _pragma DSN value (e.g. the value
-// "foreign_keys(1)" satisfies "foreign_keys"), mirroring how the driver itself
-// reads them. foreign_keys keeps referential integrity enforced; busy_timeout
-// stops concurrent writers from failing immediately with SQLITE_BUSY.
+// ErrDisabledSQLitePragma is returned by [Open] when a sqlite DB_URI carries a
+// required setting with a value that switches it off, such as foreign_keys(0).
+var ErrDisabledSQLitePragma = errors.New("DB_URI disables a required SQLite pragma")
+
+// requiredSQLitePragmas lists the pragmas a sqlite DB_URI must enable, with the
+// driver's shorthand DSN keys for each.
 //
 //nolint:gochecknoglobals // an immutable lookup table, not mutable package state.
-var requiredSQLitePragmas = []string{"foreign_keys", "busy_timeout"}
+var requiredSQLitePragmas = []struct {
+	name      string
+	shorthand []string
+	enabled   func(value string) bool
+}{
+	{name: "foreign_keys", shorthand: []string{"_foreign_keys", "_fk"}, enabled: func(v string) bool {
+		switch v {
+		case "on", "true", "yes":
+			return true
+		}
+		n, err := strconv.Atoi(v)
+
+		return err == nil && n != 0
+	}},
+	{name: "busy_timeout", shorthand: []string{"_busy_timeout", "_timeout"}, enabled: func(v string) bool {
+		n, err := strconv.Atoi(v)
+
+		return err == nil && n > 0
+	}},
+}
 
 // migrateMu serialises Migrate calls. goose's package-level state (the
 // migration registry built lazily from BaseFS) is not safe under concurrent
@@ -108,13 +129,9 @@ func Open(
 	return conn, nil
 }
 
-// validateSQLitePragmas fails fast when a sqlite DSN omits a pragma in
-// [requiredSQLitePragmas]. The query string after the first '?' is parsed the
-// same way the driver does (url.ParseQuery, _pragma values prefix-matched
-// case-insensitively), so a DSN that satisfies this check carries exactly the
-// pragmas the driver will apply to every connection. Augmenting the operator's
-// DSN instead would be surprising; a clear error naming the missing pragma lets
-// them fix their own configuration (#790).
+// validateSQLitePragmas fails fast when a sqlite DSN omits or disables a
+// pragma in [requiredSQLitePragmas] or lacks _txlock=immediate, without which a
+// read-then-write transaction fails with SQLITE_BUSY instead of waiting (#790).
 func validateSQLitePragmas(uri string) error {
 	rawQuery := ""
 	if _, after, found := strings.Cut(uri, "?"); found {
@@ -125,28 +142,59 @@ func validateSQLitePragmas(uri string) error {
 		return fmt.Errorf("parsing DB_URI query string: %w", err)
 	}
 
-	pragmas := values["_pragma"]
+	pragmas := parsePragmas(values["_pragma"])
 	for _, required := range requiredSQLitePragmas {
-		if !hasPragma(pragmas, required) {
-			return fmt.Errorf("%w: %q (add _pragma=%s(...) to DB_URI)", ErrMissingSQLitePragma, required, required)
+		settings := pragmas[required.name]
+		for _, key := range required.shorthand {
+			for _, v := range values[key] {
+				settings = append(settings, strings.ToLower(strings.TrimSpace(v)))
+			}
 		}
+		if len(settings) == 0 {
+			return fmt.Errorf(
+				"%w: %q (add _pragma=%s(...) to DB_URI)",
+				ErrMissingSQLitePragma,
+				required.name,
+				required.name,
+			)
+		}
+		for _, v := range settings {
+			if !required.enabled(v) {
+				return fmt.Errorf("%w: %s(%s)", ErrDisabledSQLitePragma, required.name, v)
+			}
+		}
+	}
+
+	switch txlock := values.Get("_txlock"); {
+	case txlock == "":
+		return fmt.Errorf("%w: _txlock (add _txlock=immediate to DB_URI)", ErrMissingSQLitePragma)
+	case !strings.EqualFold(txlock, "immediate"):
+		return fmt.Errorf("%w: _txlock=%s, want immediate", ErrDisabledSQLitePragma, txlock)
 	}
 
 	return nil
 }
 
-// hasPragma reports whether any _pragma DSN value names the given pragma,
-// matching on the prefix before the '(' so "foreign_keys(1)" satisfies
-// "foreign_keys". Comparison is case-insensitive and ignores surrounding
-// whitespace, mirroring the driver's own pragma handling.
-func hasPragma(pragmas []string, name string) bool {
-	for _, p := range pragmas {
-		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(p)), name) {
-			return true
+// parsePragmas maps each lower-cased pragma name in the _pragma DSN values to
+// the values it is set to, accepting both the name(value) and name=value forms
+// the driver passes through to SQLite.
+func parsePragmas(raw []string) map[string][]string {
+	pragmas := make(map[string][]string, len(raw))
+	for _, p := range raw {
+		p = strings.ToLower(strings.TrimSpace(p))
+		i := strings.IndexAny(p, "(=")
+		if i < 0 {
+			pragmas[p] = append(pragmas[p], "")
+
+			continue
 		}
+		name := strings.TrimSpace(p[:i])
+		value := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(p[i+1:]), ")"))
+		value = strings.Trim(value, `'"`)
+		pragmas[name] = append(pragmas[name], value)
 	}
 
-	return false
+	return pragmas
 }
 
 // Migrate runs database migrations against conn, which must be held to one
