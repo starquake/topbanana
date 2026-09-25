@@ -290,11 +290,12 @@ func TestProcess_Concurrent(t *testing.T) {
 // report the declared dimensions - the basis of a decode bomb: a tiny file that
 // claims an enormous size.
 func pngHeader(w, h uint32) []byte {
-	return pngHeaderWith(w, h, 8, 2)
+	return pngHeaderWith(w, h, 8, 2, 0)
 }
 
-// pngHeaderWith is pngHeader with an explicit bit depth and colour type.
-func pngHeaderWith(w, h uint32, depth, colourType byte) []byte {
+// pngHeaderWith is pngHeader with an explicit bit depth, colour type, and
+// interlace method.
+func pngHeaderWith(w, h uint32, depth, colourType, interlace byte) []byte {
 	var b bytes.Buffer
 	b.WriteString("\x89PNG\r\n\x1a\n")
 
@@ -303,6 +304,7 @@ func pngHeaderWith(w, h uint32, depth, colourType byte) []byte {
 	binary.BigEndian.PutUint32(ihdr[4:], h)
 	ihdr[8] = depth
 	ihdr[9] = colourType
+	ihdr[12] = interlace
 
 	_ = binary.Write(&b, binary.BigEndian, uint32(len(ihdr)))
 	b.WriteString("IHDR")
@@ -336,9 +338,10 @@ func TestProcess_RejectsDecodeBomb(t *testing.T) {
 
 // TestProcess_RejectsOversizedDecodedBuffer pins the decoded-size guard: a
 // 16-bit png within MaxPixels still decodes at 8 bytes per pixel (gray too, as
-// a tRNS chunk would promote it), so its header alone is enough to reject it,
-// while the same area at 8 bits passes the guard (and then fails to decode,
-// having no pixel data).
+// a tRNS chunk would promote it), and an interlaced png holds its Adam7 pass
+// images on top of the full one, so the header alone is enough to reject
+// either, while the same area at 8 bits non-interlaced passes the guard (and
+// then fails to decode, having no pixel data).
 func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 	t.Parallel()
 
@@ -348,20 +351,22 @@ func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		depth, colourType byte
-		want              error
+		depth, colourType, interlace byte
+		want                         error
 	}{
-		"16-bit rgba": {16, 6, ErrImageTooLarge},
-		"16-bit rgb":  {16, 2, ErrImageTooLarge},
-		"8-bit rgba":  {8, 6, ErrUnsupportedImage},
-		"16-bit gray": {16, 0, ErrImageTooLarge},
-		"8-bit gray":  {8, 0, ErrUnsupportedImage},
+		"16-bit rgba":           {16, 6, 0, ErrImageTooLarge},
+		"16-bit rgb":            {16, 2, 0, ErrImageTooLarge},
+		"8-bit rgba":            {8, 6, 0, ErrUnsupportedImage},
+		"16-bit gray":           {16, 0, 0, ErrImageTooLarge},
+		"8-bit gray":            {8, 0, 0, ErrUnsupportedImage},
+		"8-bit rgba interlaced": {8, 6, 1, ErrImageTooLarge},
+		"8-bit gray interlaced": {8, 0, 1, ErrImageTooLarge},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			raw := pngHeaderWith(w, h, tc.depth, tc.colourType)
+			raw := pngHeaderWith(w, h, tc.depth, tc.colourType, tc.interlace)
 			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 			if got, want := err, tc.want; !errors.Is(got, want) {
 				t.Errorf("Process(%s png header) err = %v, want %v", name, got, want)
