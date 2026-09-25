@@ -54,6 +54,23 @@ func (q *Queries) AdminRenamePlayer(ctx context.Context, arg AdminRenamePlayerPa
 	return i, err
 }
 
+const bumpPlayerSessionVersion = `-- name: BumpPlayerSessionVersion :one
+UPDATE players
+SET session_version = session_version + 1
+WHERE id = ?1
+RETURNING session_version
+`
+
+// Increments session_version so every cookie minted before the bump stops
+// validating ("sign out everywhere"). Returns the new version so the caller
+// can re-issue the current cookie.
+func (q *Queries) BumpPlayerSessionVersion(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, bumpPlayerSessionVersion, id)
+	var session_version int64
+	err := row.Scan(&session_version)
+	return session_version, err
+}
+
 const claimPlayer = `-- name: ClaimPlayer :one
 UPDATE players
 SET display_name = ?1,

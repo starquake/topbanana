@@ -457,6 +457,10 @@ func addProfileRoutes(
 			csrfMW(requireAuthn(profile.HandleProfileDisplayName(logger, csrfMgr, stores.Players))),
 		),
 	)
+	mux.Handle(
+		"POST /profile/sign-out-everywhere",
+		csrfMW(requireAuthn(profile.HandleSignOutEverywhere(logger, csrfMgr, stores.SessionRevoker, sessions))),
+	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
 	mux.Handle(
 		"POST /profile/password",

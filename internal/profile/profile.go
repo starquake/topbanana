@@ -3,6 +3,7 @@
 //   - GET/POST /profile (display name editor, #410)
 //   - GET/POST /profile/email (email change, #111)
 //   - GET/POST /profile/password (password change, #112)
+//   - POST /profile/sign-out-everywhere (revoke every session, #1360)
 //
 // Every route is mounted behind auth.RequireAuthenticated, so the handlers can
 // assume a *Player is on the request context.
@@ -40,7 +41,8 @@ const logPlayerIDKey = "player_id"
 // <title>. DisplayName is the value pre-filled into the input. Message
 // surfaces server-side validation errors (taken display name, empty
 // input, etc.). Saved is true on a successful POST so the template
-// can show a small confirmation banner. Back* drive the form's
+// can show a small confirmation banner; SignedOutEverywhere does the same
+// for the sign-out-everywhere POST. Back* drive the form's
 // return link so a visitor arriving from the admin chrome lands back
 // on the dashboard instead of the public home page.
 type pageData struct {
@@ -51,6 +53,8 @@ type pageData struct {
 	BackHref    string
 	BackLabel   string
 	Next        string
+
+	SignedOutEverywhere bool
 }
 
 // profileBack resolves the page's return link from the ?next= query
