@@ -153,11 +153,11 @@ WHERE players.id = sqlc.arg('id')
   AND players.email IS NULL
 RETURNING *;
 
--- name: SetPlayerPasswordHash :execrows
+-- name: SetPlayerPasswordHash :one
 -- Used by the cmd/server -reset-password operator tool to rotate a single
 -- player's password without disturbing display_name / role / email. Returns the
--- number of affected rows so the caller can map "no rows" to an "email
--- not found" error. The lookup is by email (the post-#446 login credential)
+-- row id so the caller can revoke its live links, and sql.ErrNoRows when no
+-- email matches. The lookup is by email (the post-#446 login credential)
 -- so the operator's reset target matches what the player types into /login.
 --
 -- display_name_claimed is set to 1 alongside the password because once an
@@ -176,7 +176,8 @@ UPDATE players
 SET password_hash    = sqlc.arg('password_hash'),
     display_name_claimed = 1,
     session_version = session_version + 1
-WHERE email = sqlc.arg('email');
+WHERE email = sqlc.arg('email')
+RETURNING id;
 
 -- name: GetPlayerByEmail :one
 -- Look up a player by email so the Google OAuth callback can link a

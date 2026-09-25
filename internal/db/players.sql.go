@@ -1110,12 +1110,13 @@ func (q *Queries) SetPlayerApprovedNow(ctx context.Context, id int64) (int64, er
 	return result.RowsAffected()
 }
 
-const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
+const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :one
 UPDATE players
 SET password_hash    = ?1,
     display_name_claimed = 1,
     session_version = session_version + 1
 WHERE email = ?2
+RETURNING id
 `
 
 type SetPlayerPasswordHashParams struct {
@@ -1125,8 +1126,8 @@ type SetPlayerPasswordHashParams struct {
 
 // Used by the cmd/server -reset-password operator tool to rotate a single
 // player's password without disturbing display_name / role / email. Returns the
-// number of affected rows so the caller can map "no rows" to an "email
-// not found" error. The lookup is by email (the post-#446 login credential)
+// row id so the caller can revoke its live links, and sql.ErrNoRows when no
+// email matches. The lookup is by email (the post-#446 login credential)
 // so the operator's reset target matches what the player types into /login.
 //
 // display_name_claimed is set to 1 alongside the password because once an
@@ -1142,11 +1143,10 @@ type SetPlayerPasswordHashParams struct {
 // is almost always a security action (compromised or lost account), so
 // leaving old sessions alive on the previous credential would defeat it.
 func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	row := q.db.QueryRowContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setPlayerRole = `-- name: SetPlayerRole :execrows
