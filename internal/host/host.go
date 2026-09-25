@@ -106,10 +106,9 @@ func NewHandlers(
 
 // BigScreen handles GET /host/{code}: it renders the host big screen for a
 // session the caller hosts. The route is host-gated; this handler additionally
-// enforces that the caller may view the session (GetSessionState returns
-// ErrNotParticipant for a host who does not own it), so one host cannot open
-// another host's room by guessing a code. An unknown code or a foreign
-// session both 404 so the code stays opaque.
+// enforces that the caller is this session's host, so one host cannot open
+// another host's room by guessing a code or by joining it as a player. An
+// unknown code or a foreign session both 404 so the code stays opaque.
 func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -131,6 +130,11 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.ErrorContext(ctx, "error loading host big-screen state", slog.Any("err", err))
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return
+	}
+	if state.Session.HostPlayerID != player.ID {
+		http.NotFound(w, r)
 
 		return
 	}
