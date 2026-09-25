@@ -53,12 +53,11 @@ jobs:
   build:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
-    permissions:
-      # go-test-coverage commits the badge to the badges branch on main.
-      contents: write
 
     steps:
     - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Cache build tools
       uses: ./.github/actions/cache-tools
@@ -135,12 +134,13 @@ jobs:
         # coverage rises (#667).
         threshold-total: 80
 
-        ## when token is not specified (value '') this feature is turned off
-        ## in this example badge is created and committed only for main branch
-        git-token: ${{ github.ref_name == 'main' && secrets.GITHUB_TOKEN || '' }}
-        ## name of branch where badges are stored
-        ## ideally this should be orphan branch (see below how to create this branch)
-        git-branch: badges
+    - name: Upload coverage profile
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-profile
+        path: build/coverage/coverage.out
+        retention-days: 1
 
     # Smoke against a seeded fixture DB (#349): test-coverage's fresh
     # DB doesn't exercise migrations against populated rows, so a
@@ -158,6 +158,33 @@ jobs:
         make seed-dev
         make seed-dev-demo
         make smoke
+
+  # The only job with a write token, so dependency code run by build (npm ci,
+  # go test) never sees one. Not a required check.
+  coverage-badge:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Download coverage profile
+      uses: actions/download-artifact@v7
+      with:
+        name: coverage-profile
+        path: build/coverage
+
+    - name: Commit coverage badge
+      uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+      with:
+        config: .testcoverage.yml
+        git-token: ${{ secrets.GITHUB_TOKEN }}
+        git-branch: badges
 
   e2e:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
