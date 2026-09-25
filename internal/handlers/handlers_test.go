@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -62,6 +63,20 @@ func TestIDFromString(t *testing.T) {
 
 func TestParseIDFromPath(t *testing.T) {
 	t.Parallel()
+
+	t.Run("malformed id logs below warn", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
+			ParseIDFromPath(w, r, warnLogger(&buf), "id")
+		})
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/items/abc", nil)
+		mux.ServeHTTP(httptest.NewRecorder(), req)
+		if got := buf.String(); got != "" {
+			t.Errorf("log output = %q, want none at WARN or above", got)
+		}
+	})
 
 	t.Run("valid id", func(t *testing.T) {
 		t.Parallel()
@@ -216,8 +231,28 @@ func TestSlugFromSlugID(t *testing.T) {
 	}
 }
 
+// warnLogger returns a logger that records only WARN and above into buf, so a
+// test can assert that malformed client input is not logged as an error (#369).
+func warnLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
+
 func TestParseIDFromSlugPath(t *testing.T) {
 	t.Parallel()
+
+	t.Run("malformed slug id logs below warn", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /quizzes/{slugID}", func(w http.ResponseWriter, r *http.Request) {
+			ParseIDFromSlugPath(w, r, warnLogger(&buf), "slugID")
+		})
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/quizzes/no-numbers", nil)
+		mux.ServeHTTP(httptest.NewRecorder(), req)
+		if got := buf.String(); got != "" {
+			t.Errorf("log output = %q, want none at WARN or above", got)
+		}
+	})
 
 	t.Run("valid slug id", func(t *testing.T) {
 		t.Parallel()
