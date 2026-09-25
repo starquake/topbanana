@@ -64,7 +64,7 @@ type Store interface {
 	GetQuizVisibility(ctx context.Context, id int64) (string, error)
 	// CreateQuiz creates a quiz.
 	CreateQuiz(ctx context.Context, qz *Quiz) error
-	// UpdateQuiz updates a quiz.
+	// UpdateQuiz updates the quiz's own fields; it never touches qz.Questions.
 	UpdateQuiz(ctx context.Context, qz *Quiz) error
 	// SetQuizMode flips just the play mode of a quiz between ModeSolo and
 	// ModeLive without touching its questions (#830). Returns ErrInvalidMode

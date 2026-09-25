@@ -1102,7 +1102,7 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "failed to create question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1126,7 +1126,7 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "failed to create question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1166,83 +1166,55 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 func TestQuizStore_UpdateQuiz(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-
 	db := dbtest.Open(t)
-
-	quizStore := NewQuizStore(db, logger)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
 
 	originalQuiz := newTestQuizzes()[0]
-
-	// Create the original quiz
-	err := quizStore.CreateQuiz(t.Context(), originalQuiz)
+	if err := quizStore.CreateQuiz(t.Context(), originalQuiz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	want, err := quizStore.GetQuiz(t.Context(), originalQuiz.ID)
 	if err != nil {
-		t.Fatalf("failed to create quiz: %v", err)
+		t.Fatalf("GetQuiz err = %v, want nil", err)
 	}
 
+	// A stale snapshot: an edited first question and none of the others.
 	updatedQuiz := &quiz.Quiz{
-		ID:                   originalQuiz.ID,
-		Title:                originalQuiz.Title + " Updated",
-		Slug:                 originalQuiz.Slug + "-updated",
-		Description:          originalQuiz.Description + " Updated",
-		CreatedAt:            originalQuiz.CreatedAt,
-		UpdatedAt:            originalQuiz.UpdatedAt,
-		CreatedByPlayerID:    originalQuiz.CreatedByPlayerID,
-		CreatedByDisplayName: originalQuiz.CreatedByDisplayName,
-		TimeLimitSeconds:     originalQuiz.TimeLimitSeconds,
-		Visibility:           originalQuiz.Visibility,
-		Mode:                 originalQuiz.Mode,
-		Language:             originalQuiz.Language,
+		ID:                originalQuiz.ID,
+		Title:             originalQuiz.Title + " Updated",
+		Slug:              originalQuiz.Slug + "-updated",
+		Description:       originalQuiz.Description + " Updated",
+		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
+		TimeLimitSeconds:  originalQuiz.TimeLimitSeconds + 5,
+		Visibility:        quiz.VisibilityUnlisted,
+		Mode:              quiz.ModeLive,
+		Language:          quiz.LanguageNL,
 		Questions: []*quiz.Question{
-			{
-				ID:     originalQuiz.Questions[0].ID,
-				QuizID: originalQuiz.ID,
-				Text:   originalQuiz.Questions[0].Text + " Updated",
-				Options: []*quiz.Option{
-					{
-						ID:      originalQuiz.Questions[0].Options[1].ID,
-						Text:    originalQuiz.Questions[0].Options[1].Text + " Updated",
-						Correct: !originalQuiz.Questions[0].Options[1].Correct,
-					},
-					{
-						ID:      originalQuiz.Questions[0].Options[2].ID,
-						Text:    originalQuiz.Questions[0].Options[2].Text + " Updated",
-						Correct: !originalQuiz.Questions[0].Options[2].Correct,
-					},
-					{
-						Text: "Option Added",
-					},
-				},
-			},
+			{ID: originalQuiz.Questions[0].ID, Text: "stale edit"},
 		},
 	}
+	if err = quizStore.UpdateQuiz(t.Context(), updatedQuiz); err != nil {
+		t.Fatalf("UpdateQuiz err = %v, want nil", err)
+	}
 
-	// Update the quiz
-	err = quizStore.UpdateQuiz(t.Context(), updatedQuiz)
+	got, err := quizStore.GetQuiz(t.Context(), updatedQuiz.ID)
 	if err != nil {
-		t.Fatalf("failed to update quiz: %v", err)
+		t.Fatalf("GetQuiz err = %v, want nil", err)
 	}
 
-	// Get the updated quiz from the database for assertions
-	qz, err := quizStore.GetQuiz(t.Context(), updatedQuiz.ID)
-	if err != nil {
-		t.Fatalf("failed to get quiz by ID: %v", err)
-	}
-
-	if qz == updatedQuiz {
-		t.Fatalf("qz = %v, want different from updatedQuiz", qz)
-	}
-	if diff := cmp.Diff(qz, updatedQuiz,
+	want.Title = updatedQuiz.Title
+	want.Slug = updatedQuiz.Slug
+	want.Description = updatedQuiz.Description
+	want.TimeLimitSeconds = updatedQuiz.TimeLimitSeconds
+	want.Visibility = updatedQuiz.Visibility
+	want.Mode = updatedQuiz.Mode
+	want.Language = updatedQuiz.Language
+	if diff := cmp.Diff(got, want,
 		cmpopts.SortSlices(lessQuestions),
 		cmpopts.SortSlices(lessOptions),
 		cmpopts.EquateApproxTime(3*time.Second),
-		// UpdateQuiz assigns each question to the quiz's default group
-		// (#444); the expected literal builds fresh questions and cannot
-		// predict that id, so ignore RoundID here. The dedicated group
-		// tests pin the assignment.
-		cmpopts.IgnoreFields(quiz.Question{}, "RoundID")); diff != "" {
-		t.Errorf("quizzes diff (-got +want):\n%s", diff)
+	); diff != "" {
+		t.Errorf("quiz diff (-got +want):\n%s", diff)
 	}
 }
 
@@ -1728,50 +1700,6 @@ func TestQuizStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		}
 		if got, want := err, quiz.ErrUpdatingQuizNoRowsAffected; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("failed to handle questions", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-
-		db := dbtest.Open(t)
-
-		quizStore := NewQuizStore(db, logger)
-
-		originalQuiz := newTestQuizzes()[0]
-
-		err := quizStore.CreateQuiz(t.Context(), originalQuiz)
-		if err != nil {
-			t.Fatalf("failed to create questions: %v", err)
-		}
-
-		// Rename questions table to force an insert error
-		_, err = db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
-		if err != nil {
-			t.Fatalf("failed to rename table: %v", err)
-		}
-
-		updatedQuiz := &quiz.Quiz{
-			ID:          originalQuiz.ID,
-			Title:       "Quiz 1",
-			Slug:        "quiz-1",
-			Description: "Description",
-			Questions: []*quiz.Question{
-				{
-					Text: "Question 1 Updated",
-				},
-			},
-		}
-
-		err = quizStore.UpdateQuiz(t.Context(), updatedQuiz)
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(got, want) {
-			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
 }

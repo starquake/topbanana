@@ -713,36 +713,6 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 	return items, nil
 }
 
-const listQuestionIDsByQuizID = `-- name: ListQuestionIDsByQuizID :many
-SELECT id
-FROM questions
-WHERE quiz_id = ?
-ORDER BY position
-`
-
-func (q *Queries) ListQuestionIDsByQuizID(ctx context.Context, quizID int64) ([]int64, error) {
-	rows, err := q.db.QueryContext(ctx, listQuestionIDsByQuizID, quizID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listQuestionIDsByRoundID = `-- name: ListQuestionIDsByRoundID :many
 SELECT id
 FROM questions
@@ -1219,9 +1189,8 @@ type UpdateQuestionPositionParams struct {
 	ID       int64
 }
 
-// Position-only update. Used by the reorder flow (#16) to swap a pair
-// of questions atomically inside a transaction without rewriting the
-// text/image fields.
+// Position-only update. Used by the drag-and-drop reorder to renumber
+// questions inside a transaction without rewriting the text/image fields.
 func (q *Queries) UpdateQuestionPosition(ctx context.Context, arg UpdateQuestionPositionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updateQuestionPosition, arg.Position, arg.ID)
 }
