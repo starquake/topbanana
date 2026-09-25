@@ -229,7 +229,7 @@ func decodedPixelBytes(raw []byte, m color.Model, format string) int64 {
 	case format == "png" && m == color.Gray16Model:
 		return rgba64PixelBytes
 	case format == "jpeg" && jpegProgressive(raw):
-		// Progressive decode keeps an int32 coefficient per sample alongside the pixels.
+		// Progressive decode keeps an int32 coefficient per sample; a jpeg's pixel bytes equal its samples.
 		return perPixel + progressiveCoefficientBytes*perPixel
 	default:
 		return perPixel
