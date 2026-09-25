@@ -370,27 +370,22 @@ func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 	}
 }
 
-// jpegHeader builds a jpeg SOI, a JFIF APP0, and a start-of-frame segment
-// (marker sof) declaring w x h with three 1x1-sampled components, and no scan
-// data. image/jpeg's DecodeConfig returns at the frame only after a JFIF APP0.
-func jpegHeader(sof byte, w, h uint16) []byte {
-	return jpegHeaderGap(sof, w, h, nil)
+// jfifAPP0 is a minimal JFIF APP0 segment. image/jpeg's DecodeConfig returns
+// at the frame only after one.
+func jfifAPP0() []byte {
+	return seg(0xE0, []byte("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")...)
 }
 
-// jpegHeaderGap is jpegHeader with gap written between the APP0 and the frame.
-func jpegHeaderGap(sof byte, w, h uint16, gap []byte) []byte {
-	var b bytes.Buffer
-	b.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 16})
-	b.WriteString("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
-	b.Write(gap)
-	b.Write([]byte{0xFF, sof})
-	frame := []byte{8, 0, 0, 0, 0, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0}
-	binary.BigEndian.PutUint16(frame[1:], h)
-	binary.BigEndian.PutUint16(frame[3:], w)
-	_ = binary.Write(&b, binary.BigEndian, uint16(len(frame)+2))
-	b.Write(frame)
+// jpegFrame builds a start-of-frame segment (marker sof) declaring w x h with
+// one 1x1-sampled component per byte of ids.
+func jpegFrame(sof byte, w, h uint16, ids string) []byte {
+	frame := make([]byte, 0, 6+3*len(ids))
+	frame = append(frame, 8, byte(h>>8), byte(h), byte(w>>8), byte(w), byte(len(ids)))
+	for i := range len(ids) {
+		frame = append(frame, ids[i], 0x11, 0)
+	}
 
-	return b.Bytes()
+	return seg(sof, frame...)
 }
 
 // TestProcess_RejectsOversizedProgressiveJPEG pins that a progressive jpeg is
@@ -416,7 +411,44 @@ func TestProcess_RejectsOversizedProgressiveJPEG(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			raw := jpegHeaderGap(tc.sof, w, h, tc.gap)
+			raw := jpegStream(jfifAPP0(), tc.gap, jpegFrame(tc.sof, w, h, "\x01\x02\x03"))
+			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
+			if got, want := err, tc.want; !errors.Is(got, want) {
+				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
+			}
+		})
+	}
+}
+
+// TestProcess_RejectsOversizedConvertedJPEG pins that a 4-component (CMYK or
+// YCCK) jpeg is charged for its sample planes plus the converted output, as is
+// an RGB jpeg, while a YCbCr jpeg of the same area passes the guard.
+func TestProcess_RejectsOversizedConvertedJPEG(t *testing.T) {
+	t.Parallel()
+
+	const ycc, cmyk, rgb = "\x01\x02\x03", "\x01\x02\x03\x04", "RGB"
+	cases := map[string]struct {
+		sof  byte
+		side uint16
+		ids  string
+		want error
+	}{
+		"ycbcr":             {0xC0, 6000, ycc, ErrUnsupportedImage},
+		"cmyk":              {0xC0, 6000, cmyk, ErrImageTooLarge},
+		"rgb":               {0xC0, 6000, rgb, ErrImageTooLarge},
+		"progressive ycbcr": {0xC2, 3000, ycc, ErrUnsupportedImage},
+		"progressive cmyk":  {0xC2, 3000, cmyk, ErrImageTooLarge},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			frame := jpegFrame(tc.sof, tc.side, tc.side, tc.ids)
+			raw := jpegStream(jfifAPP0(), frame)
+			if tc.ids == rgb {
+				// image/jpeg reports RGB only without a JFIF APP0, reading on to the scan header.
+				raw = jpegStream(frame, seg(0xDA, 0))
+			}
 			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 			if got, want := err, tc.want; !errors.Is(got, want) {
 				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
