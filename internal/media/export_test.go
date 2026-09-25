@@ -44,3 +44,10 @@ func FillDecodeSlotsForTest() func() {
 		}
 	}
 }
+
+// ExportJPEGSegments re-exports the unexported jpeg marker walker for tests.
+var ExportJPEGSegments = jpegSegments
+
+// ExportJPEGProgressive re-exports the unexported progressive-frame check for
+// tests.
+var ExportJPEGProgressive = jpegProgressive
