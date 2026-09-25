@@ -327,12 +327,14 @@ WHERE id = ?;
 -- name: ListOptionsByQuestionID :many
 SELECT *
 FROM options
-WHERE question_id = ?;
+WHERE question_id = ?
+ORDER BY id;
 
 -- name: ListOptionIDsByQuestionID :many
 SELECT id
 FROM options
-WHERE question_id = ?;
+WHERE question_id = ?
+ORDER BY id;
 
 -- name: GetOption :one
 SELECT *
