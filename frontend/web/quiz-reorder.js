@@ -16,6 +16,7 @@
 // pre-move HTML and surfaces a small banner.
 
 import { onDomReady } from '@shared/domReady.js';
+import { isLoginRedirect, SESSION_EXPIRED_MESSAGE } from '@shared/loginRedirect.js';
 
 const QUESTIONS_LIST_ID = 'questions-list';
 
@@ -36,6 +37,10 @@ let instances = [];
 // failed POST actually snap the item back to where it was.
 let preDragHTML = '';
 
+// True while a reorder POST is pending, so a held arrow key cannot fire
+// overlapping saves whose late failure restores an older snapshot.
+let saving = false;
+
 function captureSnapshot() {
     const root = document.getElementById(QUESTIONS_LIST_ID);
     preDragHTML = root ? root.outerHTML : '';
@@ -43,6 +48,13 @@ function captureSnapshot() {
 
 function csrfToken(root) {
     return root.dataset.csrf || '';
+}
+
+// A drag dropped mid-save would race the pending POST, so dragging is off until it settles.
+function setDragDisabled(disabled) {
+    for (const inst of instances) {
+        inst.option('disabled', disabled);
+    }
 }
 
 function destroyInstances() {
@@ -68,26 +80,40 @@ function showError(root, message) {
 
 // postReorder sends the form-encoded body and, on a 2xx, replaces
 // #questions-list with the returned partial and re-initialises. On any
-// failure it restores the pre-drop snapshot. Either way Sortable is rebuilt
-// against the resulting DOM.
+// failure, including a redirect to the login page, it restores the pre-drop
+// snapshot. Either way Sortable is rebuilt against the resulting DOM.
 async function postReorder(url, body, snapshotHTML) {
+    if (saving) return;
+    saving = true;
+    setDragDisabled(true);
+    let message = 'Could not save the new order. Please try again.';
     try {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body,
         });
+        if (isLoginRedirect(response.url)) {
+            message = SESSION_EXPIRED_MESSAGE;
+            throw new Error('reorder failed: session expired');
+        }
         if (!response.ok) {
             throw new Error(`reorder failed: ${response.status}`);
         }
-        const html = await response.text();
-        replaceList(html);
+        const next = parseList(await response.text());
+        if (!next) {
+            throw new Error('reorder failed: response has no list');
+        }
+        replaceList(next);
     } catch {
         restoreSnapshot(snapshotHTML);
         const fresh = document.getElementById(QUESTIONS_LIST_ID);
         if (fresh) {
-            showError(fresh, 'Could not save the new order. Please try again.');
+            showError(fresh, message);
         }
+    } finally {
+        saving = false;
+        setDragDisabled(false);
     }
 }
 
@@ -117,14 +143,17 @@ function restoreFocus(root) {
     if (handle) handle.focus();
 }
 
-function replaceList(html) {
+function parseList(html) {
+    const template = document.createElement('template');
+    template.innerHTML = html.trim();
+
+    return template.content.querySelector(`#${QUESTIONS_LIST_ID}`);
+}
+
+function replaceList(next) {
     const current = document.getElementById(QUESTIONS_LIST_ID);
     if (!current) return;
     destroyInstances();
-    const template = document.createElement('template');
-    template.innerHTML = html.trim();
-    const next = template.content.querySelector(`#${QUESTIONS_LIST_ID}`);
-    if (!next) return;
     current.replaceWith(next);
     swapProcessed(next);
 }
@@ -248,6 +277,11 @@ function onHandleKeydown(evt) {
     const root = document.getElementById(QUESTIONS_LIST_ID);
     if (!root) return;
     const direction = evt.key === 'ArrowDown' ? 1 : -1;
+    if (saving) {
+        if (evt.target.closest('[data-round-handle], [data-question-handle]')) evt.preventDefault();
+
+        return;
+    }
     const roundHandle = evt.target.closest('[data-round-handle]');
     if (roundHandle) {
         evt.preventDefault();

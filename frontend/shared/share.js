@@ -37,14 +37,14 @@ const NETWORKS = [
     {
         key: 'whatsapp',
         label: 'WhatsApp',
-        bg: '#25D366',
+        bgClass: 'bg-[#25D366]',
         icon: ICON_WHATSAPP,
         href: ({ text, url }) => `https://wa.me/?text=${encodeURIComponent(joinTextAndURL(text, url))}`,
     },
     {
         key: 'telegram',
         label: 'Telegram',
-        bg: '#229ED9',
+        bgClass: 'bg-[#229ED9]',
         icon: ICON_TELEGRAM,
         href: ({ text, url }) =>
             `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`,
@@ -52,7 +52,7 @@ const NETWORKS = [
     {
         key: 'reddit',
         label: 'Reddit',
-        bg: '#FF4500',
+        bgClass: 'bg-[#FF4500]',
         icon: ICON_REDDIT,
         href: ({ text, url }) =>
             `https://reddit.com/submit?url=${encodeURIComponent(url)}&title=${encodeURIComponent(text)}`,
@@ -60,7 +60,7 @@ const NETWORKS = [
     {
         key: 'x',
         label: 'X',
-        bg: '#000000',
+        bgClass: 'bg-black',
         icon: ICON_X,
         href: ({ text, url }) =>
             `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
@@ -159,8 +159,7 @@ function networkButtonsHTML() {
            target="_blank" rel="noopener noreferrer"
            aria-label="Share on ${n.label}"
            class="group flex flex-col items-center gap-2 no-underline focus-visible:outline-none">
-            <span class="w-12 h-12 inline-flex items-center justify-center rounded-full text-white transition-transform group-hover:scale-110 group-focus-visible:scale-110 group-focus-visible:shadow-focus"
-                  style="background-color: ${n.bg};">
+            <span class="w-12 h-12 inline-flex items-center justify-center rounded-full text-white transition-transform group-hover:scale-110 group-focus-visible:scale-110 group-focus-visible:shadow-focus ${n.bgClass}">
                 <svg viewBox="0 0 24 24" class="w-6 h-6" fill="currentColor" aria-hidden="true"><path d="${n.icon}"/></svg>
             </span>
             <span class="text-[0.7rem] uppercase tracking-[0.1em] text-text-dim group-hover:text-text">${n.label}</span>

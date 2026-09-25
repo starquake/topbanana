@@ -20,6 +20,9 @@
 // alpine:init event.
 
 import { runAnim } from '@shared/anim.js';
+import { createCoalescedRead } from '@shared/coalescedRead.js';
+import { createReconnectBackoff } from '@shared/reconnectBackoff.js';
+import { isLoginRedirect, SESSION_EXPIRED_MESSAGE } from '@shared/loginRedirect.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
@@ -37,11 +40,6 @@ import {
 // The big screen keeps refreshing off every SSE tick underneath; the banner just tells
 // the host why the screen looks frozen. Cleared on the next good read.
 const STATE_FAILURE_LIMIT = 3;
-
-// EventSource gives up for good on a fatal non-200, so the big screen (often an
-// unattended display) re-subscribes itself on a capped backoff (#1179).
-const RECONNECT_BASE_DELAY = 1000;
-const RECONNECT_MAX_DELAY = 30000;
 
 function hostBigScreen(joinCode, hasQuiz) {
     return {
@@ -120,6 +118,8 @@ function hostBigScreen(joinCode, hasQuiz) {
         // Monotonic id per GET /state read; ignore a superseded response so an
         // out-of-order read can't regress the screen (e.g. reveal->question) (#1178).
         stateSeq: 0,
+        // Assigned in init: a burst of ticks shares one GET /state plus one follow-up.
+        stateReads: null,
         // True once GET /state 404s: the session is gone (terminal), distinct
         // from connectionTrouble's retryable fault, so the footer settles.
         sessionGone: false,
@@ -127,9 +127,10 @@ function hostBigScreen(joinCode, hasQuiz) {
         startMessage: '',
         source: null,
         timer: null,
-        // Backoff timer + current delay for the SSE hard-close recovery (#1179).
-        reconnectTimer: null,
-        reconnectDelay: RECONNECT_BASE_DELAY,
+        readBeat: {},
+        // The big screen is often an unattended display, so a hard-closed SSE
+        // stream re-subscribes itself (#1179).
+        reconnect: createReconnectBackoff(),
 
         // --- Host-armed last-call countdown (#735) --------------------------
         // The absolute armed deadline (ISO string) off the latest state read,
@@ -174,6 +175,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         rootEl: null,
 
         init() {
+            this.stateReads = createCoalescedRead((signal) => this.readState(signal));
             // Capture the component root so the standings FLIP can scope its row
             // queries to this island. $root resolves here because init() runs in
             // Alpine context; the later SSE-driven syncStandings path does not,
@@ -206,15 +208,14 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.source = source;
             source.onopen = () => {
                 this.connected = true;
-                // A clean open resets the backoff.
-                this.reconnectDelay = RECONNECT_BASE_DELAY;
+                this.reconnect.reset();
             };
             // Every tick means "re-read state". The payload (version, phase)
             // is intentionally ignored here; the state read is the source of
             // truth.
             source.onmessage = () => {
                 this.connected = true;
-                this.reconnectDelay = RECONNECT_BASE_DELAY;
+                this.reconnect.reset();
                 this.refresh();
             };
             source.onerror = () => {
@@ -232,22 +233,16 @@ function hostBigScreen(joinCode, hasQuiz) {
         // the SSE stream after a hard close (#1179). Idempotent while a retry is
         // pending, and a no-op once the session is gone (terminal).
         scheduleReconnect() {
-            if (this.reconnectTimer || this.sessionGone) return;
-            const delay = this.reconnectDelay;
-            this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_DELAY);
-            this.reconnectTimer = setTimeout(() => {
-                this.reconnectTimer = null;
+            if (this.sessionGone) return;
+            this.reconnect.schedule(() => {
                 if (this.sessionGone) return;
                 this.refresh();
                 this.connect();
-            }, delay);
+            });
         },
 
         clearReconnectTimer() {
-            if (this.reconnectTimer) {
-                clearTimeout(this.reconnectTimer);
-                this.reconnectTimer = null;
-            }
+            this.reconnect.cancel();
         },
 
         // streamDropped reports whether the SSE stream is gone or hard-closed, so
@@ -286,12 +281,16 @@ function hostBigScreen(joinCode, hasQuiz) {
             if (this.audio) this.audio.teardown();
         },
 
-        async refresh() {
+        refresh() {
+            return this.stateReads.run();
+        },
+
+        async readState(signal) {
             const seq = ++this.stateSeq;
             try {
                 const response = await fetch(
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/state`,
-                    { headers: { Accept: 'application/json' } },
+                    { headers: { Accept: 'application/json' }, signal },
                 );
                 if (!response.ok) {
                     // A 404 means the session is gone (terminal), not a
@@ -312,6 +311,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.connectionTrouble = false;
                 this.applyState(state);
             } catch (err) {
+                if (signal?.aborted) return;
                 // Count every failure, even a superseded one: seq-gating this
                 // would drop a fast-superseded run of failures and never trip
                 // the trouble banner (#1178). Transient anyway - the next tick
@@ -600,6 +600,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 },
                 setTimer: (handle) => { this.timer = handle; },
                 clearTimer: () => this.stopCountdown(),
+                readBeat: this.readBeat,
             });
         },
 
@@ -724,7 +725,9 @@ function hostBigScreen(joinCode, hasQuiz) {
                 // fetch follows transparently to a 200. The runner advances
                 // the page into play off the SSE tick, so there is nothing to
                 // do here on success beyond clearing the disabled state.
-                if (!response.ok) {
+                if (isLoginRedirect(response.url)) {
+                    this.startMessage = SESSION_EXPIRED_MESSAGE;
+                } else if (!response.ok) {
                     this.startMessage = 'Could not start the game. Try again.';
                 }
             } catch (err) {

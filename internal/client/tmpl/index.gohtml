@@ -270,7 +270,7 @@
                      start which, under row-reverse, is the visual right
                      edge — exactly the cluster we want. */}}
                 <div x-show="!finished && startStateResolved" class="flex flex-row-reverse flex-wrap items-center gap-3">
-                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">{{t "play.startGame"}}</button>
+                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError || starting">{{t "play.startGame"}}</button>
                     {{/* Share button for #176 — invitation form ("Play
                          this quiz: <title>"). Hidden while no quiz is
                          selected (e.g. the empty-quiz-list edge case)
@@ -726,8 +726,7 @@
             <template x-if="claimModalOpen">
                 <div class="fixed inset-0 z-40 flex flex-col items-center bg-bg/80 backdrop-blur-sm p-4 sm:justify-center" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title" x-focus-trap="claimModalOpen">
                     <div class="absolute inset-0" @click="closeClaimModal()"></div>
-                    <div class="relative w-full max-w-[480px] mx-auto mt-4 sm:mt-0 bg-surface border border-accent-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
-                         style="max-height: calc(var(--visual-viewport-height, 100svh) - 2rem)"
+                    <div class="relative w-full max-w-[480px] max-h-[calc(var(--visual-viewport-height,100svh)_-_2rem)] mx-auto mt-4 sm:mt-0 bg-surface border border-accent-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
                          x-data="claimNameForm({
                                 submitLabel: $t('claim.save'),
                                 cancelLabel: $t('common.cancel'),

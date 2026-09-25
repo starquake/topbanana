@@ -122,6 +122,13 @@ test('the in-session Exit link prompts a confirm modal that the player can cance
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByTestId('exit-session-modal')).toBeHidden();
   await expect(page.getByTestId('lobby-view')).toBeVisible();
+
+  // Escape closes it too (#1344).
+  await page.getByTestId('exit-session-open').click();
+  await expect(page.getByTestId('exit-session-modal')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('exit-session-modal')).toBeHidden();
+  await expect(page.getByTestId('lobby-view')).toBeVisible();
 });
 
 test('the in-session Exit confirm drops the player and routes them to the join entry-code screen', async ({ page, hostSessions }) => {

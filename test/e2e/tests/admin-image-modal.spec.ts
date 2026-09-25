@@ -122,7 +122,7 @@ test('the lightbox shows a loading indicator until the full image loads', async 
     );
     const img = document.getElementById('image-modal-viewer-img') as HTMLImageElement;
     const loadingEl = document.getElementById('image-modal-viewer-loading') as HTMLElement;
-    return { loadingVisible: !loadingEl.hidden, imgHidden: img.style.visibility === 'hidden' };
+    return { loadingVisible: !loadingEl.hidden, imgHidden: img.classList.contains('invisible') };
   }, mediaId);
 
   // While the new src is loading, the indicator fills the gap and the <img> is

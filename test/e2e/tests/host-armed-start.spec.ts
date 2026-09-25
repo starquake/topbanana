@@ -134,3 +134,24 @@ test.describe('host-armed last-call countdown', () => {
     await expect(page.getByTestId('lobby-view')).toBeVisible();
   });
 });
+
+// An expired session 303s the start POST to /login; the host is told the session expired (#1343).
+test('Start now with an expired session says the session expired', async ({ page, hostSessions }) => {
+  test.setTimeout(60_000);
+  const quizTitle = `Start Expired ${Date.now()}`;
+  const alice = `Alice-${Date.now()}`;
+
+  const { host, joinCode } = await openHostLobby(hostSessions, quizTitle);
+  await joinAsPlayer(page, joinCode, alice);
+  await expect(host.getByTestId('start-now')).toBeEnabled({ timeout: 15_000 });
+
+  // Drop only the session cookie (the CSRF nonce outlives it), and put it back
+  // afterwards so teardown can still end the room.
+  const cookies = await host.context().cookies();
+  await host.context().clearCookies({ name: 'topbanana_session' });
+  await host.getByTestId('start-now').click();
+
+  await expect(host.getByRole('status').filter({ hasText: 'Your session has expired' })).toBeVisible();
+  await host.context().addCookies(cookies);
+  await expect(page.getByTestId('waiting-hint')).toBeVisible();
+});

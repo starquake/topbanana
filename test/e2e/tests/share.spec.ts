@@ -53,6 +53,10 @@ test('player client start screen has a share button that opens the dialog with i
     'href',
     new RegExp(`wa\\.me/\\?text=.*Play%20this%20quiz%3A%20E2E%20Share%20Start%20Quiz%20${browserName}`),
   );
+  // The brand colour comes from a class, not an inline style (#1344).
+  const badge = whatsapp.locator('span').first();
+  await expect(badge).not.toHaveAttribute('style');
+  await expect(badge).toHaveCSS('background-color', 'rgb(37, 211, 102)');
 });
 
 // #892 — the Copy fallback writes the same brag-text payload the share

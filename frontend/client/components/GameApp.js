@@ -33,6 +33,8 @@ export class GameApp {
         // question lands as one Alpine tick rather than going through a
         // visible "Loading question..." gap (#982).
         this.nextItemPromise = null;
+        // True while startGame is in flight so a double-tap can't bootstrap two games.
+        this.starting = false;
         // Current round-boundary item shown to the player (#444). Set
         // when /next returns type=round_boundary; cleared when the player
         // clicks Continue (markRoundSeen) before fetching the next item.
@@ -676,6 +678,16 @@ export class GameApp {
     }
 
     async startGame() {
+        if (this.starting) return;
+        this.starting = true;
+        try {
+            await this.runStartGame();
+        } finally {
+            this.starting = false;
+        }
+    }
+
+    async runStartGame() {
         // Synchronously first in the gesture, before any await (#1088): unlock the
         // context + keep-alive, then play the gesture-bound round-start sting that
         // unlocks iOS output. roundStartPlayed dedupes the first round intro.
@@ -783,17 +795,22 @@ export class GameApp {
     // response is already in hand and nextQuestion can swap to the new
     // question without an intermediate "Loading question..." render (#982).
     // Idempotent: a second call while one is in flight is a no-op.
+    // The clock offset is captured when the response lands, not when the item
+    // is shown after the feedback pause, or the pause would skew it (#1340).
     prefetchNextItem() {
         if (this.nextItemPromise || !this.gameId) return;
-        this.nextItemPromise = gameService.getNextQuestion(this.gameId).catch((err) => {
-            console.warn('prefetch next item failed', err);
-            this.nextItemPromise = null;
+        this.nextItemPromise = gameService
+            .getNextQuestion(this.gameId)
+            .then((item) => ({ item, clockOffset: item ? clockOffsetFromServerNow(item.serverNow) : null }))
+            .catch((err) => {
+                console.warn('prefetch next item failed', err);
+                this.nextItemPromise = null;
 
-            return null;
-        });
+                return null;
+            });
     }
 
-    async nextQuestion() {
+    clearAnswerTimers() {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
@@ -802,19 +819,30 @@ export class GameApp {
             clearInterval(this.revealTimer);
             this.revealTimer = null;
         }
+    }
+
+    async nextQuestion() {
+        this.clearAnswerTimers();
         this.clearRoundTimer();
         // Stop the prior clip before swapping items so it can't bleed over (#1088).
         this.audio.stopClip();
         this.revealing = false;
         this.submitError = false;
         let item;
+        let offset = null;
         if (this.nextItemPromise) {
-            item = await this.nextItemPromise;
+            const prefetched = await this.nextItemPromise;
             this.nextItemPromise = null;
+            if (prefetched && prefetched.item) {
+                item = prefetched.item;
+                offset = prefetched.clockOffset;
+            }
         }
         if (!item) {
             item = await gameService.getNextQuestion(this.gameId);
+            offset = item ? clockOffsetFromServerNow(item.serverNow) : null;
         }
+        if (offset !== null) this.clockOffset = offset;
         if (!item) {
             this.feedback = null;
             this.finished = true;
@@ -884,10 +912,8 @@ export class GameApp {
         // the round-summary card reads `lastQuestionPosition` (the server
         // doesn't bump position over a round boundary, and
         // resolveAndAdvance has already nulled `question` by the time we
-        // land here). serverNow lives on both variants, so the
-        // clock-offset reconciliation still happens.
+        // land here).
         if (item.type === 'round_boundary') {
-            this.syncClockFrom(item);
             this.feedback = null;
             this.roundItem = item;
             // Round intro sting (#1088), deduped against the gesture's round-start
@@ -908,7 +934,6 @@ export class GameApp {
             return;
         }
         this.imageError = false;
-        this.syncClockFrom(item);
         this.feedback = null;
         this.roundItem = null;
         this.question = item;
@@ -926,18 +951,6 @@ export class GameApp {
             if (item.audioUrl) this.audio.playClip(item.id);
         });
         this.startRevealCountdown();
-    }
-
-    // syncClockFrom recomputes clockOffset from the serverNow that
-    // travels with every question payload. A per-question reset keeps
-    // drift bounded without needing a separate clock-sync endpoint;
-    // the only remaining error is one-way network delay (RTT/2), which
-    // is negligible against a 10-second answer window. A missing
-    // serverNow (older server) leaves clockOffset at 0 — the existing
-    // skew-vulnerable behaviour, not a regression.
-    syncClockFrom(question) {
-        const offset = clockOffsetFromServerNow(question && question.serverNow);
-        if (offset !== null) this.clockOffset = offset;
     }
 
     // serverTime returns the current time in ms as the server sees it,
@@ -962,6 +975,7 @@ export class GameApp {
     // (issued before #247) should not stall on a reveal it never
     // had.
     startRevealCountdown() {
+        this.clearAnswerTimers();
         const startAt = new Date(this.question.startedAt).getTime();
         const revealStart = this.serverTime();
         if (revealStart >= startAt) {
@@ -1011,6 +1025,10 @@ export class GameApp {
     }
 
     startCountdown() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
         const start = new Date(this.question.startedAt).getTime();
         const end = new Date(this.question.expiredAt).getTime();
         const total = end - start;
