@@ -13,8 +13,9 @@ import (
 // [MaxDisplayNameLength] runes.
 var ErrDisplayNameTooLong = errors.New("displayName too long")
 
-// ErrDisplayNameInvalid is returned when a display name contains a control or
-// format character (zero-width spaces, bidi overrides and the like).
+// ErrDisplayNameInvalid is returned when a display name contains a control,
+// format or line/paragraph separator character (zero-width spaces, bidi
+// overrides and the like).
 var ErrDisplayNameInvalid = errors.New("displayName contains invalid characters")
 
 // CleanDisplayName trims name and checks it against the rules every
@@ -30,7 +31,7 @@ func CleanDisplayName(name string) (string, error) {
 	}
 	// Cf covers zero-width and bidi characters, which make look-alike names.
 	if strings.ContainsFunc(cleaned, func(r rune) bool {
-		return r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf)
+		return r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp)
 	}) {
 		return cleaned, ErrDisplayNameInvalid
 	}
