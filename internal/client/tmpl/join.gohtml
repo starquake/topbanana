@@ -506,6 +506,7 @@
                 <div x-show="exitConfirmOpen"
                      x-cloak
                      x-focus-trap="exitConfirmOpen"
+                     @keydown.escape.window="exitConfirmOpen = false"
                      class="fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4"
                      role="dialog"
                      aria-modal="true"
