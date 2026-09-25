@@ -1,9 +1,11 @@
 package mediahttp
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/starquake/topbanana/internal/handlers"
@@ -158,6 +160,8 @@ func streamMedia(
 		}
 	}()
 
+	extendMediaWriteDeadline(ctx, w, logger, f)
+
 	w.Header().Set("Content-Type", m.MIME)
 	w.Header().Set("ETag", strconv.Quote(m.SHA256))
 	if visibility == quiz.VisibilityPublic {
@@ -171,4 +175,18 @@ func streamMedia(
 	// reimplemented here. The name is only used for content-type sniffing, which
 	// our explicit Content-Type pre-empts; created_at is the modtime.
 	http.ServeContent(w, r, m.Path, m.CreatedAt, f)
+}
+
+// extendMediaWriteDeadline sizes the write deadline to f so a large clip on a
+// slow connection is not cut off by the server-wide WriteTimeout (#1352).
+func extendMediaWriteDeadline(ctx context.Context, w http.ResponseWriter, logger *slog.Logger, f *os.File) {
+	info, err := f.Stat()
+	if err != nil {
+		logger.WarnContext(ctx, "could not stat media file for write deadline", slog.Any("err", err))
+
+		return
+	}
+	if err = handlers.ExtendWriteDeadline(w, info.Size()); err != nil {
+		logger.WarnContext(ctx, "could not extend media write deadline", slog.Any("err", err))
+	}
 }

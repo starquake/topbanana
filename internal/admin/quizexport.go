@@ -395,6 +395,9 @@ func HandleQuizExport(logger *slog.Logger, quizStore quiz.Store, mediaSvc MediaA
 			return
 		}
 
+		if derr := handlers.ExtendWriteDeadline(w, int64(buf.Len())); derr != nil {
+			logger.WarnContext(r.Context(), "could not extend export write deadline", slog.Any("err", derr))
+		}
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+quizSlugFilename(qz)+"\"")
 		w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
