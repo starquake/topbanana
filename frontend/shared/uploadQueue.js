@@ -12,6 +12,8 @@
 // or failure, the row's data-testid, and what to do once the batch settles. The
 // queue/XHR/progress/settle machinery itself lives here once.
 
+import { isLoginRedirect, SESSION_EXPIRED_MESSAGE } from '@shared/loginRedirect.js';
+
 // Match the server's per-route read deadline so a stalled XHR can't pin
 // inFlight forever.
 const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
@@ -38,7 +40,7 @@ const CANCEL_ICON_HTML =
 // failure reason instead of a wall of HTML.
 function readPlainText(xhr) {
     const body = (xhr.responseText || '').trim();
-    if (!body) return '';
+    if (!body || body.startsWith('<')) return '';
     const firstLine = body.split('\n', 1)[0];
 
     return firstLine.length > 140 ? firstLine.slice(0, 137) + '...' : firstLine;
@@ -283,6 +285,12 @@ export function createUploadQueue(config) {
         // Try to parse JSON regardless of Content-Type. A misconfigured proxy
         // that strips Content-Type would otherwise force a successful upload into
         // the plain-text fallback and the row gets counted as failed.
+        if (isLoginRedirect(xhr.responseURL)) {
+            b.skipped++;
+            finishRow(row, status, SESSION_EXPIRED_MESSAGE, false);
+
+            return;
+        }
         let json = null;
         if (xhr.status >= 200 && xhr.status < 300) {
             try { json = JSON.parse(xhr.responseText); } catch (_err) { /* json stays null */ }
