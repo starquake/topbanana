@@ -18,7 +18,9 @@ const (
 // WriteBudget returns how long a response carrying size bytes may take to
 // write.
 func WriteBudget(size int64) time.Duration {
-	budget := writeBudgetFloor + time.Duration(max(size, 0)/writeBudgetMinRate)*time.Second
+	// Clamp first so a huge size cannot overflow the Duration multiplication.
+	size = min(max(size, 0), int64(writeBudgetMaxDuration/time.Second)*writeBudgetMinRate)
+	budget := writeBudgetFloor + time.Duration(size/writeBudgetMinRate)*time.Second
 
 	return min(budget, writeBudgetMaxDuration)
 }
