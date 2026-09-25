@@ -374,9 +374,15 @@ func TestProcess_RejectsOversizedDecodedBuffer(t *testing.T) {
 // (marker sof) declaring w x h with three 1x1-sampled components, and no scan
 // data. image/jpeg's DecodeConfig returns at the frame only after a JFIF APP0.
 func jpegHeader(sof byte, w, h uint16) []byte {
+	return jpegHeaderGap(sof, w, h, nil)
+}
+
+// jpegHeaderGap is jpegHeader with gap written between the APP0 and the frame.
+func jpegHeaderGap(sof byte, w, h uint16, gap []byte) []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 16})
 	b.WriteString("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+	b.Write(gap)
 	b.Write([]byte{0xFF, sof})
 	frame := []byte{8, 0, 0, 0, 0, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0}
 	binary.BigEndian.PutUint16(frame[1:], h)
@@ -389,23 +395,28 @@ func jpegHeader(sof byte, w, h uint16) []byte {
 
 // TestProcess_RejectsOversizedProgressiveJPEG pins that a progressive jpeg is
 // charged for its coefficient buffer: the same area passes the guard as a
-// baseline jpeg (then fails to decode, having no scan data).
+// baseline jpeg (then fails to decode, having no scan data). Bytes image/jpeg
+// skips ahead of the frame must not hide a progressive frame.
 func TestProcess_RejectsOversizedProgressiveJPEG(t *testing.T) {
 	t.Parallel()
 
 	const w, h = 7000, 7000
 	cases := map[string]struct {
 		sof  byte
+		gap  []byte
 		want error
 	}{
-		"baseline":    {0xC0, ErrUnsupportedImage},
-		"progressive": {0xC2, ErrImageTooLarge},
+		"baseline":                  {0xC0, nil, ErrUnsupportedImage},
+		"progressive":               {0xC2, nil, ErrImageTooLarge},
+		"progressive after junk":    {0xC2, []byte{0x42}, ErrImageTooLarge},
+		"progressive after stuffed": {0xC2, []byte{0xFF, 0x00}, ErrImageTooLarge},
+		"progressive after RST0":    {0xC2, []byte{0xFF, 0xD0}, ErrImageTooLarge},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			raw := jpegHeader(tc.sof, w, h)
+			raw := jpegHeaderGap(tc.sof, w, h, tc.gap)
 			_, err := Process(t.Context(), bytes.NewReader(raw), MaxUploadBytes)
 			if got, want := err, tc.want; !errors.Is(got, want) {
 				t.Errorf("Process(%s jpeg header) err = %v, want %v", name, got, want)
