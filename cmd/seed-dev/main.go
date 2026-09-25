@@ -188,15 +188,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ParseDatabase keeps the URI and its pragmas in one source of truth; it
-	// bypasses the production server gates, so it is safe here.
-	dbc, err := config.ParseDatabase(os.Getenv)
+	dbc, err := resolveSeedDB(os.Getenv, *dbURI)
 	if err != nil {
 		logger.Error("seed-dev failed to resolve DB URI", slog.Any("err", err))
 		os.Exit(1)
-	}
-	if *dbURI != "" {
-		dbc.URI = *dbURI
 	}
 
 	cfg := seedConfig{
@@ -227,6 +222,28 @@ func checkSeedEnvironment(appEnv string) error {
 	}
 
 	return fmt.Errorf("%w (APP_ENV=%q)", errNotDevelopment, appEnv)
+}
+
+// resolveSeedDB resolves the DB config through [config.ParseDatabase], with an
+// explicit -db standing in for $DB_URI so it satisfies the production DB_URI
+// requirement.
+func resolveSeedDB(getenv func(string) string, dbFlag string) (config.DatabaseConfig, error) {
+	if dbFlag != "" {
+		envGetenv := getenv
+		getenv = func(key string) string {
+			if key == "DB_URI" {
+				return dbFlag
+			}
+
+			return envGetenv(key)
+		}
+	}
+	dbc, err := config.ParseDatabase(getenv)
+	if err != nil {
+		return config.DatabaseConfig{}, fmt.Errorf("parse database config: %w", err)
+	}
+
+	return dbc, nil
 }
 
 // run is the non-fatal entry point: it returns errors so main() keeps its

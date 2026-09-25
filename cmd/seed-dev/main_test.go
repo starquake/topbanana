@@ -602,3 +602,66 @@ func TestCheckSeedEnvironment(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveSeedDB pins that an explicit -db satisfies the production DB_URI
+// requirement, so `-force -db X` works with APP_ENV=production and no $DB_URI.
+func TestResolveSeedDB(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		env     map[string]string
+		dbFlag  string
+		wantURI string
+		wantErr error
+	}{
+		{
+			name:    "production with -db and no DB_URI",
+			env:     map[string]string{"APP_ENV": "production"},
+			dbFlag:  "file:seed.db",
+			wantURI: "file:seed.db",
+		},
+		{
+			name:    "production without -db or DB_URI refuses",
+			env:     map[string]string{"APP_ENV": "production"},
+			wantErr: config.ErrDBURINotSetInProduction,
+		},
+		{
+			name:    "-db overrides DB_URI",
+			env:     map[string]string{"APP_ENV": "development", "DB_URI": "file:env.db"},
+			dbFlag:  "file:flag.db",
+			wantURI: "file:flag.db",
+		},
+		{
+			name:    "DB_URI used without -db",
+			env:     map[string]string{"APP_ENV": "development", "DB_URI": "file:env.db"},
+			wantURI: "file:env.db",
+		},
+		{
+			name:    "development default",
+			env:     map[string]string{"APP_ENV": "development"},
+			wantURI: config.DBURIDefault,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			getenv := func(key string) string { return tc.env[key] }
+
+			dbc, err := ExportResolveSeedDB(getenv, tc.dbFlag)
+			if tc.wantErr != nil {
+				if got, want := err, tc.wantErr; !errors.Is(got, want) {
+					t.Errorf("err = %v, want %v", got, want)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("ExportResolveSeedDB err = %v, want nil", err)
+			}
+			if got, want := dbc.URI, tc.wantURI; got != want {
+				t.Errorf("URI = %q, want %q", got, want)
+			}
+		})
+	}
+}

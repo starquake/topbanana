@@ -14,6 +14,7 @@ var (
 	ExportSeedPlayerNames              = seedPlayerNames
 	ExportSeedPlays                    = seedPlays
 	ExportCheckSeedEnvironment         = checkSeedEnvironment
+	ExportResolveSeedDB                = resolveSeedDB
 	ErrExportNotDevelopment            = errNotDevelopment
 	ErrExportFixtureQuestionsOrRounds  = errFixtureQuestionsOrRounds
 	ErrExportFixtureRoundTitleRequired = errFixtureRoundTitleRequired
