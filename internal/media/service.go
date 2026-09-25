@@ -486,12 +486,23 @@ func (s *Service) resolve(relPath string) (string, error) {
 }
 
 // removeFile unlinks a root-relative path best-effort. A missing file is not an
-// error (the cleanup tooling reconciles); any other failure is logged.
+// error (the cleanup tooling reconciles); any other failure is logged. The path
+// is confined to root like Open's, so a corrupt DB value cannot unlink a file
+// outside the media tree or the root itself.
 func (s *Service) removeFile(relPath string) {
 	if relPath == "" {
 		return
 	}
-	if err := os.Remove(filepath.Join(s.root, relPath)); err != nil && !os.IsNotExist(err) {
+	resolved, err := s.resolve(relPath)
+	if err == nil && filepath.Clean(resolved) == filepath.Clean(s.root) {
+		err = fmt.Errorf("%w: %q names the media root", ErrPathEscapesRoot, relPath)
+	}
+	if err != nil {
+		s.logger.Error("refusing to remove media file", slog.String("path", relPath), slog.Any("err", err))
+
+		return
+	}
+	if err = os.Remove(resolved); err != nil && !os.IsNotExist(err) {
 		s.logger.Error("failed to remove media file",
 			slog.String("path", relPath), slog.Any("err", err))
 	}
