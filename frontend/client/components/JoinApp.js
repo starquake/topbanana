@@ -262,7 +262,7 @@ export class JoinApp {
     // /join/{code} deep link otherwise lands on the name form; the bare /join
     // entry with no remembered session shows the enter-code form first.
     async init() {
-        this.stateReads = createCoalescedRead(() => this.readState());
+        this.stateReads = createCoalescedRead((signal) => this.readState(signal));
         // Capture the component root so the standings FLIP can scope its row
         // queries to this island. $root resolves here because init() runs in
         // Alpine context; the later SSE-driven syncStandingsFromState path does
@@ -556,12 +556,13 @@ export class JoinApp {
     // polling a dead room. A thrown read (network drop, 5xx) leaves the prior
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
-    async readState() {
+    async readState(signal) {
         const seq = ++this.stateSeq;
         let state;
         try {
-            state = await sessionService.getState(this.code);
+            state = await sessionService.getState(this.code, { signal });
         } catch {
+            if (signal?.aborted) return;
             // Count every failure, even a superseded one: seq-gating this would
             // drop a fast-superseded run and never trip the banner (#1178). A
             // transient read failure leaves the prior roster on screen; the next
