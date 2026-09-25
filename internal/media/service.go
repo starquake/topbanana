@@ -49,7 +49,20 @@ type Service struct {
 	root          string
 	imageMaxBytes int64
 	audioMaxBytes int64
+	quizLimit     int
 	logger        *slog.Logger
+}
+
+// Option configures a [Service].
+type Option func(*Service)
+
+// WithQuizLimit caps how many ready rows of one media type a quiz may hold. The
+// cap is enforced as each upload is flipped ready, so concurrent uploads cannot
+// overshoot it; zero or negative means no cap.
+func WithQuizLimit(limit int) Option {
+	return func(s *Service) {
+		s.quizLimit = limit
+	}
 }
 
 // NewService returns a media Service writing files under root and recording
@@ -57,14 +70,21 @@ type Service struct {
 // ensures it exists at startup. imageMaxBytes caps a stored image upload's raw
 // size and audioMaxBytes caps a stored audio upload's raw size; zero or negative
 // means no cap.
-func NewService(store Store, root string, imageMaxBytes, audioMaxBytes int64, logger *slog.Logger) *Service {
-	return &Service{
+func NewService(
+	store Store, root string, imageMaxBytes, audioMaxBytes int64, logger *slog.Logger, opts ...Option,
+) *Service {
+	s := &Service{
 		store:         store,
 		root:          root,
 		imageMaxBytes: imageMaxBytes,
 		audioMaxBytes: audioMaxBytes,
 		logger:        logger,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // StoreImage processes the upload into a normalised jpeg full image plus
@@ -368,10 +388,27 @@ func (s *Service) writeAndCommit(ctx context.Context, id int64, quizDir string, 
 	// Flip the row ready last, so a cancel arriving after the paths commit but
 	// before this flip leaves a hidden (not-ready) row the sweep drops rather
 	// than a file the host sees in their library (#992).
-	if err := s.store.MarkMediaReady(ctx, id); err != nil {
+	if err := s.markReady(ctx, id); err != nil {
 		s.cleanupRowAndFiles(ctx, id, blobs)
 
 		return fmt.Errorf("marking media ready: %w", err)
+	}
+
+	return nil
+}
+
+// markReady flips the row ready, re-checking the per-quiz cap in the same
+// statement when one is configured.
+func (s *Service) markReady(ctx context.Context, id int64) error {
+	if s.quizLimit > 0 {
+		if err := s.store.MarkMediaReadyWithinLimit(ctx, id, s.quizLimit); err != nil {
+			return fmt.Errorf("capped ready flip: %w", err)
+		}
+
+		return nil
+	}
+	if err := s.store.MarkMediaReady(ctx, id); err != nil {
+		return fmt.Errorf("ready flip: %w", err)
 	}
 
 	return nil

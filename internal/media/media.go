@@ -24,6 +24,10 @@ var ErrMediaNotFound = errors.New("media not found")
 // path against a corrupt or hostile DB value.
 var ErrPathEscapesRoot = errors.New("media path escapes root")
 
+// ErrQuizMediaLimit is returned when storing a media row would push its quiz
+// past the per-quiz library cap for that media type.
+var ErrQuizMediaLimit = errors.New("quiz media limit reached")
+
 // Media is a single stored media item scoped to a quiz. Path and ThumbPath are
 // filesystem paths relative to the configured media root; the serving layer
 // resolves them against that root rather than trusting an absolute path from
@@ -82,6 +86,10 @@ type Store interface {
 	// MarkMediaReady flips a media row ready, the final step of the two-phase
 	// upload. Returns ErrMediaNotFound when no row matched.
 	MarkMediaReady(ctx context.Context, id int64) error
+	// MarkMediaReadyWithinLimit is MarkMediaReady that flips the row only while
+	// its quiz holds fewer than limit ready rows of its type, atomically.
+	// Returns ErrQuizMediaLimit when the cap is reached.
+	MarkMediaReadyWithinLimit(ctx context.Context, id int64, limit int) error
 	// GetMedia returns the media row for id, or ErrMediaNotFound.
 	GetMedia(ctx context.Context, id int64) (*Media, error)
 	// UpdateMediaDescription sets the host-supplied description label of a media

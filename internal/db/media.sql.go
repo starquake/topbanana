@@ -284,6 +284,33 @@ func (q *Queries) MarkMediaReady(ctx context.Context, id int64) (sql.Result, err
 	return q.db.ExecContext(ctx, markMediaReady, id)
 }
 
+const markMediaReadyWithinLimit = `-- name: MarkMediaReadyWithinLimit :execresult
+UPDATE media
+SET ready = 1
+WHERE media.id = ?1
+  AND (
+    SELECT COUNT(*)
+    FROM media AS other
+    WHERE other.quiz_id = media.quiz_id
+      AND other.type = media.type
+      AND other.ready = 1
+  ) < CAST(?2 AS INTEGER)
+`
+
+type MarkMediaReadyWithinLimitParams struct {
+	ID       int64
+	MaxReady int64
+}
+
+// Flips a media row ready like MarkMediaReady, but only while its quiz holds
+// fewer than max_ready ready rows of the same type. One statement, so the count
+// and the flip are atomic: concurrent uploads that each passed the up-front cap
+// check cannot all land (#1355). Zero rows affected means the row is missing or
+// the cap is reached; the caller tells the two apart.
+func (q *Queries) MarkMediaReadyWithinLimit(ctx context.Context, arg MarkMediaReadyWithinLimitParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, markMediaReadyWithinLimit, arg.ID, arg.MaxReady)
+}
+
 const updateMediaDescription = `-- name: UpdateMediaDescription :execresult
 UPDATE media
 SET description = ?1
