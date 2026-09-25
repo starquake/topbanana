@@ -332,3 +332,34 @@ func TestDecode_LegacyTwoFieldCookieDecodesAsVersionZero(t *testing.T) {
 		t.Errorf("Decode sessionVersion = %d, want %d (legacy implicit zero)", got, want)
 	}
 }
+
+// TestWithLoginApprovalRequired_CopiesPolicy pins that the policy rides on a
+// copy, leaving the original manager's policy and cookies unchanged.
+func TestWithLoginApprovalRequired_CopiesPolicy(t *testing.T) {
+	t.Parallel()
+
+	base := New([]byte("k"), false)
+	held := base.WithLoginApprovalRequired(true)
+
+	if got, want := base.LoginApprovalRequired(), false; got != want {
+		t.Errorf("base.LoginApprovalRequired() = %v, want %v", got, want)
+	}
+	if got, want := held.LoginApprovalRequired(), true; got != want {
+		t.Errorf("held.LoginApprovalRequired() = %v, want %v", got, want)
+	}
+
+	rec := httptest.NewRecorder()
+	base.Set(rec, 7, 3)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	req.AddCookie(rec.Result().Cookies()[0])
+	id, version, ok := held.Decode(req)
+	if !ok {
+		t.Fatal("held.Decode ok = false, want true (same key)")
+	}
+	if got, want := id, int64(7); got != want {
+		t.Errorf("id = %d, want %d", got, want)
+	}
+	if got, want := version, int64(3); got != want {
+		t.Errorf("version = %d, want %d", got, want)
+	}
+}

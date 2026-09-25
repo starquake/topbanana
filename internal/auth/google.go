@@ -327,6 +327,8 @@ func finalizeGoogleSignIn(
 		}
 		deps.logger.InfoContext(r.Context(), "google sign-in blocked: account not approved",
 			slog.Int64(logPlayerKey, current.ID))
+		// The pre-sign-in cookie may point at this very row (a claimed guest).
+		deps.sessions.Clear(w)
 		http.Redirect(w, r, loginPendingApprovalPath, http.StatusSeeOther)
 
 		return
