@@ -37,10 +37,7 @@ SET title      = ?,
 WHERE id = ?;
 
 -- name: UpdateRoundPosition :execresult
--- Position-only update used by the drag-and-drop round reorder.
--- Mirrors UpdateBreakPosition so the move path can rewrite a single
--- column without touching title/summary or updated_at - the reorder
--- is not a content edit.
+-- Position-only; leaves updated_at alone since a reorder is not a content edit.
 UPDATE rounds
 SET position = ?
 WHERE id = ?;
