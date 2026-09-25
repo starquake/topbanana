@@ -24,6 +24,11 @@ const (
 // the user closes the tab mid-redirect.
 const signedFlashMaxAge = 15
 
+// signedFlashDerivationLabel is mixed into the SESSION_KEY to derive the
+// flash HMAC key, so a flash signature can never double as a session one.
+// Versioned so we can rotate without breaking outstanding cookies.
+const signedFlashDerivationLabel = "signed-flash-v1"
+
 // signedFlashWaitSep is the ASCII unit separator so a verbatim error
 // string in the message cannot collide with the wait-seconds prefix.
 const signedFlashWaitSep = "\x1f"
@@ -41,13 +46,18 @@ type SignedFlash struct {
 }
 
 // NewSignedFlash returns a flash helper bound to the given cookie name
-// and path. secureCookies follows [session.Manager]: production true,
-// dev false (#205). Path scopes which routes receive the cookie - the
-// verify flow uses /verify-email so /forgot-password cannot read its
-// banner, and vice versa.
-func NewSignedFlash(key []byte, secureCookies bool, cookieName, cookiePath string) *SignedFlash {
+// and path. sessionKey is reused (via HMAC derivation) to sign the
+// cookie so the deployment does not need a second secret. secureCookies
+// follows [session.Manager]: production true, dev false (#205). Path
+// scopes which routes receive the cookie - the verify flow uses
+// /verify-email so /forgot-password cannot read its banner, and vice
+// versa.
+func NewSignedFlash(sessionKey []byte, secureCookies bool, cookieName, cookiePath string) *SignedFlash {
+	h := hmac.New(sha256.New, sessionKey)
+	_, _ = h.Write([]byte(signedFlashDerivationLabel))
+
 	return &SignedFlash{
-		key:           key,
+		key:           h.Sum(nil),
 		secureCookies: secureCookies,
 		cookieName:    cookieName,
 		cookiePath:    cookiePath,
