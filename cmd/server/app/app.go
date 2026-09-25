@@ -502,7 +502,7 @@ func buildMailer(
 }
 
 func setupDB(signalCtx context.Context, dbc config.DatabaseConfig, logger *slog.Logger) (*sql.DB, error) {
-	conn, err := database.Open(
+	conn, err := database.OpenMigrated(
 		signalCtx,
 		dbc.Driver,
 		dbc.URI,
@@ -511,13 +511,7 @@ func setupDB(signalCtx context.Context, dbc config.DatabaseConfig, logger *slog.
 		dbc.ConnMaxLifetime,
 	)
 	if err != nil {
-		logger.ErrorContext(signalCtx, "error opening database connection", slog.Any("err", err))
-
-		return nil, fmt.Errorf("error opening database connection: %w", err)
-	}
-
-	if err = database.Migrate(conn); err != nil {
-		msg := "error migrating database"
+		msg := "error opening and migrating database"
 		logger.ErrorContext(signalCtx, msg, slog.Any("err", err))
 
 		return nil, fmt.Errorf("%s: %w", msg, err)

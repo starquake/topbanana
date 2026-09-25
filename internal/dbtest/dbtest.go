@@ -101,6 +101,7 @@ func buildTemplate() {
 		return
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	if err = goose.Up(db, "."); err != nil {
 		templateErr = fmt.Errorf("run migrations on template db: %w", err)
@@ -183,3 +184,19 @@ func OpenUnmigrated(t *testing.T) *sql.DB {
 
 	return db
 }
+
+// UnmigratedDSN returns a DSN for an empty on-disk SQLite database with no
+// migrations applied, for tests that migrate a file database themselves.
+func UnmigratedDSN(t *testing.T) string {
+	t.Helper()
+
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
+
+	return fmt.Sprintf(
+		"file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate",
+		filepath.Join(t.TempDir(), "unmigrated.sqlite"),
+	)
+}
+
