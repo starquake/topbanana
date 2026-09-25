@@ -272,6 +272,8 @@ export default defineConfig({
   // steps stay single-shot: a retry re-hits ErrDisplayNameTaken and fails
   // again, but those are few.
   retries: 1,
+  // A pass-on-retry still fails CI, so a flake gets filed instead of hidden.
+  failOnFlakyTests: !!process.env.CI,
   workers: WORKER_COUNT,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
