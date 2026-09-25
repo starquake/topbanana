@@ -37,11 +37,7 @@ type testServer struct {
 	DBURI   string
 }
 
-// waitTimeout is the budget for polling on server-side work. Coverage
-// instrumentation (make test-coverage, the CI build job) plus -race slows
-// parallel servers enough to blow a tight budget all at once (#608), so it
-// widens only under coverage; a plain `make test-integration` keeps the
-// short budget so a genuine hang still fails fast.
+// waitTimeout widens under coverage, whose -race slowdown blew tight budgets (#608).
 func waitTimeout() time.Duration {
 	if testing.CoverMode() != "" {
 		return 60 * time.Second
