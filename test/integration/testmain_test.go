@@ -37,6 +37,15 @@ type testServer struct {
 	DBURI   string
 }
 
+// waitTimeout widens under coverage, whose -race slowdown blew tight budgets (#608).
+func waitTimeout() time.Duration {
+	if testing.CoverMode() != "" {
+		return 60 * time.Second
+	}
+
+	return 10 * time.Second
+}
+
 // startServer boots a real server against an ephemeral port and a fresh
 // test DB, waits until /healthz responds, and returns a context tied to
 // the test's lifetime plus a testServer with the resulting URLs. Shutdown
@@ -107,18 +116,8 @@ func startServer(
 		errCh <- app.Run(ctx, getenv, stdout, ln, runOpts...)
 	}()
 
-	// Coverage instrumentation (make test-coverage, the CI build job) plus
-	// -race slows server startup enough that a batch of parallel boots -
-	// each running every migration on a fresh DB - can blow past a tight
-	// readiness budget all at once (#608). Widen the budget only under
-	// coverage; a plain `make test-integration` keeps the short budget so
-	// a genuine startup hang still fails fast.
-	readyTimeout := 10 * time.Second
-	if testing.CoverMode() != "" {
-		readyTimeout = 60 * time.Second
-	}
 	baseURL := "http://" + ln.Addr().String()
-	if werr := testutil.WaitForReady(ctx, t, readyTimeout, baseURL+"/healthz"); werr != nil {
+	if werr := testutil.WaitForReady(ctx, t, waitTimeout(), baseURL+"/healthz"); werr != nil {
 		t.Fatalf("error waiting for server to be ready: %v", werr)
 	}
 

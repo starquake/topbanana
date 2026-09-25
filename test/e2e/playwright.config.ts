@@ -260,18 +260,11 @@ export default defineConfig({
   // longer cross-contend.
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // One retry, in CI and locally. In CI it absorbs post-registration
-  // flakes (the URL race after question Save, #384) and slow-runner nav.
-  // Locally it absorbs the Playwright worker-teardown race under load
-  // (#1009): a worker's browser is closed gracefully during wind-down just
-  // as a tail-scheduled test calls browser.newContext, which fails on any
-  // spec - even single-page ones, since the default page fixture also opens
-  // a context. Local used to be retries=0 to surface flakes loudly (#350);
-  // that mostly holds because a passed-on-retry test still prints as "flaky"
-  // in the run summary, it just no longer hard-fails the run. Registration
-  // steps stay single-shot: a retry re-hits ErrDisplayNameTaken and fails
-  // again, but those are few.
+  // One retry. Locally it absorbs the Playwright worker-teardown race under
+  // load (#1009); a passed-on-retry test still prints as "flaky". In CI
+  // failOnFlakyTests fails the run on it, so a flake gets filed, not hidden.
   retries: 1,
+  failOnFlakyTests: !!process.env.CI,
   workers: WORKER_COUNT,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {

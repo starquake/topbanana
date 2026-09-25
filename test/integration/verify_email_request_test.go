@@ -229,7 +229,7 @@ func postVerifyRequest(ctx context.Context, t *testing.T, client *http.Client, b
 // the row is the lightweight signal we need.
 func waitForVerifyTokenRow(ctx context.Context, t *testing.T, dbConn *sql.DB, playerID int64) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitTimeout())
 	for time.Now().Before(deadline) {
 		if countVerifyTokens(ctx, t, dbConn, playerID) >= 1 {
 			return

@@ -2,9 +2,10 @@ name: Cache build tools
 description: >
   Cache the pinned tool binaries in build/bin (golangci-lint, sqlc, mailpit,
   Tailwind) so CI does not re-download them from the GitHub releases CDN on
-  every run. Keyed on the tool versions only, so a version bump misses cleanly
-  (the binaries live at version-agnostic paths, so reusing a stale cache would
-  silently run the wrong version - hence no restore-keys).
+  every run. Keyed on the tool version and checksum pins only, so a bump misses
+  cleanly and every cached binary passed the checksum check (the binaries live
+  at version-agnostic paths, so reusing a stale cache would silently run the
+  wrong version - hence no restore-keys).
 
 inputs:
   scope:
@@ -21,10 +22,10 @@ runs:
       id: toolvers
       shell: bash
       run: |
-        hash=$(grep -E '^(GOLANGCI|SQLC|MAILPIT|TAILWIND)_VERSION' Makefile \
+        hash=$(grep -E '^(GOLANGCI|SQLC|MAILPIT|TAILWIND)_(VERSION|SHA256)' Makefile \
           | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@v5
+    - uses: actions/cache@v6
       with:
         path: build/bin
         key: tools-${{ inputs.scope }}-${{ runner.os }}-${{ steps.toolvers.outputs.hash }}

@@ -98,7 +98,7 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 // register-time row.
 func waitForVerifyTokenCount(ctx context.Context, t *testing.T, dbConn *sql.DB, playerID int64, want int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitTimeout())
 	for time.Now().Before(deadline) {
 		if countVerifyTokens(ctx, t, dbConn, playerID) >= want {
 			return

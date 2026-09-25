@@ -15,11 +15,14 @@ updates:
     schedule:
       interval: "weekly"
 
-  # Action versions pinned in .github/workflows/*.yml. Without this entry the
-  # pins drift silently — actions/checkout, actions/setup-go, etc. age out
-  # without a bump until something breaks.
+  # Action versions pinned in .github/workflows/*.yml and the composite actions
+  # under .github/actions/. Without this entry the pins drift silently —
+  # actions/checkout, actions/setup-go, etc. age out without a bump until
+  # something breaks.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
 
