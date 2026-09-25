@@ -10,7 +10,7 @@ import (
 
 // uniqueActiveRoomVersion is the #1336 migration adding the one-active-room-per-
 // host partial unique index on sessions.
-const uniqueActiveRoomVersion = 20260925120000
+const uniqueActiveRoomVersion = 20260925150000
 
 // TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces pins the #1336
 // migration: a host's extra active rooms are finished (the newest stays open),
