@@ -173,8 +173,8 @@ func TestQuizVisibility_Integration(t *testing.T) {
 
 // TestUnlistedQuizSlug_Integration pins that an unlisted quiz is reachable only
 // through its own slug: a guessed slug with the right id 404s on every play
-// read path and keeps the default share card, while the real link and an admin
-// still get through (#1332).
+// read path and keeps the default share card, while the real link, an admin and
+// the quiz's own creator still get through (#1332).
 func TestUnlistedQuizSlug_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -182,6 +182,10 @@ func TestUnlistedQuizSlug_Integration(t *testing.T) {
 	baseURL := setup.BaseURL
 
 	admin := registerAdminClient(ctx, t, baseURL, setup.DBURI, "slug-admin")
+	ownerHost := registerAdminClient(ctx, t, baseURL, setup.DBURI, "slug-owner-host")
+	otherHost := registerAdminClient(ctx, t, baseURL, setup.DBURI, "slug-other-host")
+	makeHost(ctx, t, setup.DBURI, "slug-owner-host")
+	makeHost(ctx, t, setup.DBURI, "slug-other-host")
 
 	unlistedQz := &quiz.Quiz{
 		Title:             "Secret Slug Quiz",
@@ -199,6 +203,22 @@ func TestUnlistedQuizSlug_Integration(t *testing.T) {
 	}
 	realSlugID := fmt.Sprintf("%s-%d", unlistedQz.Slug, unlistedQz.ID)
 	guessedSlugID := fmt.Sprintf("x-%d", unlistedQz.ID)
+
+	hostQz := &quiz.Quiz{
+		Title:             "Host Secret Slug Quiz",
+		Published:         true,
+		Slug:              "host-secret-slug",
+		CreatedByPlayerID: playerIDByDisplayName(ctx, t, setup.DBURI, "slug-owner-host"),
+		Visibility:        quiz.VisibilityUnlisted,
+		Questions: []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "yes", Correct: true}, {Text: "no"}}},
+		},
+	}
+	if err := setup.Stores.Quizzes.CreateQuiz(ctx, hostQz); err != nil {
+		t.Fatalf("CreateQuiz host unlisted err = %v", err)
+	}
+	hostGuessedSlugID := fmt.Sprintf("x-%d", hostQz.ID)
+	hostWrongSlugBody := fmt.Sprintf(`{"quizId": %d, "slug": "x"}`, hostQz.ID)
 
 	for _, suffix := range []string{"", "/leaderboard", "/leaderboard/stream", "/my-game"} {
 		t.Run("guessed slug 404s on /api/quizzes/{slugID}"+suffix, func(t *testing.T) {
@@ -228,6 +248,34 @@ func TestUnlistedQuizSlug_Integration(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
+
+	for _, tc := range []struct {
+		name     string
+		client   *http.Client
+		metaWant int
+		gameWant int
+	}{
+		{name: "owning host", client: ownerHost, metaWant: http.StatusOK, gameWant: http.StatusCreated},
+		{name: "other host", client: otherHost, metaWant: http.StatusNotFound, gameWant: http.StatusNotFound},
+	} {
+		t.Run(tc.name+" reads metadata by a guessed slug", func(t *testing.T) {
+			t.Parallel()
+			resp := httpGet(ctx, t, tc.client, baseURL+"/api/quizzes/"+hostGuessedSlugID)
+			defer closeBody(t, resp.Body)
+			if got, want := resp.StatusCode, tc.metaWant; got != want {
+				t.Errorf("status = %d, want %d", got, want)
+			}
+		})
+
+		t.Run(tc.name+" creates a game with a wrong slug", func(t *testing.T) {
+			t.Parallel()
+			resp := httpPostJSON(ctx, t, tc.client, baseURL+"/api/games", hostWrongSlugBody)
+			defer closeBody(t, resp.Body)
+			if got, want := resp.StatusCode, tc.gameWant; got != want {
+				t.Errorf("status = %d, want %d", got, want)
+			}
+		})
+	}
 
 	for name, body := range map[string]string{
 		"missing slug": fmt.Sprintf(`{"quizId": %d}`, unlistedQz.ID),
