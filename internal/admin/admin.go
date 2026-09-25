@@ -658,7 +658,7 @@ func fillQuizFromForm(
 	} else {
 		qz.Language = quiz.LanguageEN
 	}
-	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
+	if problems := (&quizForm{quiz: qz}).validMetadata(); len(problems) > 0 {
 		return problems, true
 	}
 
@@ -2138,6 +2138,7 @@ func HandleQuestionSave(
 		if !ok {
 			return
 		}
+		fieldErrors = addQuestionCountProblem(fieldErrors, qctx)
 		if len(fieldErrors) > 0 {
 			renderQuestionForm(w, r, logger, csrfMgr, formRenderer, mediaStore, qctx, fieldErrors)
 
@@ -2158,6 +2159,21 @@ func HandleQuestionSave(
 		// requireQuizOwner so gosec flags fmt.Sprintf's %d as tainted.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(qctx.Quiz.ID, 10), http.StatusSeeOther)
 	})
+}
+
+// addQuestionCountProblem flags a new question on a quiz already at
+// maxQuestionsPerQuiz, so one-at-a-time adds cannot pass the cap an import
+// enforces.
+func addQuestionCountProblem(problems map[string]string, qctx *questionSaveCtx) map[string]string {
+	if qctx.Question.ID != 0 || len(qctx.Quiz.Questions) < maxQuestionsPerQuiz {
+		return problems
+	}
+	if problems == nil {
+		problems = make(map[string]string)
+	}
+	problems["text"] = fmt.Sprintf("A quiz may have at most %d questions", maxQuestionsPerQuiz)
+
+	return problems
 }
 
 // loadQuestionForSave parses the quizID + questionID off the path,

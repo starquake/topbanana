@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -536,4 +537,35 @@ func roundByTitle(t *testing.T, env *adminEnv, quizID int64, title string) *quiz
 	t.Fatalf("no round titled %q on quiz %d", title, quizID)
 
 	return nil
+}
+
+// TestHandleRoundSave_RoundCountCap pins that adding a round to a quiz already
+// at the round cap is refused, matching the cap the import enforces (#1350).
+func TestHandleRoundSave_RoundCountCap(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	qz := env.seedQuiz(t, ownedQuiz("Round Cap", "round-cap"))
+	for i := range MaxRoundsPerQuiz - 1 {
+		if err := env.quizzes.CreateRound(t.Context(), &quiz.Round{
+			QuizID: qz.ID, Title: fmt.Sprintf("Round %d", i), Position: i + 2,
+		}); err != nil {
+			t.Fatalf("CreateRound err = %v, want nil", err)
+		}
+	}
+
+	rec := postRoundSave(t, env, strconv.FormatInt(qz.ID, 10), url.Values{"title": {"One Too Many"}}, adminActor)
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), fmt.Sprintf(
+		"at most %d rounds",
+		MaxRoundsPerQuiz,
+	); !strings.Contains(
+		got,
+		want,
+	) {
+		t.Errorf("body should contain %q", want)
+	}
 }
