@@ -119,10 +119,10 @@ test.describe('live reconnect and recovery', () => {
     );
     expect(await hardCloseStream(page)).toBe(true);
     await expect(page.getByTestId('connection-trouble')).toBeVisible();
+    await page.unroute(`**/api/sessions/${joinCode}/state`);
 
     const benContext = await hostSessions.newPlayerContext();
     await claimAndJoin(benContext.request, joinCode, ben);
-    await page.unroute(`**/api/sessions/${joinCode}/state`);
 
     // The backoff timer re-opens the stream and re-reads state with no
     // foreground return or tap, so the second player appears.
