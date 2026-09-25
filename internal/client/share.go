@@ -158,6 +158,8 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The locale comes from the locale cookie or Accept-Language (locale.Resolve).
+	w.Header().Add("Vary", "Cookie, Accept-Language")
 	if err := t.Execute(w, data); err != nil {
 		// Headers are already flushed - log and let the client see a
 		// truncated response rather than a stray 500.

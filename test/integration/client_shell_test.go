@@ -72,3 +72,24 @@ func TestClientShell_PreloadsFonts(t *testing.T) {
 		t.Error("client shell preloads the extended-latin subset, which should not be preloaded (#691)")
 	}
 }
+
+// TestClientShell_VariesOnLocale pins that the shells, whose language follows
+// the locale cookie or Accept-Language, tell caches to key on both.
+func TestClientShell_VariesOnLocale(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	for _, path := range []string{"/client/", "/play/does-not-exist-99999", "/join"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			resp := httpGet(ctx, t, http.DefaultClient, srv.BaseURL+path)
+			defer closeBody(t, resp.Body)
+			for _, want := range []string{"Cookie", "Accept-Language"} {
+				if got := resp.Header.Get("Vary"); !strings.Contains(got, want) {
+					t.Errorf("GET %s Vary = %q, should contain %q", path, got, want)
+				}
+			}
+		})
+	}
+}
