@@ -338,12 +338,11 @@ func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	return nil
 }
 
-// UpdateQuiz updates a quiz using a transaction.
+// UpdateQuiz updates the quiz's own row only. qz.Questions is ignored, so a
+// save built from a stale snapshot cannot overwrite or delete questions edited
+// elsewhere in the meantime.
 func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		return s.execUpdateQuiz(ctx, q, qz)
-	})
-	if err != nil {
+	if err := execUpdateQuiz(ctx, s.q, qz); err != nil {
 		return fmt.Errorf("failed to update quiz: %w", err)
 	}
 
@@ -940,10 +939,9 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	for _, qs := range qz.Questions {
 		qs.ID = 0
 		qs.QuizID = qz.ID
-	}
-
-	if err = s.handleQuestions(ctx, q, qz); err != nil {
-		return fmt.Errorf("failed to handle questions: %w", err)
+		if err = s.execCreateQuestion(ctx, q, qs); err != nil {
+			return fmt.Errorf("failed to create question: %w", err)
+		}
 	}
 
 	return nil
@@ -1001,7 +999,7 @@ func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz 
 	return nil
 }
 
-func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
+func execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
 	if qz.ID == 0 {
 		return quiz.ErrCannotUpdateQuizWithIDZero
 	}
@@ -1028,53 +1026,6 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 
 	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrUpdatingQuizNoRowsAffected
-	}
-
-	for _, qs := range qz.Questions {
-		qs.QuizID = qz.ID
-	}
-
-	if err = s.handleQuestions(ctx, q, qz); err != nil {
-		return fmt.Errorf("failed to handle questions: %w", err)
-	}
-
-	return nil
-}
-
-func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
-	var err error
-	existingIDs, err := q.ListQuestionIDsByQuizID(ctx, qz.ID)
-	if err != nil {
-		return fmt.Errorf("failed to list existing question IDs for quiz %d: %w", qz.ID, err)
-	}
-
-	incomingIDs := make(map[int64]bool)
-	for _, qs := range qz.Questions {
-		if qs.ID == 0 {
-			// CREATE
-			if createErr := s.execCreateQuestion(ctx, q, qs); createErr != nil {
-				return fmt.Errorf("failed to create question: %w", createErr)
-			}
-		} else {
-			// UPDATE
-			incomingIDs[qs.ID] = true
-
-			if updateErr := s.execUpdateQuestion(ctx, q, qs); updateErr != nil {
-				return fmt.Errorf("failed to update question: %w", updateErr)
-			}
-		}
-	}
-
-	// DELETE
-	deleteIDs := make([]int64, 0, len(existingIDs))
-	for _, id := range existingIDs {
-		if !incomingIDs[id] {
-			deleteIDs = append(deleteIDs, id)
-		}
-	}
-
-	if err = s.execDeleteQuestions(ctx, q, deleteIDs); err != nil {
-		return fmt.Errorf("failed to delete questions: %w", err)
 	}
 
 	return nil

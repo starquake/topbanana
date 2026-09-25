@@ -251,12 +251,6 @@ FROM questions
 WHERE quiz_id = ?
 ORDER BY position;
 
--- name: ListQuestionIDsByQuizID :many
-SELECT id
-FROM questions
-WHERE quiz_id = ?
-ORDER BY position;
-
 -- name: ListQuestionIDsByRoundID :many
 -- Lists the question IDs attached to a round, snapshotted up front by the
 -- round delete so it can clean up each question's dependent game_questions
@@ -304,9 +298,8 @@ SET round_id = ?
 WHERE id = ?;
 
 -- name: UpdateQuestionPosition :execresult
--- Position-only update. Used by the reorder flow (#16) to swap a pair
--- of questions atomically inside a transaction without rewriting the
--- text/image fields.
+-- Position-only update. Used by the drag-and-drop reorder to renumber
+-- questions inside a transaction without rewriting the text/image fields.
 UPDATE questions
 SET position = ?
 WHERE id = ?;
