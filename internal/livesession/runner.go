@@ -319,7 +319,8 @@ func (r *Runner) advanceRoundIntro(ctx context.Context, sess *Session, now time.
 // advanceQuestion closes the current question when every active player has
 // answered (early close) or the answer window has expired (timeout close),
 // moving into the reveal phase and scoring the picks. The reveal is written
-// first so the answer set is frozen before it is scored (#1334).
+// first so the answer set is frozen before it is scored (#1334); a scoring
+// failure is retried before the reveal advances (#1335).
 func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Time) {
 	if sess.CurrentQuestionID == nil || sess.QuestionExpiresAt == nil {
 		return
@@ -345,17 +346,21 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 	r.markPhase(sess.ID, now)
-	r.scoreQuestion(ctx, sess)
+	r.scoreQuestionLogged(ctx, sess)
 	r.publish(sess.JoinCode, PhaseReveal)
 }
 
-// advanceReveal moves to the next question once the reveal beat has elapsed,
-// or - when the revealed question was the last of its round - into the
-// between-rounds round_results screen. The final round skips round_results and
+// advanceReveal moves to the next question once the reveal beat has elapsed
+// and every pick on the revealed question is scored, or - when the revealed
+// question was the last of its round - into the between-rounds round_results
+// screen. The final round skips round_results and
 // finishes directly, so the game ends on a single final-standings screen rather
 // than showing "Scores so far" back-to-back with "Final scores".
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
 	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RevealBeat {
+		return
+	}
+	if !r.scoreQuestionLogged(ctx, sess) {
 		return
 	}
 
@@ -631,34 +636,45 @@ func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 	r.forgetPublished(sess.JoinCode)
 }
 
-// scoreQuestion computes and writes the score for every pick on the current
-// question using the shared CalculateScore curve.
-func (r *Runner) scoreQuestion(ctx context.Context, sess *Session) {
-	if sess.CurrentQuestionID == nil || sess.QuestionStartedAt == nil || sess.QuestionExpiresAt == nil {
-		return
-	}
-	answers, err := r.store.ListAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
-	if err != nil {
+// scoreQuestionLogged runs scoreQuestion and logs a failure, reporting whether
+// every pick is now scored.
+func (r *Runner) scoreQuestionLogged(ctx context.Context, sess *Session) bool {
+	if err := r.scoreQuestion(ctx, sess); err != nil {
 		r.logger.WarnContext(
 			ctx,
-			"runner failed to list answers for scoring",
+			"runner failed to score question",
 			slog.String(logSessionKey, sess.ID),
 			slog.Any("err", err),
 		)
 
-		return
+		return false
+	}
+
+	return true
+}
+
+// scoreQuestion computes and writes the score for every not-yet-scored pick on
+// the current question using the shared CalculateScore curve. Already-scored
+// picks are skipped, so a retry after a partial failure only fills the gaps.
+func (r *Runner) scoreQuestion(ctx context.Context, sess *Session) error {
+	if sess.CurrentQuestionID == nil || sess.QuestionStartedAt == nil || sess.QuestionExpiresAt == nil {
+		return nil
+	}
+	answers, err := r.store.ListAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
+	if err != nil {
+		return fmt.Errorf("failed to list answers for scoring: %w", err)
 	}
 	for _, a := range answers {
+		if a.Score != nil {
+			continue
+		}
 		score := r.scorer.ScoreAnswer(ctx, a.Correct, *sess.QuestionStartedAt, *sess.QuestionExpiresAt, a.AnsweredAt)
-		if err := r.store.SetAnswerScore(ctx, sess.ID, *sess.CurrentQuestionID, a.PlayerID, score); err != nil {
-			r.logger.WarnContext(
-				ctx,
-				"runner failed to set answer score",
-				slog.String(logSessionKey, sess.ID),
-				slog.Any("err", err),
-			)
+		if err = r.store.SetAnswerScore(ctx, sess.ID, *sess.CurrentQuestionID, a.PlayerID, score); err != nil {
+			return fmt.Errorf("failed to set answer score: %w", err)
 		}
 	}
+
+	return nil
 }
 
 // allActiveAnswered reports whether every active player has answered the

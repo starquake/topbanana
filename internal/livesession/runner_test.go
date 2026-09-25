@@ -1585,8 +1585,9 @@ func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
 	}
 }
 
-// hookStore wraps the real store to inject the interleavings a real store
-// cannot produce on demand: work that lands between a read and the next write.
+// hookStore wraps the real store to inject the interleavings and failures a
+// real store cannot produce on demand: work that lands between a read and the
+// next write, and a scoring write that fails.
 type hookStore struct {
 	*store.LiveSessionStore
 
@@ -1595,7 +1596,11 @@ type hookStore struct {
 	// matching call.
 	beforeEnterReveal  func()
 	beforeRecordAnswer func()
+	// failScores is how many SetAnswerScore calls fail before one succeeds.
+	failScores int
 }
+
+var errInjectedScore = errors.New("injected score failure")
 
 func (s *hookStore) EnterReveal(ctx context.Context, sessionID string, expected Phase, questionID int64) (bool, error) {
 	s.takeHook(&s.beforeEnterReveal)()
@@ -1609,6 +1614,20 @@ func (s *hookStore) RecordAnswer(
 	s.takeHook(&s.beforeRecordAnswer)()
 
 	return s.LiveSessionStore.RecordAnswer(ctx, sessionID, questionID, playerID, optionID, answeredAt)
+}
+
+func (s *hookStore) SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error {
+	s.mu.Lock()
+	fail := s.failScores > 0
+	if fail {
+		s.failScores--
+	}
+	s.mu.Unlock()
+	if fail {
+		return errInjectedScore
+	}
+
+	return s.LiveSessionStore.SetAnswerScore(ctx, sessionID, questionID, playerID, score)
 }
 
 func (s *hookStore) takeHook(hook *func()) func() {
@@ -1702,5 +1721,54 @@ func TestRunner_ScoresAnswerLandingJustBeforeClose(t *testing.T) {
 	}
 	if got, want := *score, scoreAt(q, *q.QuestionExpiresAt); got != want {
 		t.Errorf("deadline pick score = %d, want %d", got, want)
+	}
+}
+
+// TestRunner_RetriesFailedScoring pins #1335: a scoring failure at close does
+// not leave the picks unscored; the runner holds the reveal and retries until
+// every pick is scored, then advances.
+func TestRunner_RetriesFailedScoring(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	q := h.openFirstQuestion(t)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	answerAt := h.clock.Now().Add(runnerCfg.QuestionReadBeat)
+	if err := h.service.SubmitAnswer(ctx, h.code, h.players[0], optRight, answerAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	// Fail at close and again on the first retry.
+	hooked := &hookStore{LiveSessionStore: h.store, failScores: 2}
+	r := h.runnerOver(hooked)
+	tick := func() { ExportRunnerTick(ctx, r, h.clock.Now()) }
+
+	h.clock.advance(q.QuestionExpiresAt.Sub(h.clock.Now()) + time.Millisecond)
+	tick()
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after timeout = %q, want %q", got, want)
+	}
+	if score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0]); score != nil {
+		t.Fatalf("score after failed close = %d, want nil (injected failure)", *score)
+	}
+
+	h.clock.advance(runnerCfg.RevealBeat)
+	tick()
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after failed retry = %q, want %q (held until scored)", got, want)
+	}
+
+	tick()
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after successful retry = %q, want %q", got, want)
+	}
+	score, _ := h.answerScore(t, q.ID, *q.CurrentQuestionID, h.players[0])
+	if score == nil {
+		t.Fatal("score after retry = nil, want the pick scored")
+	}
+	if got, want := *score, scoreAt(q, answerAt); got != want {
+		t.Errorf("score after retry = %d, want %d", got, want)
 	}
 }
