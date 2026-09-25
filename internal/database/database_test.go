@@ -73,8 +73,11 @@ func TestValidateSQLitePragmas(t *testing.T) {
 		t.Parallel()
 		for _, dsn := range []string{
 			"file:db.sqlite?_foreign_keys=1&_busy_timeout=5000&_txlock=immediate",
-			"file:db.sqlite?_pragma=foreign_keys(2)&_pragma=busy_timeout(5000)&_txlock=immediate",
+			"file:db.sqlite?_fk=YES&_busy_timeout=5000&_txlock=immediate",
+			"file:db.sqlite?_foreign_keys=true&_busy_timeout=5000&_txlock=immediate",
 			"file:db.sqlite?_pragma=foreign_keys('on')&_pragma=busy_timeout(5000)&_txlock=immediate",
+			`file:db.sqlite?_pragma=foreign_keys("TRUE")&_pragma=busy_timeout(5000)&_txlock=immediate`,
+			"file:db.sqlite?_pragma=foreign_keys%3Dyes&_pragma=busy_timeout(5000)&_txlock=immediate",
 		} {
 			if err := database.ExportValidateSQLitePragmas(dsn); err != nil {
 				t.Errorf("err = %v, want nil for %q", err, dsn)
@@ -90,6 +93,36 @@ func TestValidateSQLitePragmas(t *testing.T) {
 		{
 			name: "rejects foreign_keys(0)",
 			dsn:  "file:db.sqlite?_pragma=foreign_keys(0)&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects foreign_keys(-1), which SQLite reads as off",
+			dsn:  "file:db.sqlite?_pragma=foreign_keys(-1)&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects foreign_keys(256), which SQLite reads as off",
+			dsn:  "file:db.sqlite?_pragma=foreign_keys(256)&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects foreign_keys(full), which SQLite reads as off",
+			dsn:  "file:db.sqlite?_pragma=foreign_keys(full)&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects the _fk shorthand set to -1",
+			dsn:  "file:db.sqlite?_fk=-1&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects the _foreign_keys shorthand set to 256",
+			dsn:  "file:db.sqlite?_foreign_keys=256&_pragma=busy_timeout(5000)&_txlock=immediate",
+			want: database.ErrDisabledSQLitePragma,
+		},
+		{
+			name: "rejects an empty _fk shorthand, which suppresses the pragma",
+			dsn:  "file:db.sqlite?_foreign_keys=1&_fk=&_pragma=busy_timeout(5000)&_txlock=immediate",
 			want: database.ErrDisabledSQLitePragma,
 		},
 		{
@@ -149,6 +182,66 @@ func TestValidateSQLitePragmas(t *testing.T) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestOpen_AcceptedForeignKeysValuesEnableEnforcement pins that every
+// foreign_keys value validation accepts really switches enforcement on.
+func TestOpen_AcceptedForeignKeysValuesEnableEnforcement(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
+
+	for _, tt := range []struct {
+		query  string
+		accept bool
+	}{
+		{query: "_pragma=foreign_keys(1)", accept: true},
+		{query: "_pragma=foreign_keys(ON)", accept: true},
+		{query: "_pragma=foreign_keys('true')", accept: true},
+		{query: "_pragma=foreign_keys%3Dyes", accept: true},
+		{query: "_fk=1", accept: true},
+		{query: "_fk=on", accept: true},
+		{query: "_foreign_keys=TRUE", accept: true},
+		{query: "_foreign_keys=yes", accept: true},
+		{query: "_pragma=foreign_keys(0)"},
+		{query: "_pragma=foreign_keys(-1)"},
+		{query: "_pragma=foreign_keys(256)"},
+		{query: "_pragma=foreign_keys(full)"},
+		{query: "_fk=off"},
+		{query: "_foreign_keys=no"},
+	} {
+		t.Run(tt.query, func(t *testing.T) {
+			t.Parallel()
+
+			dsn := ":memory:?" + tt.query + "&_pragma=busy_timeout(5000)&_txlock=immediate"
+			conn, err := database.Open(t.Context(), "sqlite", dsn, 1, 1, 0)
+			if !tt.accept {
+				if got, want := err, database.ErrDisabledSQLitePragma; !errors.Is(got, want) {
+					t.Errorf("Open err = %v, want %v", got, want)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("Open err = %v, want nil", err)
+			}
+			t.Cleanup(func() {
+				if cerr := conn.Close(); cerr != nil {
+					t.Errorf("conn.Close err = %v", cerr)
+				}
+			})
+
+			var foreignKeys int
+			if err = conn.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+				t.Fatalf("PRAGMA foreign_keys err = %v", err)
+			}
+			if got, want := foreignKeys, 1; got != want {
+				t.Errorf("PRAGMA foreign_keys = %d, want %d", got, want)
+			}
+		})
+	}
 }
 
 // TestExecTx_PanicReleasesTransaction pins that a panicking fn does not leave
