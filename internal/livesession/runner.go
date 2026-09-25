@@ -127,6 +127,9 @@ type Runner struct {
 	// beat-gated phase (round_intro or reveal), so the beat is measured from
 	// the transition rather than persisted.
 	phaseSince map[string]time.Time
+	// unscored marks sessions revealed while scoring their question failed,
+	// so the reveal retries it every tick and republishes once it lands.
+	unscored map[string]bool
 }
 
 // NewRunner builds a runner over the live-session store, quiz reader, tick
@@ -143,6 +146,7 @@ func NewRunner(
 		clock:      realClock{},
 		cfg:        cfg.withDefaults(),
 		phaseSince: make(map[string]time.Time),
+		unscored:   make(map[string]bool),
 	}
 }
 
@@ -347,7 +351,9 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 		return
 	}
 	r.markPhase(sess.ID, now)
-	r.scoreQuestionLogged(ctx, sess)
+	if !r.scoreQuestionLogged(ctx, sess) {
+		r.markUnscored(sess.ID)
+	}
 	r.publish(sess.JoinCode, PhaseReveal)
 }
 
@@ -358,9 +364,17 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 // finishes directly, so the game ends on a single final-standings screen rather
 // than showing "Scores so far" back-to-back with "Final scores".
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
+	if r.isUnscored(sess.ID) {
+		if !r.scoreQuestionLogged(ctx, sess) {
+			return
+		}
+		r.clearUnscored(sess.ID)
+		r.publish(sess.JoinCode, PhaseReveal)
+	}
 	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RevealBeat {
 		return
 	}
+	// Backstop for a restart that lost the unscored mark.
 	if !r.scoreQuestionLogged(ctx, sess) {
 		return
 	}
@@ -807,6 +821,26 @@ func (r *Runner) forget(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.phaseSince, sessionID)
+	delete(r.unscored, sessionID)
+}
+
+func (r *Runner) markUnscored(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unscored[sessionID] = true
+}
+
+func (r *Runner) clearUnscored(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.unscored, sessionID)
+}
+
+func (r *Runner) isUnscored(sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.unscored[sessionID]
 }
 
 // forgetAllExcept drops the phase clock of every session not in live.
