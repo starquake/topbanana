@@ -403,11 +403,12 @@ func newGuestFixture(t *testing.T, extraEnv map[string]string) (context.Context,
 // apiResult is the part of a response the guest-minting tests assert on.
 type apiResult struct {
 	status     int
+	retryAfter string
 	setSession bool
 }
 
 // sendAPI issues one request with an optional JSON body and reports its
-// status and whether it set the session cookie.
+// status, Retry-After header, and whether it set the session cookie.
 func sendAPI(ctx context.Context, t *testing.T, client *http.Client, method, target, body string) apiResult {
 	t.Helper()
 
@@ -424,7 +425,7 @@ func sendAPI(ctx context.Context, t *testing.T, client *http.Client, method, tar
 	}
 	defer closeBody(t, resp.Body)
 
-	res := apiResult{status: resp.StatusCode}
+	res := apiResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 	for _, c := range resp.Cookies() {
 		if c.Name == session.CookieName {
 			res.setSession = true
@@ -510,5 +511,65 @@ func TestAnonymous_SessionJoinMints(t *testing.T) {
 	}
 	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 1; got != want {
 		t.Errorf("anonymous players added by POST join = %d, want %d", got, want)
+	}
+}
+
+// TestAnonymous_MintBudgetPerIP pins that minting past GUEST_MINT_BUDGET
+// from one IP answers 429 with Retry-After and creates no row.
+func TestAnonymous_MintBudgetPerIP(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, map[string]string{"GUEST_MINT_BUDGET": "2"})
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+	body := fmt.Sprintf(`{"quizId": %d}`, fx.quiz.ID)
+
+	for i := range 2 {
+		res := sendAPI(ctx, t, newCookieJarClient(t), http.MethodPost, fx.baseURL+"/api/games", body)
+		if got, want := res.status, http.StatusCreated; got != want {
+			t.Fatalf("mint #%d status = %d, want %d", i+1, got, want)
+		}
+	}
+
+	res := sendAPI(ctx, t, newCookieJarClient(t), http.MethodPost, fx.baseURL+"/api/games", body)
+	if got, want := res.status, http.StatusTooManyRequests; got != want {
+		t.Errorf("mint over budget status = %d, want %d", got, want)
+	}
+	if res.retryAfter == "" {
+		t.Error("mint over budget carried no Retry-After header")
+	}
+	if res.setSession {
+		t.Error("mint over budget set the session cookie, want none")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 2; got != want {
+		t.Errorf("anonymous players added = %d, want %d (none past the budget)", got, want)
+	}
+}
+
+// TestAnonymous_RenameBudgetPerIP pins that PATCH /api/players/me past
+// GUEST_RENAME_BUDGET from one IP answers 429 with Retry-After and leaves the
+// name unchanged.
+func TestAnonymous_RenameBudgetPerIP(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, map[string]string{"GUEST_RENAME_BUDGET": "2"})
+	client := newCookieJarClient(t)
+
+	for i, name := range []string{"guest-one", "guest-two"} {
+		if got, want := patchPlayerDisplayName(ctx, t, client, fx.baseURL, name), http.StatusOK; got != want {
+			t.Fatalf("rename #%d status = %d, want %d", i+1, got, want)
+		}
+	}
+
+	res := sendAPI(
+		ctx, t, client, http.MethodPatch, fx.baseURL+"/api/players/me", `{"displayName": "guest-three"}`,
+	)
+	if got, want := res.status, http.StatusTooManyRequests; got != want {
+		t.Errorf("rename over budget status = %d, want %d", got, want)
+	}
+	if res.retryAfter == "" {
+		t.Error("rename over budget carried no Retry-After header")
+	}
+	if got, want := fetchPlayerMe(ctx, t, client, fx.baseURL).DisplayName, "guest-two"; got != want {
+		t.Errorf("displayName after blocked rename = %q, want %q", got, want)
 	}
 }

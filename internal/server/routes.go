@@ -1056,11 +1056,12 @@ func addAdminRoundRoutes(
 // (sameOriginCheck) that rejects a cross-site Origin / Sec-Fetch-Site.
 //
 // Every route is wrapped in EnsurePlayer. An unsafe request from a cookieless
-// visitor mints an anonymous players row before the handler runs, so
-// POST/PATCH handlers can read the player off the context; a GET/HEAD without
-// a session runs with no player and mints nothing, so those handlers must
-// cope with a missing player. The same-origin guard runs outermost so a
-// cross-site mutating request is rejected before any row is minted.
+// visitor mints an anonymous players row (per-IP budgeted) before the handler
+// runs, so POST/PATCH handlers can read the player off the context; a
+// GET/HEAD without a session runs with no player and mints nothing, so those
+// handlers must cope with a missing player. The same-origin guard runs
+// outermost so a cross-site mutating request is rejected before any row is
+// minted. PATCH /api/players/me also carries a per-IP rename budget.
 func addAPIRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -1071,14 +1072,18 @@ func addAPIRoutes(
 	cfg *config.Config,
 ) {
 	expectedOrigin := originFromBaseURL(cfg.BaseURL)
+	mintLimiter := auth.NewIPBudgetLimiter(cfg.GuestMintBudget, config.GuestLimitWindow, cfg.TrustedProxyCIDRs)
+	renameLimiter := auth.NewIPBudgetLimiter(cfg.GuestRenameBudget, config.GuestLimitWindow, cfg.TrustedProxyCIDRs)
 	ensurePlayer := func(h http.Handler) http.Handler {
-		return sameOriginCheck(expectedOrigin, auth.EnsurePlayer(h, stores.Players, sessions, logger))
+		return sameOriginCheck(expectedOrigin, auth.EnsurePlayer(h, stores.Players, sessions, mintLimiter, logger))
 	}
 
 	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
 	mux.Handle(
 		"PATCH /api/players/me",
-		ensurePlayer(clientapi.HandlePlayerClaimName(logger, stores.Players, gameService)),
+		ensurePlayer(auth.LimitByIP(
+			clientapi.HandlePlayerClaimName(logger, stores.Players, gameService), renameLimiter,
+		)),
 	)
 	mux.Handle("GET /api/quizzes", ensurePlayer(clientapi.HandleQuizList(logger, stores.Quizzes)))
 	mux.Handle(

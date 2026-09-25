@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -375,7 +376,7 @@ func TestEnsurePlayer_NoCookieUnsafeMethod_CreatesAnonymousAndSetsCookie(t *test
 		w.WriteHeader(http.StatusTeapot)
 	})
 
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
@@ -431,7 +432,7 @@ func TestEnsurePlayer_ValidCookie_ReusesExistingRow(t *testing.T) {
 		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, existing.ID, 0)
@@ -464,7 +465,7 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	// Issue a cookie pointing at an ID that does not exist in the store.
 	rec := httptest.NewRecorder()
@@ -502,7 +503,7 @@ func TestEnsurePlayer_TwoCookielessRequests_TwoDistinctPlayers(t *testing.T) {
 		seenIDs = append(seenIDs, p.ID)
 	})
 
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	for range 2 {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
@@ -563,7 +564,7 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+	mw := EnsurePlayer(next, fakeStore, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
@@ -594,7 +595,7 @@ func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
 		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+	mw := EnsurePlayer(next, fakeStore, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
@@ -619,7 +620,7 @@ func TestEnsurePlayer_CreateAnonymousNonCollisionError_500(t *testing.T) {
 		t.Error("next should not be called when CreateAnonymousPlayer returns a non-collision error")
 	})
 
-	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+	mw := EnsurePlayer(next, fakeStore, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
@@ -646,7 +647,7 @@ func TestEnsurePlayer_GetPlayerError_500(t *testing.T) {
 		t.Error("next should not be called on store error")
 	})
 
-	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+	mw := EnsurePlayer(next, fakeStore, sessions, unlimited(), discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, existing.ID, 0)
@@ -683,7 +684,7 @@ func TestEnsurePlayer_NoCookieSafeMethod_RunsWithoutPlayer(t *testing.T) {
 				w.WriteHeader(http.StatusTeapot)
 			})
 
-			mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+			mw := EnsurePlayer(next, fakeStore, sessions, unlimited(), discardLogger())
 
 			req := httptest.NewRequestWithContext(t.Context(), method, "/api/quizzes", nil)
 			rec := httptest.NewRecorder()
@@ -702,5 +703,75 @@ func TestEnsurePlayer_NoCookieSafeMethod_RunsWithoutPlayer(t *testing.T) {
 				t.Error("session cookie was set on a sessionless safe request, want none")
 			}
 		})
+	}
+}
+
+func TestEnsurePlayer_MintOverBudget_429WithoutRow(t *testing.T) {
+	t.Parallel()
+
+	fakeStore := newFakePlayerStore()
+	sessions := session.New([]byte("k"), true)
+	limiter := NewIPBudgetLimiter(1, time.Minute, nil)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mw := EnsurePlayer(next, fakeStore, sessions, limiter, discardLogger())
+
+	first := httptest.NewRecorder()
+	mw.ServeHTTP(first, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil))
+	if got, want := first.Code, http.StatusNoContent; got != want {
+		t.Fatalf("first status = %d, want %d", got, want)
+	}
+
+	second := httptest.NewRecorder()
+	mw.ServeHTTP(second, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil))
+	if got, want := second.Code, http.StatusTooManyRequests; got != want {
+		t.Errorf("second status = %d, want %d", got, want)
+	}
+	if got, want := second.Header().Get("Retry-After"), "60"; got != want {
+		t.Errorf("Retry-After = %q, want %q", got, want)
+	}
+	if got, want := fakeStore.rowsCreated(), int64(1); got != want {
+		t.Errorf("rows created = %d, want %d (no row past the budget)", got, want)
+	}
+	if _, ok := findSessionCookie(second); ok {
+		t.Error("session cookie set on a 429, want none")
+	}
+}
+
+// TestEnsurePlayer_ExistingSessionSkipsMintBudget pins that the budget only
+// gates minting: a player with a valid session is admitted however spent it is.
+func TestEnsurePlayer_ExistingSessionSkipsMintBudget(t *testing.T) {
+	t.Parallel()
+
+	fakeStore := newFakePlayerStore()
+	existing, err := fakeStore.CreateAnonymousPlayer(t.Context(), "anon-x")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	sessions := session.New([]byte("k"), true)
+	limiter := NewIPBudgetLimiter(1, time.Minute, nil)
+	if _, ok := limiter.Allow("192.0.2.1"); !ok {
+		t.Fatal("seed Allow = false, want true")
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mw := EnsurePlayer(next, fakeStore, sessions, limiter, discardLogger())
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, existing.ID, 0)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
+	req.RemoteAddr = "192.0.2.1:1234"
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusNoContent; got != want {
+		t.Errorf("status = %d, want %d", got, want)
 	}
 }

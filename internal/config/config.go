@@ -108,6 +108,14 @@ var ErrMediaImportBudgetNegative = errors.New("MEDIA_IMPORT_BUDGET must not be n
 // budget is measured over, so a negative value is meaningless.
 var ErrMediaImportBudgetWindowNegative = errors.New("MEDIA_IMPORT_BUDGET_WINDOW must not be negative")
 
+// ErrGuestMintBudgetNegative is returned when GUEST_MINT_BUDGET parses to a
+// negative integer; zero is allowed and disables the limiter.
+var ErrGuestMintBudgetNegative = errors.New("GUEST_MINT_BUDGET must not be negative")
+
+// ErrGuestRenameBudgetNegative is returned when GUEST_RENAME_BUDGET parses to a
+// negative integer; zero is allowed and disables the limiter.
+var ErrGuestRenameBudgetNegative = errors.New("GUEST_RENAME_BUDGET must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -231,6 +239,19 @@ const (
 	// MediaImportBudgetWindowDefault is the default rolling window the per-host
 	// import budget is measured over.
 	MediaImportBudgetWindowDefault = time.Minute
+
+	// GuestMintBudgetDefault is how many anonymous players one client IP may
+	// create per GuestLimitWindow (#1359). Sized for a couple of classrooms
+	// behind one school NAT joining at once, while bounding a scripted loop.
+	GuestMintBudgetDefault = 60
+
+	// GuestRenameBudgetDefault is how many PATCH /api/players/me renames one
+	// client IP may make per GuestLimitWindow. Every guest joining a live room
+	// names itself through this endpoint, so it matches the mint budget.
+	GuestRenameBudgetDefault = 60
+
+	// GuestLimitWindow is the trailing window both guest budgets are counted over.
+	GuestLimitWindow = time.Minute
 
 	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
 	sessionKeyByteLength = 32
@@ -414,6 +435,16 @@ type Config struct {
 	// MediaImportBudgetWindow is the rolling window MediaImportBudget is measured
 	// over. Defaults to 1 minute. Parsed from MEDIA_IMPORT_BUDGET_WINDOW.
 	MediaImportBudgetWindow time.Duration
+
+	// GuestMintBudget is how many anonymous players one client IP may create
+	// per GuestLimitWindow. Defaults to 60. Parsed from GUEST_MINT_BUDGET; zero
+	// disables the limiter.
+	GuestMintBudget int
+
+	// GuestRenameBudget is how many PATCH /api/players/me requests one client
+	// IP may make per GuestLimitWindow. Defaults to 60. Parsed from
+	// GUEST_RENAME_BUDGET; zero disables the limiter.
+	GuestRenameBudget int
 
 	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
 	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
@@ -622,6 +653,8 @@ func defaultConfig() Config {
 		MediaImportMaxBytes:     MediaImportMaxBytesDefault,
 		MediaImportBudget:       MediaImportBudgetDefault,
 		MediaImportBudgetWindow: MediaImportBudgetWindowDefault,
+		GuestMintBudget:         GuestMintBudgetDefault,
+		GuestRenameBudget:       GuestRenameBudgetDefault,
 	}
 }
 
@@ -854,8 +887,25 @@ func parseMediaImportLimits(getenv func(string) string, c *Config) error {
 		return err
 	}
 
-	return parseNonNegativeDuration(
+	if err := parseNonNegativeDuration(
 		getenv, "MEDIA_IMPORT_BUDGET_WINDOW", ErrMediaImportBudgetWindowNegative, &c.MediaImportBudgetWindow,
+	); err != nil {
+		return err
+	}
+
+	return parseGuestLimits(getenv, c)
+}
+
+// parseGuestLimits reads the per-IP guest mint and rename budgets into c.
+func parseGuestLimits(getenv func(string) string, c *Config) error {
+	if err := parseNonNegativeInt(
+		getenv, "GUEST_MINT_BUDGET", ErrGuestMintBudgetNegative, &c.GuestMintBudget,
+	); err != nil {
+		return err
+	}
+
+	return parseNonNegativeInt(
+		getenv, "GUEST_RENAME_BUDGET", ErrGuestRenameBudgetNegative, &c.GuestRenameBudget,
 	)
 }
 

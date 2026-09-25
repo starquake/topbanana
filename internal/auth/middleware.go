@@ -31,12 +31,14 @@ const petnameMaxAttempts = 5
 
 // EnsurePlayer attaches the session's players row to the request context.
 // On an unsafe method with no usable session it mints a fresh anonymous row
-// and sets the session cookie. A GET/HEAD with no usable session runs next
-// with no player and no cookie, so read-only traffic never creates rows (#1359).
+// and sets the session cookie, subject to mintLimiter (429 when the client IP
+// is over budget). A GET/HEAD with no usable session runs next with no player
+// and no cookie, so read-only traffic never creates rows (#1359).
 func EnsurePlayer(
 	next http.Handler,
 	players PlayerStore,
 	sessions *session.Manager,
+	mintLimiter *IPBudgetLimiter,
 	logger *slog.Logger,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +61,11 @@ func EnsurePlayer(
 			return
 		}
 
+		if wait, ok := mintLimiter.Allow(mintLimiter.ClientIP(r)); !ok {
+			writeTooManyRequests(w, wait)
+
+			return
+		}
 		player, err = mintAnonymousPlayer(r.Context(), players)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error creating anonymous player", slog.Any("err", err))
