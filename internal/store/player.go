@@ -283,25 +283,47 @@ func (s *PlayerStore) GetPlayerByProviderSubject(
 }
 
 // CreatePlayerFromOAuth inserts a new players row with the supplied
-// displayName + email and no password_hash. Returns auth.ErrDisplayNameTaken
-// when the displayName collides (the OAuth handler retries on this
-// sentinel with a fresh petname) and auth.ErrEmailTaken when the email does.
+// displayName + email and no password_hash, and links the (provider, subject)
+// identity onto it in the same transaction. The immediate write lock serialises
+// the "first credentialled player becomes admin" check against a concurrent
+// sign-in, and a failed link rolls the row back rather than leaving an
+// unlinked admin behind (#1330). Returns auth.ErrDisplayNameTaken when the
+// displayName collides (the OAuth handler retries on this sentinel with a fresh
+// petname), auth.ErrEmailTaken when the email does, and
+// auth.ErrIdentityAlreadyLinked when the identity is already linked to another
+// row.
 func (s *PlayerStore) CreatePlayerFromOAuth(
 	ctx context.Context,
-	displayName, email string,
+	displayName, email, provider, subject string,
 ) (*auth.Player, error) {
 	cleanedDisplayName := strings.TrimSpace(displayName)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
-	row, err := s.q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
-		DisplayName: cleanedDisplayName,
-		Email:       sql.NullString{String: cleanedEmail, Valid: true},
-	})
-	if err != nil {
-		var sqliteErr *sqlite.Error
-		if !errors.As(err, &sqliteErr) || sqliteErr.Code() != sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, fmt.Errorf("failed to create player from oauth: %w", err)
+	var (
+		created  db.Player
+		clashErr error
+	)
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
+			DisplayName: cleanedDisplayName,
+			Email:       sql.NullString{String: cleanedEmail, Valid: true},
+		})
+		if err != nil {
+			var sqliteErr *sqlite.Error
+			if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+				clashErr = err
+
+				return auth.ErrDisplayNameTaken
+			}
+
+			return fmt.Errorf("failed to create player from oauth: %w", err)
 		}
-		classified := s.classifyCredentialConflict(ctx, cleanedDisplayName, cleanedEmail, err)
+		created = row
+
+		return linkProviderIdentity(ctx, q, row.ID, provider, subject)
+	})
+	if clashErr != nil {
+		// Classified after the transaction: the lookups run on s.q, which would wait on its connection.
+		classified := s.classifyCredentialConflict(ctx, cleanedDisplayName, cleanedEmail, clashErr)
 		if errors.Is(classified, auth.ErrEmailTaken) {
 			return nil, auth.ErrEmailTaken
 		}
@@ -309,35 +331,142 @@ func (s *PlayerStore) CreatePlayerFromOAuth(
 		// An unclassified clash keeps the petname retry the caller runs on this sentinel.
 		return nil, auth.ErrDisplayNameTaken
 	}
+	if err != nil {
+		return nil, fmt.Errorf("create player from oauth: %w", err)
+	}
 
-	return playerFromRow(row), nil
+	return playerFromRow(created), nil
 }
 
 // ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
-// anonymous (no password_hash, no email) players row. Returns
-// auth.ErrPlayerNotFound when the row does not match the
-// anonymous-only guards in the SQL - the OAuth handler treats that
-// sentinel as "fall through to create a new row" so a session
-// pointing at a deleted, credentialled, or already-OAuth-linked row
-// degrades gracefully.
+// anonymous (no password_hash, no email) players row and links the
+// (provider, subject) identity onto it in one transaction, so the admin
+// bootstrap check and the link commit together (#1330). Returns
+// auth.ErrPlayerNotFound when the row does not match the anonymous-only
+// guards in the SQL - the OAuth handler treats that sentinel as "fall through
+// to create a new row" so a session pointing at a deleted, credentialled, or
+// already-OAuth-linked row degrades gracefully - and
+// auth.ErrIdentityAlreadyLinked when the identity is already linked elsewhere,
+// in which case the claim is rolled back.
 func (s *PlayerStore) ClaimPlayerForOAuth(
 	ctx context.Context,
 	playerID int64,
-	email string,
+	email, provider, subject string,
 ) (*auth.Player, error) {
-	row, err := s.q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
-		ID:    playerID,
-		Email: sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+	var claimed db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
+			ID:    playerID,
+			Email: sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return auth.ErrPlayerNotFound
+			}
+
+			return fmt.Errorf("failed to claim player for oauth: %w", err)
+		}
+		claimed = row
+
+		return linkProviderIdentity(ctx, q, row.ID, provider, subject)
 	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, auth.ErrPlayerNotFound
-		}
-
-		return nil, fmt.Errorf("failed to claim player for oauth: %w", err)
+		return nil, fmt.Errorf("claim player for oauth: %w", err)
 	}
 
-	return playerFromRow(row), nil
+	return playerFromRow(claimed), nil
+}
+
+// LinkProviderIdentity links the (provider, subject) identity onto an existing
+// row and, in the same transaction, treats the row's email as proven by the
+// provider: an unverified row is stamped verified, its unproven password is
+// dropped, and its sessions are invalidated (#1328). Returns the row as it
+// stands after the link, auth.ErrIdentityAlreadyLinked when the identity is
+// already linked (the caller re-reads it), and auth.ErrPlayerNotFound when no
+// row matches the id.
+func (s *PlayerStore) LinkProviderIdentity(
+	ctx context.Context,
+	playerID int64,
+	provider, subject string,
+) (*auth.Player, error) {
+	var linked db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		if err := linkProviderIdentity(ctx, q, playerID, provider, subject); err != nil {
+			return err
+		}
+		row, err := markEmailVerifiedByOAuth(ctx, q, playerID)
+		if err != nil {
+			return err
+		}
+		linked = row
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("link provider identity: %w", err)
+	}
+
+	return playerFromRow(linked), nil
+}
+
+// MarkPlayerEmailVerifiedByOAuth applies the same provider-attested proof as
+// [PlayerStore.LinkProviderIdentity] to a row whose identity is already linked:
+// an unverified row is stamped verified, its password dropped, and its sessions
+// invalidated. Returns the row as it stands afterwards, or auth.ErrPlayerNotFound.
+func (s *PlayerStore) MarkPlayerEmailVerifiedByOAuth(ctx context.Context, playerID int64) (*auth.Player, error) {
+	var marked db.Player
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, err := markEmailVerifiedByOAuth(ctx, q, playerID)
+		if err != nil {
+			return err
+		}
+		marked = row
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mark email verified by oauth: %w", err)
+	}
+
+	return playerFromRow(marked), nil
+}
+
+// linkProviderIdentity inserts the player_identities row on q, mapping the
+// UNIQUE (provider, subject) collision to auth.ErrIdentityAlreadyLinked.
+func linkProviderIdentity(ctx context.Context, q *db.Queries, playerID int64, provider, subject string) error {
+	err := q.LinkProviderIdentity(ctx, db.LinkProviderIdentityParams{
+		PlayerID: playerID,
+		Provider: provider,
+		Subject:  subject,
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return auth.ErrIdentityAlreadyLinked
+		}
+
+		return fmt.Errorf("failed to link provider identity: %w", err)
+	}
+
+	return nil
+}
+
+// markEmailVerifiedByOAuth runs MarkPlayerEmailVerifiedByOAuth on q and returns
+// the row as it stands afterwards.
+func markEmailVerifiedByOAuth(ctx context.Context, q *db.Queries, playerID int64) (db.Player, error) {
+	if _, err := q.MarkPlayerEmailVerifiedByOAuth(ctx, playerID); err != nil {
+		return db.Player{}, fmt.Errorf("failed to mark email verified by oauth: %w", err)
+	}
+	row, err := q.GetPlayer(ctx, playerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.Player{}, auth.ErrPlayerNotFound
+		}
+
+		return db.Player{}, fmt.Errorf("failed to reload player: %w", err)
+	}
+
+	return row, nil
 }
 
 // MarkPlayerEmailVerifiedIfNew stamps email_verified_at when it is
@@ -605,29 +734,6 @@ func (s *PlayerStore) ConsumeResetToken(
 func (s *PlayerStore) DeleteExpiredResetTokens(ctx context.Context) error {
 	if err := s.q.DeleteExpiredPasswordResetTokens(ctx, time.Now().UTC()); err != nil {
 		return fmt.Errorf("failed to delete expired reset tokens: %w", err)
-	}
-
-	return nil
-}
-
-// LinkProviderIdentity inserts a player_identities row tying the given
-// player to the (provider, subject) pair. Returns
-// auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)
-// constraint fires; the caller treats this as "another request beat us
-// to it" and re-reads the identity row.
-func (s *PlayerStore) LinkProviderIdentity(ctx context.Context, playerID int64, provider, subject string) error {
-	err := s.q.LinkProviderIdentity(ctx, db.LinkProviderIdentityParams{
-		PlayerID: playerID,
-		Provider: provider,
-		Subject:  subject,
-	})
-	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return auth.ErrIdentityAlreadyLinked
-		}
-
-		return fmt.Errorf("failed to link provider identity: %w", err)
 	}
 
 	return nil
