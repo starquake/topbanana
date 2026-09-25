@@ -640,11 +640,9 @@ func addAdminRoutes(
 // The serving routes (GET /media/{id} and GET /media/{id}/thumb) resolve the
 // viewer read-only via AuthenticatedSessionPlayer - NOT EnsurePlayer - so a
 // cacheable image response never mints a players row or attaches a Set-Cookie (a
-// Set-Cookie on a Cache-Control: public response is a shared-cache footgun). The
-// private-quiz gate only needs to know whether an authenticated viewer is
-// present. Authorization mirrors the owning quiz's own access rule, decided
-// inside the handler by the quiz's visibility: public/unlisted to anyone,
-// private to an authenticated viewer.
+// Set-Cookie on a Cache-Control: public response is a shared-cache footgun).
+// Authorization mirrors the owning quiz's own access rule and is decided inside
+// the handler.
 func addMediaRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -720,9 +718,8 @@ func addMediaRoutes(
 
 	// The serve routes resolve the viewer from the session WITHOUT minting a
 	// player row or setting a cookie (unlike EnsurePlayer): a media response is
-	// cacheable, so it must not carry a Set-Cookie. The private-quiz gate only
-	// needs to know whether an authenticated viewer is present, which
-	// AuthenticatedSessionPlayer answers read-only.
+	// cacheable, so it must not carry a Set-Cookie. AuthenticatedSessionPlayer
+	// answers who the viewer is read-only.
 	viewer := func(r *http.Request) (*auth.Player, bool) {
 		return auth.AuthenticatedSessionPlayer(r, stores.Players, sessions)
 	}

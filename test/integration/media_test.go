@@ -376,7 +376,8 @@ func uploadOneFile(
 
 // TestMediaServe_Integration covers the serving endpoints (#936 slice 2):
 // conditional requests, the thumbnail variant, the unknown-id 404, a garbage
-// id, and the public-vs-private visibility gate.
+// id, and the read gate: visibility, drafts hidden from all but the creator and
+// admins (#1331), and the cache policy each case gets.
 func TestMediaServe_Integration(t *testing.T) {
 	t.Parallel()
 
