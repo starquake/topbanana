@@ -141,6 +141,17 @@ func ValidateQuestionForm(ctx context.Context, q *quiz.Question) map[string]stri
 // payload one over the limit without hard-coding the value.
 const MaxOptions = maxOptions
 
+// Input caps exposed so the validation tests can build values just past them.
+const (
+	MaxTitleLength        = maxTitleLength
+	MaxSlugLength         = maxSlugLength
+	MaxDescriptionLength  = maxDescriptionLength
+	MaxQuestionTextLength = maxQuestionTextLength
+	MaxOptionTextLength   = maxOptionTextLength
+	MaxQuestionsPerQuiz   = maxQuestionsPerQuiz
+	MaxRoundsPerQuiz      = maxRoundsPerQuiz
+)
+
 // ParseOptionalTimeLimit exposes the unexported per-question
 // time_limit_seconds parser so the external admin_test package can pin
 // the blank / valid / garbage mapping without driving the form handler.

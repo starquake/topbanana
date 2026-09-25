@@ -615,8 +615,9 @@ type roundForm struct {
 // means the form is valid.
 func (f *roundForm) Valid(_ context.Context) map[string]string {
 	problems := map[string]string{}
-	if f.round.Title == "" {
-		problems["title"] = "Give the round a name."
+	textField{"title", "Title", f.round.Title, "Give the round a name.", maxTitleLength}.check(problems)
+	if tooLong(f.round.Summary, maxDescriptionLength) {
+		problems["summary"] = lengthProblem("Summary", maxDescriptionLength)
 	}
 	if f.round.BoundaryDurationSeconds != nil {
 		v := *f.round.BoundaryDurationSeconds
