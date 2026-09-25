@@ -365,8 +365,8 @@ type Store interface {
 	// EnterRoundIntro.
 	EnterRoundResults(ctx context.Context, sessionID string, expected Phase) (bool, error)
 	// Finish ends the session terminally: marks it finished and clears the
-	// per-question runner columns. Used when the room is actually closed (idle
-	// auto-close, or an explicit host End session).
+	// per-question runner columns. Used when the host explicitly ends the room;
+	// the idle auto-close uses [Store.FinishFrom].
 	Finish(ctx context.Context, sessionID string) error
 	// FinishFrom is [Store.Finish] as an optimistic write against expected
 	// (see EnterRoundIntro), for the runner's idle close.
@@ -1222,9 +1222,9 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz
 		return nil, fmt.Errorf("failed to list final standings for state: %w", err)
 	}
 	// A room shows final standings only after a game, so a quiz is always set
-	// here; guard the deref so a quiz-less room (which has no game to score)
-	// returns the bare standings rather than panicking.
-	if sess.QuizID == nil || qz == nil {
+	// here; a quiz-less room (which has no game to score) gets the bare
+	// standings.
+	if qz == nil {
 		return standings, nil
 	}
 
