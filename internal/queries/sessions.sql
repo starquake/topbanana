@@ -202,7 +202,8 @@ WHERE id = sqlc.arg('id')
 -- Moves the session into the reveal phase, leaving the current question and
 -- its window in place so a reader still sees which question is being revealed.
 -- Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
--- pins the reveal to the question the runner scored.
+-- pins the reveal to the question the runner closed; it scores the picks after
+-- this write, once no more can land.
 UPDATE sessions
 SET phase = 'reveal'
 WHERE id = sqlc.arg('id')

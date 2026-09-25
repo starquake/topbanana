@@ -986,7 +986,8 @@ type SetSessionRevealParams struct {
 // Moves the session into the reveal phase, leaving the current question and
 // its window in place so a reader still sees which question is being revealed.
 // Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
-// pins the reveal to the question the runner scored.
+// pins the reveal to the question the runner closed; it scores the picks after
+// this write, once no more can land.
 func (q *Queries) SetSessionReveal(ctx context.Context, arg SetSessionRevealParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, setSessionReveal, arg.ID, arg.ExpectedPhase, arg.CurrentQuestionID)
 }
