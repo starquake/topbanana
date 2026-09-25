@@ -336,13 +336,11 @@ type inviteSendResult struct {
 
 // sendInvite mints + persists the invite and dispatches the email
 // synchronously. SendInviteEmail commits the invite row before the send,
-// so an unconfigured mailer (ErrNotConfigured) still leaves an acceptable
-// link behind; that case returns ok=true with a banner that says the link
-// exists but the mail did not go out, rather than hiding the half-success.
-// A store/link-build failure (no row written) returns ok=false. Running
-// synchronously rather than detached keeps the committed row observable
-// the instant the admin sees the confirmation (and keeps the flow
-// trivially testable).
+// so an unconfigured mailer or a failed send still leaves an acceptable
+// link behind; both return ok=true with a banner that says the link exists
+// but the mail did not go out. A store/link-build failure (no row written)
+// returns ok=false. Running synchronously keeps the committed row
+// observable the instant the admin sees the confirmation.
 func sendInvite(
 	ctx context.Context, logger *slog.Logger, deps InviteDeps, email, note string, invitedByID int64, loc string,
 ) inviteSendResult {
@@ -368,8 +366,15 @@ func sendInvite(
 			banner: "Invite created for " + email + ", but email is not configured so no message was sent.",
 			ok:     true,
 		}
+	case errors.Is(err, auth.ErrInviteEmailNotSent):
+		logger.ErrorContext(ctx, "invite created but email send failed", slog.String("to", email), slog.Any("err", err))
+
+		return inviteSendResult{
+			banner: "Invite created for " + email + ", but the email could not be sent. Use Resend to try again.",
+			ok:     true,
+		}
 	default:
-		logger.ErrorContext(ctx, "invite create/send failed", slog.String("to", email), slog.Any("err", err))
+		logger.ErrorContext(ctx, "invite create failed", slog.String("to", email), slog.Any("err", err))
 
 		return inviteSendResult{banner: "Could not create the invite. Try again.", ok: false}
 	}

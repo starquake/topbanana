@@ -120,6 +120,26 @@ func TestSendInviteEmail_StoreFailureSkipsSend(t *testing.T) {
 	}
 }
 
+func TestSendInviteEmail_SendFailureKeepsInvite(t *testing.T) {
+	t.Parallel()
+
+	sendErr := errors.New("smtp down")
+	invites := &recordingInviteStore{}
+	mailerStub := &recordingSender{sendErr: sendErr}
+
+	err := SendInviteEmail(t.Context(), invites, mailerStub,
+		"https://topbanana.example", "alice@example.test", "", locale.LocaleEN, 1, time.Now())
+	if got, want := err, ErrInviteEmailNotSent; !errors.Is(got, want) {
+		t.Errorf("err = %v, want wrapping %v", got, want)
+	}
+	if got, want := err, sendErr; !errors.Is(got, want) {
+		t.Errorf("err = %v, want wrapping %v", got, want)
+	}
+	if got, want := len(invites.created), 1; got != want {
+		t.Errorf("invites.created len = %d, want %d", got, want)
+	}
+}
+
 func TestResendInviteEmail_RotatesAndSends(t *testing.T) {
 	t.Parallel()
 
