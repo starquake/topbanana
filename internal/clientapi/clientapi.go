@@ -79,8 +79,8 @@ func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (s
 
 	p, ok := auth.PlayerFromContext(r.Context())
 	if !ok {
-		logger.ErrorContext(r.Context(), "missing player on context for game request")
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		// A sessionless read is a non-participant: the same opaque 404.
+		http.NotFound(w, r)
 
 		return "", 0, false
 	}
@@ -290,6 +290,16 @@ func fetchQuizLeaderboard(
 	return res, nil
 }
 
+// viewerPlayerID returns the context player's id, or 0 for a sessionless
+// read; no players row has id 0, so no entry is marked as the viewer's.
+func viewerPlayerID(ctx context.Context) int64 {
+	if p, ok := auth.PlayerFromContext(ctx); ok {
+		return p.ID
+	}
+
+	return 0
+}
+
 // writeQuizLeaderboardError translates a fetchQuizLeaderboard error into
 // the right HTTP error response. Only safe to call before any response
 // body has been written - the SSE handler uses this for the initial
@@ -395,17 +405,7 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
-		player, ok := auth.PlayerFromContext(ctx)
-		if !ok {
-			// EnsurePlayer middleware should have populated this; reaching
-			// here means the route was wired without it.
-			logger.ErrorContext(ctx, "missing player on context for quiz leaderboard")
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-			return
-		}
-
-		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
+		res, err := fetchQuizLeaderboard(ctx, service, quizID, viewerPlayerID(ctx))
 		if err != nil {
 			writeQuizLeaderboardError(w, r, logger, err)
 
@@ -525,13 +525,7 @@ func HandleQuizLeaderboardStream(
 			return
 		}
 
-		player, ok := auth.PlayerFromContext(ctx)
-		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for leaderboard stream")
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-			return
-		}
+		playerID := viewerPlayerID(ctx)
 
 		// Subscribe BEFORE the initial snapshot so we never miss a publish
 		// that lands between fetch and subscribe.
@@ -543,7 +537,7 @@ func HandleQuizLeaderboardStream(
 		// Subsequent fetch errors inside the loop happen after the response
 		// is committed as text/event-stream, so they cannot be reported as
 		// HTTP status codes - we log and end the stream there.
-		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
+		res, err := fetchQuizLeaderboard(ctx, service, quizID, playerID)
 		if err != nil {
 			writeQuizLeaderboardError(w, r, logger, err)
 
@@ -575,7 +569,7 @@ func HandleQuizLeaderboardStream(
 			logger:            logger,
 			service:           service,
 			quizID:            quizID,
-			playerID:          player.ID,
+			playerID:          playerID,
 			heartbeatInterval: heartbeatInterval,
 		}
 
@@ -739,8 +733,8 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for game-for-quiz")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			// No session means no game yet: the same 404 a fresh guest gets.
+			http.NotFound(w, r)
 
 			return
 		}
@@ -1212,14 +1206,15 @@ func newPlayerResponse(p *auth.Player) playerResponse {
 // anonymous, but a claimed-but-passwordless visitor still is - callers
 // that care about "did this player choose this name" should look at
 // hasCustomName, not isAnonymous. The displayName is shown verbatim so a
-// fresh petname can be displayed as-is until the player renames.
+// fresh petname can be displayed as-is until the player renames. A request
+// with no session has no player yet and gets 204 No Content.
 func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		current, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+			w.WriteHeader(http.StatusNoContent)
 
 			return
 		}

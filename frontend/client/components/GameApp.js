@@ -106,7 +106,8 @@ export class GameApp {
         // later switch re-hides until the new probe lands.
         this.startStateResolved = false;
         // Current player as returned by GET /api/players/me. Stays null
-        // until init() resolves; templates guard with `player &&`. When
+        // until init() resolves, and for a fresh guest until their first
+        // action creates a player; templates guard with `player &&`. When
         // the player renames, the PATCH response replaces this object
         // so player.displayName and player.hasCustomName flow through every
         // bound template at once.

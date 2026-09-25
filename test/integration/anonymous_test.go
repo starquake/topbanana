@@ -361,3 +361,154 @@ func countLegacyAnonDisplayNames(ctx context.Context, t *testing.T, dbConn *sql.
 
 	return n
 }
+
+// guestFixture is a started server plus a direct DB handle and one published
+// quiz, for the guest-minting tests below.
+type guestFixture struct {
+	baseURL string
+	db      *sql.DB
+	quiz    *quiz.Quiz
+}
+
+func newGuestFixture(t *testing.T, extraEnv map[string]string) (context.Context, guestFixture) {
+	t.Helper()
+
+	ctx, srv := startServer(t, extraEnv)
+	dbConn, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := dbConn.Close(); cerr != nil {
+			t.Errorf("dbConn.Close err = %v, want nil", cerr)
+		}
+	})
+
+	qz := &quiz.Quiz{
+		Title:             "Guest Quiz",
+		Published:         true,
+		Slug:              "guest-quiz",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if cerr := store.New(dbConn, slog.Default()).Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	return ctx, guestFixture{baseURL: srv.BaseURL, db: dbConn, quiz: qz}
+}
+
+// apiResult is the part of a response the guest-minting tests assert on.
+type apiResult struct {
+	status     int
+	setSession bool
+}
+
+// sendAPI issues one request with an optional JSON body and reports its
+// status and whether it set the session cookie.
+func sendAPI(ctx context.Context, t *testing.T, client *http.Client, method, target, body string) apiResult {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do %s %s err = %v, want nil", method, target, err)
+	}
+	defer closeBody(t, resp.Body)
+
+	res := apiResult{status: resp.StatusCode}
+	for _, c := range resp.Cookies() {
+		if c.Name == session.CookieName {
+			res.setSession = true
+		}
+	}
+
+	return res
+}
+
+// TestAnonymous_SafeRequestsDoNotMint pins #1359: cookieless GET/HEAD API
+// reads run with no player, create no players row and set no session cookie,
+// and each answers the way it does for a guest who has not played yet.
+func TestAnonymous_SafeRequestsDoNotMint(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, nil)
+	slugID := fmt.Sprintf("%s-%d", fx.quiz.Slug, fx.quiz.ID)
+	client := newCookieJarClient(t)
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodGet, "/api/quizzes", http.StatusOK},
+		{http.MethodHead, "/api/quizzes", http.StatusOK},
+		{http.MethodGet, "/api/players/me", http.StatusNoContent},
+		{http.MethodGet, "/api/quizzes/" + slugID, http.StatusOK},
+		{http.MethodGet, "/api/quizzes/" + slugID + "/leaderboard", http.StatusOK},
+		{http.MethodGet, "/api/quizzes/" + slugID + "/my-game", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/questions/next", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/audio", http.StatusNotFound},
+		{http.MethodGet, "/api/games/nope/results", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/state", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/audio", http.StatusNotFound},
+		{http.MethodGet, "/api/sessions/NOPE/events", http.StatusNotFound},
+	} {
+		res := sendAPI(ctx, t, client, tc.method, fx.baseURL+tc.path, "")
+		if got, want := res.status, tc.want; got != want {
+			t.Errorf("%s %s status = %d, want %d", tc.method, tc.path, got, want)
+		}
+		if res.setSession {
+			t.Errorf("%s %s set the session cookie, want none", tc.method, tc.path)
+		}
+	}
+
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 0; got != want {
+		t.Errorf("anonymous players added by safe requests = %d, want %d", got, want)
+	}
+
+	// The first unsafe request still mints the guest and sets the cookie.
+	gameID, setCookie := postCreateGame(ctx, t, client, fx.baseURL, fx.quiz.ID)
+	if gameID == "" {
+		t.Fatal("POST /api/games returned an empty game ID")
+	}
+	if !setCookie {
+		t.Error("POST /api/games did not set the session cookie")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 1; got != want {
+		t.Errorf("anonymous players added after POST /api/games = %d, want %d", got, want)
+	}
+	if got := fetchPlayerMe(ctx, t, client, fx.baseURL); !got.IsAnonymous || got.ID == 0 {
+		t.Errorf("GET /api/players/me after minting = %+v, want an anonymous player with an id", got)
+	}
+}
+
+// TestAnonymous_SessionJoinMints pins that joining a live room is an unsafe
+// first request that mints the guest, so the join page needs no prior GET.
+func TestAnonymous_SessionJoinMints(t *testing.T) {
+	t.Parallel()
+
+	ctx, fx := newGuestFixture(t, nil)
+	client := newCookieJarClient(t)
+	startCount := countAnonymousPlayers(ctx, t, fx.db)
+
+	res := sendAPI(ctx, t, client, http.MethodPost, fx.baseURL+"/api/sessions/NOPE/join", "")
+	if got, want := res.status, http.StatusNotFound; got != want {
+		t.Errorf("POST join status = %d, want %d", got, want)
+	}
+	if !res.setSession {
+		t.Error("POST join did not set the session cookie")
+	}
+	if got, want := countAnonymousPlayers(ctx, t, fx.db)-startCount, 1; got != want {
+		t.Errorf("anonymous players added by POST join = %d, want %d", got, want)
+	}
+}

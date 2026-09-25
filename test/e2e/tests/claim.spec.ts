@@ -9,27 +9,14 @@ import {
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
-// Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".
-// EnsurePlayer middleware generates one of these for every fresh anonymous
-// visitor on the first /api/players/me round-trip.
-const PETNAME_PATTERN = /^[A-Z][a-z]+-[A-Z][a-z]+-[A-Z][a-z]+$/;
-
-// Test 1 — petname card visible for fresh anonymous visitor.
-test('start screen shows a Playing as card with an auto-generated petname for a fresh anonymous visitor', async ({ page }) => {
-  // Playwright's default per-test context has fresh cookies, so navigating
-  // to /client/ triggers EnsurePlayer to mint a new anonymous row whose
-  // displayName is the generated petname.
+// Test 1 — a fresh anonymous visitor sees the claim card with no name yet: the
+// server creates their player on their first action, not on page load (#1359).
+test('start screen shows the claim card without a name for a fresh anonymous visitor', async ({ page }) => {
   await page.goto('/client/');
 
-  // Two `.claim-cta` blocks live in the DOM at once — start-screen and
-  // leaderboard — because `x-show` on their parent toggles CSS, not
-  // mount state. Scope to the visible one.
   const card = page.locator('.claim-cta:visible');
   await expect(card).toBeVisible();
-
-  // Petname format: Adjective-Adjective-Noun, each segment Title-cased.
-  const name = await card.getByTestId('claim-cta-name').textContent();
-  expect(name).toMatch(PETNAME_PATTERN);
+  await expect(card.getByTestId('claim-cta-name')).toBeHidden();
 
   // Button label defaults to the "no name picked yet" branch.
   await expect(page.getByRole('button', { name: 'Set your name' })).toBeVisible();
@@ -39,13 +26,8 @@ test('start screen shows a Playing as card with an auto-generated petname for a 
 test('submitting a name via the start-screen modal updates the Playing as card in place', async ({ page, browserName }) => {
   await page.goto('/client/');
 
-  // Capture the auto-generated petname so we can prove it was replaced.
-  // Two `.claim-cta` nodes are mounted at once (start-screen + leaderboard,
-  // both kept in DOM by `x-show`); scope to the visible one.
   const card = page.locator('.claim-cta:visible');
   await expect(card).toBeVisible();
-  const petname = await card.getByTestId('claim-cta-name').textContent();
-  expect(petname).toMatch(PETNAME_PATTERN);
 
   // Open the shared modal via the start-screen affordance.
   await page.getByRole('button', { name: 'Set your name' }).click();
@@ -63,7 +45,6 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   // chosen name plus the "already claimed" branch of the button label.
   await expect(modal).toBeHidden();
   await expect(card.getByTestId('claim-cta-name')).toHaveText(chosenName);
-  await expect(card.getByTestId('claim-cta-name')).not.toHaveText(petname ?? '');
   await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
   // The "Set your name" span is also still in the DOM (gated by x-show), so
   // assert on its visibility rather than DOM count.
@@ -106,6 +87,10 @@ test.describe('claim modal over a played quiz', () => {
     const modal = page.locator('[role="dialog"]');
     await expect(modal).toBeVisible();
     await expect(modal.locator('#claim-modal-title')).toHaveText('Pick a display name');
+
+    // Starting the game created the guest with an auto-generated petname
+    // (Title-cased Adjective-Adjective-Noun), now shown on the claim card.
+    await expect(page.getByTestId('claim-cta-name')).toHaveText(/^[A-Z][a-z]+-[A-Z][a-z]+-[A-Z][a-z]+$/);
   });
 
   // Test 4 — an already-claimed visitor does NOT see the auto-modal after a

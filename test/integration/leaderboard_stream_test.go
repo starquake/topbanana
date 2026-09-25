@@ -71,7 +71,7 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 
 	// Client A subscribes to the stream. We use a separate http.Client
 	// (no cookie jar shared with the answer-submitting client B) so the
-	// two represent different EnsurePlayer-minted anonymous players.
+	// two are different callers.
 	streamCtx, streamCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer streamCancel()
 
@@ -671,9 +671,8 @@ type playerMeResponse struct {
 }
 
 // getMyDisplayName hits GET /api/players/me with the given cookie-jar
-// client and returns the displayName on file. The EnsurePlayer middleware
-// mints a row on first contact, so this also doubles as the "create a
-// player session" probe.
+// client and returns the displayName on file. The client must already hold
+// a session: a sessionless GET mints no player and answers 204.
 func getMyDisplayName(ctx context.Context, t *testing.T, baseURL string, client *http.Client) string {
 	t.Helper()
 

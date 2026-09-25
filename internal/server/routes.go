@@ -1055,13 +1055,12 @@ func addAdminRoundRoutes(
 // internal/session/session.go) and a same-origin guard on unsafe methods
 // (sameOriginCheck) that rejects a cross-site Origin / Sec-Fetch-Site.
 //
-// Every route is wrapped in EnsurePlayer so a cookieless visitor is silently
-// upgraded to an anonymous players row before the handler runs. This means
-// HandleCreateGame and HandleAnswerPost can safely read the player off the
-// request context. The same-origin guard runs outermost so a cross-site
-// mutating request is rejected before any players row is minted. The static
-// /client/* assets are intentionally not wrapped - loading the SPA shell
-// should not create a row; the first /api/ call does.
+// Every route is wrapped in EnsurePlayer. An unsafe request from a cookieless
+// visitor mints an anonymous players row before the handler runs, so
+// POST/PATCH handlers can read the player off the context; a GET/HEAD without
+// a session runs with no player and mints nothing, so those handlers must
+// cope with a missing player. The same-origin guard runs outermost so a
+// cross-site mutating request is rejected before any row is minted.
 func addAPIRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,

@@ -57,9 +57,7 @@ func TestRoles_HostGating(t *testing.T) {
 		t.Parallel()
 
 		anon := authClient(t)
-		// GET /api/quizzes goes through EnsurePlayer, which mints an
-		// anonymous row and installs its session cookie on the jar.
-		fetchAPIQuizzes(ctx, t, anon, baseURL)
+		primeAnonymousPlayer(ctx, t, anon, baseURL)
 
 		for _, tc := range []struct {
 			url  string

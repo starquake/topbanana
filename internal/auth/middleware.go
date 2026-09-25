@@ -29,12 +29,16 @@ const anonymousDisplayNamePrefix = "anon-"
 // upper bound that still keeps the request latency bounded.
 const petnameMaxAttempts = 5
 
-// EnsurePlayer guarantees the request carries a session pointing at
-// an existing players row, creating a fresh anonymous row when
-// necessary. Wrap /api/* routes that attribute work to a player;
-// static client assets are deliberately not wrapped so loading
-// index.html does not create a row.
-func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Manager, logger *slog.Logger) http.Handler {
+// EnsurePlayer attaches the session's players row to the request context.
+// On an unsafe method with no usable session it mints a fresh anonymous row
+// and sets the session cookie. A GET/HEAD with no usable session runs next
+// with no player and no cookie, so read-only traffic never creates rows (#1359).
+func EnsurePlayer(
+	next http.Handler,
+	players PlayerStore,
+	sessions *session.Manager,
+	logger *slog.Logger,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		player, err := loadSessionPlayer(r, players, sessions)
 		if err != nil && !errors.Is(err, ErrPlayerNotFound) {
@@ -49,8 +53,12 @@ func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Mana
 			return
 		}
 
-		// Fall-through from loadSessionPlayer (no cookie or deleted row):
-		// the session cookie must be replaced before the next handler runs.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next.ServeHTTP(w, r)
+
+			return
+		}
+
 		player, err = mintAnonymousPlayer(r.Context(), players)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error creating anonymous player", slog.Any("err", err))

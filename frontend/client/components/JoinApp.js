@@ -303,7 +303,8 @@ export class JoinApp {
         // name form (the solo client treats the same isAuthenticated +
         // hasCustomName pair as "named", #165). The id is kept regardless so
         // the viewer's own roster row can be matched by id (rename-safe).
-        // Best-effort: a failed fetch or an anonymous / unnamed player leaves
+        // Best-effort: a failed fetch, a visitor with no player yet (the
+        // claim or join below creates one), or an anonymous / unnamed player leaves
         // accountName null, so the claim-then-join flow runs and joining is
         // never blocked on this read.
         const player = await playerService.getMe();

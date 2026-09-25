@@ -361,7 +361,7 @@ func TestRequireAdmin_DeniesHostWith404(t *testing.T) {
 	}
 }
 
-func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
+func TestEnsurePlayer_NoCookieUnsafeMethod_CreatesAnonymousAndSetsCookie(t *testing.T) {
 	t.Parallel()
 
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
@@ -377,7 +377,7 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 
 	mw := EnsurePlayer(next, players, sessions, discardLogger())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
@@ -406,7 +406,7 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 			want,
 		)
 	}
-	cookie, ok := findCookie(rec, session.CookieName)
+	cookie, ok := findSessionCookie(rec)
 	if !ok {
 		t.Fatal("session cookie was not set on the response")
 	}
@@ -448,7 +448,7 @@ func TestEnsurePlayer_ValidCookie_ReusesExistingRow(t *testing.T) {
 	if got, want := seenPlayer.ID, existing.ID; got != want {
 		t.Errorf("seenPlayer.ID = %d, want %d (existing row)", got, want)
 	}
-	if _, ok := findCookie(rec, session.CookieName); ok {
+	if _, ok := findSessionCookie(rec); ok {
 		t.Error("session cookie should not be re-set when the cookie is valid")
 	}
 }
@@ -471,7 +471,7 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 	sessions.Set(rec, 9999, 0)
 	cookie := rec.Result().Cookies()[0]
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	req.AddCookie(cookie)
 	rec = httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
@@ -485,7 +485,7 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 	if !seenPlayer.IsAnonymous() {
 		t.Error("seenPlayer.IsAnonymous() = false, want true")
 	}
-	if _, ok := findCookie(rec, session.CookieName); !ok {
+	if _, ok := findSessionCookie(rec); !ok {
 		t.Error("session cookie should have been re-issued when the cookie referenced a deleted row")
 	}
 }
@@ -505,7 +505,7 @@ func TestEnsurePlayer_TwoCookielessRequests_TwoDistinctPlayers(t *testing.T) {
 	mw := EnsurePlayer(next, players, sessions, discardLogger())
 
 	for range 2 {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 		mw.ServeHTTP(httptest.NewRecorder(), req)
 	}
 
@@ -565,7 +565,7 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 
 	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
@@ -596,7 +596,7 @@ func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
 
 	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
@@ -621,7 +621,7 @@ func TestEnsurePlayer_CreateAnonymousNonCollisionError_500(t *testing.T) {
 
 	mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/games", nil)
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
@@ -662,5 +662,45 @@ func TestEnsurePlayer_GetPlayerError_500(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), "internal error"; !strings.Contains(got, want) {
 		t.Errorf("body = %q, should contain %q", got, want)
+	}
+}
+
+func TestEnsurePlayer_NoCookieSafeMethod_RunsWithoutPlayer(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+
+			fakeStore := newFakePlayerStore()
+			sessions := session.New([]byte("k"), true)
+
+			called := false
+			var seenOK bool
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				_, seenOK = PlayerFromContext(r.Context())
+				w.WriteHeader(http.StatusTeapot)
+			})
+
+			mw := EnsurePlayer(next, fakeStore, sessions, discardLogger())
+
+			req := httptest.NewRequestWithContext(t.Context(), method, "/api/quizzes", nil)
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, req)
+
+			if !called {
+				t.Fatal("next handler was not called")
+			}
+			if seenOK {
+				t.Error("PlayerFromContext ok = true, want false (no player on a sessionless safe request)")
+			}
+			if got, want := fakeStore.rowsCreated(), int64(0); got != want {
+				t.Errorf("rows created = %d, want %d", got, want)
+			}
+			if _, ok := findSessionCookie(rec); ok {
+				t.Error("session cookie was set on a sessionless safe request, want none")
+			}
+		})
 	}
 }
