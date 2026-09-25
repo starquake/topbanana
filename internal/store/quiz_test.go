@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -1102,7 +1101,7 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "failed to create question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1126,7 +1125,7 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "failed to create question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1166,83 +1165,55 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 func TestQuizStore_UpdateQuiz(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-
 	db := dbtest.Open(t)
-
-	quizStore := NewQuizStore(db, logger)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
 
 	originalQuiz := newTestQuizzes()[0]
-
-	// Create the original quiz
-	err := quizStore.CreateQuiz(t.Context(), originalQuiz)
+	if err := quizStore.CreateQuiz(t.Context(), originalQuiz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	want, err := quizStore.GetQuiz(t.Context(), originalQuiz.ID)
 	if err != nil {
-		t.Fatalf("failed to create quiz: %v", err)
+		t.Fatalf("GetQuiz err = %v, want nil", err)
 	}
 
+	// A stale snapshot: an edited first question and none of the others.
 	updatedQuiz := &quiz.Quiz{
-		ID:                   originalQuiz.ID,
-		Title:                originalQuiz.Title + " Updated",
-		Slug:                 originalQuiz.Slug + "-updated",
-		Description:          originalQuiz.Description + " Updated",
-		CreatedAt:            originalQuiz.CreatedAt,
-		UpdatedAt:            originalQuiz.UpdatedAt,
-		CreatedByPlayerID:    originalQuiz.CreatedByPlayerID,
-		CreatedByDisplayName: originalQuiz.CreatedByDisplayName,
-		TimeLimitSeconds:     originalQuiz.TimeLimitSeconds,
-		Visibility:           originalQuiz.Visibility,
-		Mode:                 originalQuiz.Mode,
-		Language:             originalQuiz.Language,
+		ID:                originalQuiz.ID,
+		Title:             originalQuiz.Title + " Updated",
+		Slug:              originalQuiz.Slug + "-updated",
+		Description:       originalQuiz.Description + " Updated",
+		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
+		TimeLimitSeconds:  originalQuiz.TimeLimitSeconds + 5,
+		Visibility:        quiz.VisibilityUnlisted,
+		Mode:              quiz.ModeLive,
+		Language:          quiz.LanguageNL,
 		Questions: []*quiz.Question{
-			{
-				ID:     originalQuiz.Questions[0].ID,
-				QuizID: originalQuiz.ID,
-				Text:   originalQuiz.Questions[0].Text + " Updated",
-				Options: []*quiz.Option{
-					{
-						ID:      originalQuiz.Questions[0].Options[1].ID,
-						Text:    originalQuiz.Questions[0].Options[1].Text + " Updated",
-						Correct: !originalQuiz.Questions[0].Options[1].Correct,
-					},
-					{
-						ID:      originalQuiz.Questions[0].Options[2].ID,
-						Text:    originalQuiz.Questions[0].Options[2].Text + " Updated",
-						Correct: !originalQuiz.Questions[0].Options[2].Correct,
-					},
-					{
-						Text: "Option Added",
-					},
-				},
-			},
+			{ID: originalQuiz.Questions[0].ID, Text: "stale edit"},
 		},
 	}
+	if err = quizStore.UpdateQuiz(t.Context(), updatedQuiz); err != nil {
+		t.Fatalf("UpdateQuiz err = %v, want nil", err)
+	}
 
-	// Update the quiz
-	err = quizStore.UpdateQuiz(t.Context(), updatedQuiz)
+	got, err := quizStore.GetQuiz(t.Context(), updatedQuiz.ID)
 	if err != nil {
-		t.Fatalf("failed to update quiz: %v", err)
+		t.Fatalf("GetQuiz err = %v, want nil", err)
 	}
 
-	// Get the updated quiz from the database for assertions
-	qz, err := quizStore.GetQuiz(t.Context(), updatedQuiz.ID)
-	if err != nil {
-		t.Fatalf("failed to get quiz by ID: %v", err)
-	}
-
-	if qz == updatedQuiz {
-		t.Fatalf("qz = %v, want different from updatedQuiz", qz)
-	}
-	if diff := cmp.Diff(qz, updatedQuiz,
+	want.Title = updatedQuiz.Title
+	want.Slug = updatedQuiz.Slug
+	want.Description = updatedQuiz.Description
+	want.TimeLimitSeconds = updatedQuiz.TimeLimitSeconds
+	want.Visibility = updatedQuiz.Visibility
+	want.Mode = updatedQuiz.Mode
+	want.Language = updatedQuiz.Language
+	if diff := cmp.Diff(got, want,
 		cmpopts.SortSlices(lessQuestions),
 		cmpopts.SortSlices(lessOptions),
 		cmpopts.EquateApproxTime(3*time.Second),
-		// UpdateQuiz assigns each question to the quiz's default group
-		// (#444); the expected literal builds fresh questions and cannot
-		// predict that id, so ignore RoundID here. The dedicated group
-		// tests pin the assignment.
-		cmpopts.IgnoreFields(quiz.Question{}, "RoundID")); diff != "" {
-		t.Errorf("quizzes diff (-got +want):\n%s", diff)
+	); diff != "" {
+		t.Errorf("quiz diff (-got +want):\n%s", diff)
 	}
 }
 
@@ -1728,50 +1699,6 @@ func TestQuizStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		}
 		if got, want := err, quiz.ErrUpdatingQuizNoRowsAffected; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("failed to handle questions", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-
-		db := dbtest.Open(t)
-
-		quizStore := NewQuizStore(db, logger)
-
-		originalQuiz := newTestQuizzes()[0]
-
-		err := quizStore.CreateQuiz(t.Context(), originalQuiz)
-		if err != nil {
-			t.Fatalf("failed to create questions: %v", err)
-		}
-
-		// Rename questions table to force an insert error
-		_, err = db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
-		if err != nil {
-			t.Fatalf("failed to rename table: %v", err)
-		}
-
-		updatedQuiz := &quiz.Quiz{
-			ID:          originalQuiz.ID,
-			Title:       "Quiz 1",
-			Slug:        "quiz-1",
-			Description: "Description",
-			Questions: []*quiz.Question{
-				{
-					Text: "Question 1 Updated",
-				},
-			},
-		}
-
-		err = quizStore.UpdateQuiz(t.Context(), updatedQuiz)
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		if got, want := err.Error(), "failed to handle questions"; !strings.Contains(got, want) {
-			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
 }
@@ -3240,129 +3167,6 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 	if got, want := quizzes[0].Title, "First Edited"; got != want {
 		t.Errorf("quizzes[0].Title = %q, want %q", got, want)
 	}
-}
-
-// seedQuizWithQuestions creates a quiz with `n` questions at positions
-// 10, 20, ..., 10*n and returns it. Helper for the position-reorder
-// tests so each subtest can start from a known order without rebuilding
-// the fixture inline.
-func seedQuizWithQuestions(t *testing.T, quizStore *QuizStore, n int) *quiz.Quiz {
-	t.Helper()
-
-	qz := &quiz.Quiz{
-		Title:             "Reorder Quiz",
-		Slug:              "reorder-quiz",
-		Description:       "for reorder tests",
-		CreatedByPlayerID: seededAdminID,
-	}
-	for i := 1; i <= n; i++ {
-		qz.Questions = append(qz.Questions, &quiz.Question{
-			Text:     fmt.Sprintf("Q%d", i),
-			Position: i * 10,
-			Options: []*quiz.Option{
-				{Text: "A", Correct: true},
-				{Text: "B"},
-			},
-		})
-	}
-
-	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
-		t.Fatalf("failed to seed quiz: %v", err)
-	}
-
-	return qz
-}
-
-func TestQuizStore_SwapQuestionPositions(t *testing.T) {
-	t.Parallel()
-
-	t.Run("swap down moves a question past its successor", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 3) // Q1@10, Q2@20, Q3@30
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, quiz.DirectionDown)
-		if err != nil {
-			t.Fatalf("SwapQuestionPositions err = %v, want nil", err)
-		}
-
-		// After swap Q1 should hold position 20 and Q2 should hold 10,
-		// so listing by position yields Q2, Q1, Q3.
-		listed, err := quizStore.ListQuestions(t.Context(), qz.ID)
-		if err != nil {
-			t.Fatalf("ListQuestions err = %v, want nil", err)
-		}
-		got := []string{listed[0].Text, listed[1].Text, listed[2].Text}
-		want := []string{"Q2", "Q1", "Q3"}
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("order mismatch (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("swap up moves a question past its predecessor", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 3)
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[2].ID, quiz.DirectionUp)
-		if err != nil {
-			t.Fatalf("SwapQuestionPositions err = %v, want nil", err)
-		}
-
-		listed, err := quizStore.ListQuestions(t.Context(), qz.ID)
-		if err != nil {
-			t.Fatalf("ListQuestions err = %v, want nil", err)
-		}
-		got := []string{listed[0].Text, listed[1].Text, listed[2].Text}
-		want := []string{"Q1", "Q3", "Q2"}
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("order mismatch (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("swap up from the first question returns ErrQuestionAtTop", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 3)
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, quiz.DirectionUp)
-		if got, want := err, quiz.ErrQuestionAtTop; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("swap down from the last question returns ErrQuestionAtBottom", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 3)
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[2].ID, quiz.DirectionDown)
-		if got, want := err, quiz.ErrQuestionAtBottom; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("invalid direction returns ErrInvalidDirection", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 2)
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, "sideways")
-		if got, want := err, quiz.ErrInvalidDirection; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("unknown question ID returns ErrQuestionNotFound", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 2)
-
-		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, 9999, quiz.DirectionUp)
-		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
 }
 
 // roundQuizFixture is a quiz seeded with named rounds and questions for

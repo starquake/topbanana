@@ -223,10 +223,7 @@ type UpdateRoundPositionParams struct {
 	ID       int64
 }
 
-// Position-only update used by the per-row up/down reorder buttons.
-// Mirrors UpdateBreakPosition so the move path can rewrite a single
-// column without touching title/summary or updated_at - the reorder
-// is not a content edit.
+// Position-only; leaves updated_at alone since a reorder is not a content edit.
 func (q *Queries) UpdateRoundPosition(ctx context.Context, arg UpdateRoundPositionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updateRoundPosition, arg.Position, arg.ID)
 }

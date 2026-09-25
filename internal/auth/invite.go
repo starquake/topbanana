@@ -41,6 +41,10 @@ var ErrInviteInvalid = errors.New("invite invalid")
 // server fault.
 var ErrInviteNotPending = errors.New("invite not pending")
 
+// ErrInviteEmailNotSent is wrapped by SendInviteEmail when the invite row was
+// committed but the mailer failed, so callers can tell a live invite from none.
+var ErrInviteEmailNotSent = errors.New("invite created but email not sent")
+
 // LiveInvite is the slice of a pending invite row the accept flow needs:
 // the row id (for logging), the address the invite was issued to (which
 // becomes the new player's email, already verified), and the audit
@@ -130,10 +134,9 @@ func HashInviteToken(raw string) string {
 // SendInviteEmail mints a token, persists the hash via CreateInvite, and
 // dispatches the invite email. Mirrors SendResetEmail in shape but uses
 // the accept-invite link path and the 7-day TTL so the flows cannot be
-// confused at the call sites. A mailer failure surfaces verbatim to the
-// caller so the admin handler can flash a meaningful message; the invite
-// row is still committed so a future resend (slice 2) can run
-// independently of SMTP availability.
+// confused at the call sites. A mailer failure is wrapped with
+// ErrInviteEmailNotSent; the invite row is already committed by then, so the
+// link stays live and a later resend works independently of SMTP.
 //
 //nolint:revive // argument-limit: loc is message content; the rest is irreducible mail plumbing.
 func SendInviteEmail(
@@ -163,7 +166,7 @@ func SendInviteEmail(
 		Kind:    mailer.KindInvite,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
-		return fmt.Errorf("invite: send: %w", sendErr)
+		return fmt.Errorf("invite: send: %w: %w", ErrInviteEmailNotSent, sendErr)
 	}
 
 	return nil
