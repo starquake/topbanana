@@ -96,6 +96,8 @@ func HandleVerifyEmailConfirm(logger *slog.Logger, csrfMgr *csrf.Manager) http.H
 
 			return
 		}
+		// The body carries the live token, so no cache may keep a copy.
+		w.Header().Set("Cache-Control", "no-store")
 		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
 			Title:        locale.Translate(loc, "verifyEmail.title"),
 			Heading:      locale.Translate(loc, "verifyEmail.confirmHeading"),
