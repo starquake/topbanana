@@ -303,6 +303,9 @@ func TestHandleVerifyEmailConfirm_RendersFormWithoutConsuming(t *testing.T) {
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
+	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
 	body := rec.Body.String()
 	if got, want := body, `action="/verify-email" method="POST"`; !strings.Contains(got, want) {
 		t.Errorf("body missing confirm form %q", want)
