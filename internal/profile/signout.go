@@ -3,9 +3,9 @@ package profile
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/starquake/topbanana/internal/auth"
-	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/locale"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -14,15 +14,14 @@ import (
 // /profile/sign-out-everywhere. It bumps the player's session_version, which
 // signs out every other browser, then re-issues this request's cookie with the
 // new version so the current browser stays signed in. It needs no password, so
-// it works for accounts that only sign in with Google.
+// it works for accounts that only sign in with Google. It redirects to
+// /profile with a flashed notice, so a refresh does not re-post.
 func HandleSignOutEverywhere(
 	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
 	revoker auth.SessionRevoker,
 	sessions *session.Manager,
+	flash *auth.SignedFlash,
 ) http.Handler {
-	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		player, ok := auth.PlayerFromContext(r.Context())
 		if !ok {
@@ -51,16 +50,11 @@ func HandleSignOutEverywhere(
 		sessions.Set(w, player.ID, version)
 		logger.InfoContext(r.Context(), "signed out everywhere", slog.Int64(logPlayerIDKey, player.ID))
 
-		loc := locale.Resolve(r)
-		next := adminNextPath(r.PostFormValue("next"))
-		backHref, backLabel := backFromNext(loc, next)
-		renderer.render(w, r, http.StatusOK, pageData{
-			Title:               locale.Translate(loc, "profile.heading"),
-			DisplayName:         player.DisplayName,
-			SignedOutEverywhere: true,
-			BackHref:            backHref,
-			BackLabel:           backLabel,
-			Next:                next,
-		})
+		flash.SetNotice(w, locale.Translate(locale.Resolve(r), "profile.signedOutEverywhere"))
+		target := "/profile"
+		if next := adminNextPath(r.PostFormValue("next")); next != "" {
+			target += "?" + url.Values{"next": {next}}.Encode()
+		}
+		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
 }

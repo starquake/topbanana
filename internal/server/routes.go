@@ -447,14 +447,18 @@ func addProfileRoutes(
 		return auth.RequireAuthenticated(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
 	}
 
-	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
+	profileFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		profile.FlashCookieName, profile.FlashCookiePath,
+	)
+	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr, profileFlash)))
 	mux.Handle(
 		"POST /profile/display-name",
 		csrfMW(requireAuthn(profile.HandleProfileDisplayName(logger, csrfMgr, stores.Players))),
 	)
 	mux.Handle(
 		"POST /profile/sign-out-everywhere",
-		csrfMW(requireAuthn(profile.HandleSignOutEverywhere(logger, csrfMgr, stores.SessionRevoker, sessions))),
+		csrfMW(requireAuthn(profile.HandleSignOutEverywhere(logger, stores.SessionRevoker, sessions, profileFlash))),
 	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
 	mux.Handle(

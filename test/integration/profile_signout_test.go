@@ -62,28 +62,24 @@ func assertSignOutEverywhere(ctx context.Context, t *testing.T, current, other *
 	if got, want := priming.body, `action="/profile/sign-out-everywhere"`; !strings.Contains(got, want) {
 		t.Errorf("profile body missing %q", want)
 	}
-	form := url.Values{"csrf_token": {priming.csrf}}
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/profile/sign-out-everywhere", strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := current.Do(req)
-	if err != nil {
-		t.Fatalf("client.Do err = %v, want nil", err)
-	}
-	body := readAllClose(t, resp)
+	resp := postSignOutEverywhere(ctx, t, current, baseURL, url.Values{"csrf_token": {priming.csrf}})
 
-	if got, want := resp.StatusCode, http.StatusOK; got != want {
+	if got, want := resp.status, http.StatusSeeOther; got != want {
 		t.Fatalf("sign-out-everywhere status = %d, want %d", got, want)
 	}
-	if got, want := body, "Signed out of every other browser and device."; !strings.Contains(got, want) {
-		t.Errorf("sign-out-everywhere body missing %q", want)
+	if got, want := resp.location, "/profile"; got != want {
+		t.Errorf("sign-out-everywhere Location = %q, want %q", got, want)
 	}
-	if got, want := hasSessionCookie(resp), true; got != want {
+	if got, want := resp.sessionCookie, true; got != want {
 		t.Errorf("sign-out-everywhere re-issued session cookie = %v, want %v", got, want)
+	}
+
+	notice := "Signed out of every other browser and device."
+	if got, want := profileGET(ctx, t, current, baseURL).body, notice; !strings.Contains(got, want) {
+		t.Errorf("profile after redirect missing %q", want)
+	}
+	if got, want := profileGET(ctx, t, current, baseURL).body, notice; strings.Contains(got, want) {
+		t.Errorf("profile reload still shows %q, want the flash consumed", want)
 	}
 
 	if got, want := profileGetStatus(ctx, t, current, baseURL), http.StatusOK; got != want {
@@ -91,5 +87,61 @@ func assertSignOutEverywhere(ctx context.Context, t *testing.T, current, other *
 	}
 	if got, want := profileGetStatus(ctx, t, other, baseURL), http.StatusSeeOther; got != want {
 		t.Errorf("other browser profile status after = %d, want %d (redirect to login)", got, want)
+	}
+}
+
+// TestProfile_SignOutEverywhereKeepsAdminNext pins that the redirect back to
+// /profile carries a validated admin return target.
+func TestProfile_SignOutEverywhereKeepsAdminNext(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+	client := authClient(t)
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "signout-next", "correct-battery-14")
+	priming := profileGET(ctx, t, client, srv.BaseURL)
+
+	resp := postSignOutEverywhere(ctx, t, client, srv.BaseURL, url.Values{
+		"csrf_token": {priming.csrf},
+		"next":       {"/admin/quizzes"},
+	})
+	if got, want := resp.status, http.StatusSeeOther; got != want {
+		t.Fatalf("sign-out-everywhere status = %d, want %d", got, want)
+	}
+	if got, want := resp.location, "/profile?next=%2Fadmin%2Fquizzes"; got != want {
+		t.Errorf("sign-out-everywhere Location = %q, want %q", got, want)
+	}
+}
+
+// signOutResult is the part of the unfollowed sign-out response the tests check.
+type signOutResult struct {
+	status        int
+	location      string
+	sessionCookie bool
+}
+
+// postSignOutEverywhere submits form to the sign-out-everywhere endpoint
+// without following the redirect.
+func postSignOutEverywhere(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL string, form url.Values,
+) signOutResult {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/profile/sign-out-everywhere", strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	readAllClose(t, resp)
+
+	return signOutResult{
+		status:        resp.StatusCode,
+		location:      resp.Header.Get("Location"),
+		sessionCookie: hasSessionCookie(resp),
 	}
 }
