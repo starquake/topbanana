@@ -111,9 +111,12 @@ func startServer(
 		t.Fatalf("failed to listen: %v", err)
 	}
 
+	// No solo read beat by default; a test's own WithSoloRevealDelay wins.
+	opts := append([]app.Option{app.WithSoloRevealDelay(0)}, runOpts...)
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Run(ctx, getenv, stdout, ln, runOpts...)
+		errCh <- app.Run(ctx, getenv, stdout, ln, opts...)
 	}()
 
 	baseURL := "http://" + ln.Addr().String()

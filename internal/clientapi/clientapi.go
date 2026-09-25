@@ -1103,7 +1103,7 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 //   - ErrGameNotFound / ErrQuestionNotInGame -> 404
 //   - ErrOptionNotInQuestion -> 400
 //   - ErrAnswerAlreadyRecorded -> 409 (double-tap / retry; #353)
-//   - ErrAnswerWindowClosed -> 409 (answer arrived too late; #1163)
+//   - ErrAnswerWindowClosed -> 409 (answer arrived outside the window; #1163, #1337)
 //   - anything else -> 500 via writeInternalError
 func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {

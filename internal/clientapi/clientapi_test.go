@@ -1033,6 +1033,44 @@ func TestHandleAnswerPost(t *testing.T) {
 		}
 	})
 
+	t.Run("returns 409 when the answer arrives during the read beat", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "answer-early")
+
+		svc := game.NewService(env.games, env.quizzes, env.logger)
+		svc.SetRevealDelay(time.Hour)
+
+		g, err := svc.CreateGame(t.Context(), qz.ID, playerID, false)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if _, err := svc.GetNext(t.Context(), g.ID, playerID); err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		questionID, optionID := correctOptionID(t, qz, 0)
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(env.logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodPost,
+			fmt.Sprintf("/api/games/%s/questions/%d/answers", g.ID, questionID),
+			strings.NewReader(fmt.Sprintf(`{"optionId": %d}`, optionID)),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusConflict; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("returns 404 when the question was deleted mid-game", func(t *testing.T) {
 		t.Parallel()
 
@@ -1184,13 +1222,16 @@ func TestHandleGameResults(t *testing.T) {
 		}
 
 		for i := range 2 {
-			if _, gerr := env.service.GetNext(ctx, g.ID, alice); gerr != nil {
+			item, gerr := env.service.GetNext(ctx, g.ID, alice)
+			if gerr != nil {
 				t.Fatalf("GetNext(%d) err = %v, want nil", i, gerr)
 			}
+			// Tapping at the window start scores exactly 1000, keeping the tie exact.
+			tappedAt := item.Question.StartedAt
 			qID, correct := correctOptionID(t, qz, i)
 			wrong := wrongOptionID(t, qz, i)
 
-			if _, serr := env.service.SubmitAnswer(ctx, g.ID, alice, qID, correct, time.Time{}); serr != nil {
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, alice, qID, correct, tappedAt); serr != nil {
 				t.Fatalf("alice SubmitAnswer(%d) err = %v, want nil", i, serr)
 			}
 			// bob right on Q0, wrong on Q1; carol wrong on Q0, right on Q1.
@@ -1198,10 +1239,10 @@ func TestHandleGameResults(t *testing.T) {
 			if i == 1 {
 				bobOpt, carolOpt = wrong, correct
 			}
-			if _, serr := env.service.SubmitAnswer(ctx, g.ID, bob, qID, bobOpt, time.Time{}); serr != nil {
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, bob, qID, bobOpt, tappedAt); serr != nil {
 				t.Fatalf("bob SubmitAnswer(%d) err = %v, want nil", i, serr)
 			}
-			if _, serr := env.service.SubmitAnswer(ctx, g.ID, carol, qID, carolOpt, time.Time{}); serr != nil {
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, carol, qID, carolOpt, tappedAt); serr != nil {
 				t.Fatalf("carol SubmitAnswer(%d) err = %v, want nil", i, serr)
 			}
 		}
