@@ -783,14 +783,19 @@ export class GameApp {
     // response is already in hand and nextQuestion can swap to the new
     // question without an intermediate "Loading question..." render (#982).
     // Idempotent: a second call while one is in flight is a no-op.
+    // The clock offset is captured when the response lands, not when the item
+    // is shown after the feedback pause, or the pause would skew it (#1340).
     prefetchNextItem() {
         if (this.nextItemPromise || !this.gameId) return;
-        this.nextItemPromise = gameService.getNextQuestion(this.gameId).catch((err) => {
-            console.warn('prefetch next item failed', err);
-            this.nextItemPromise = null;
+        this.nextItemPromise = gameService
+            .getNextQuestion(this.gameId)
+            .then((item) => ({ item, clockOffset: item ? clockOffsetFromServerNow(item.serverNow) : null }))
+            .catch((err) => {
+                console.warn('prefetch next item failed', err);
+                this.nextItemPromise = null;
 
-            return null;
-        });
+                return null;
+            });
     }
 
     async nextQuestion() {
@@ -808,13 +813,20 @@ export class GameApp {
         this.revealing = false;
         this.submitError = false;
         let item;
+        let offset = null;
         if (this.nextItemPromise) {
-            item = await this.nextItemPromise;
+            const prefetched = await this.nextItemPromise;
             this.nextItemPromise = null;
+            if (prefetched && prefetched.item) {
+                item = prefetched.item;
+                offset = prefetched.clockOffset;
+            }
         }
         if (!item) {
             item = await gameService.getNextQuestion(this.gameId);
+            offset = item ? clockOffsetFromServerNow(item.serverNow) : null;
         }
+        if (offset !== null) this.clockOffset = offset;
         if (!item) {
             this.feedback = null;
             this.finished = true;
@@ -884,10 +896,8 @@ export class GameApp {
         // the round-summary card reads `lastQuestionPosition` (the server
         // doesn't bump position over a round boundary, and
         // resolveAndAdvance has already nulled `question` by the time we
-        // land here). serverNow lives on both variants, so the
-        // clock-offset reconciliation still happens.
+        // land here).
         if (item.type === 'round_boundary') {
-            this.syncClockFrom(item);
             this.feedback = null;
             this.roundItem = item;
             // Round intro sting (#1088), deduped against the gesture's round-start
@@ -908,7 +918,6 @@ export class GameApp {
             return;
         }
         this.imageError = false;
-        this.syncClockFrom(item);
         this.feedback = null;
         this.roundItem = null;
         this.question = item;
@@ -926,18 +935,6 @@ export class GameApp {
             if (item.audioUrl) this.audio.playClip(item.id);
         });
         this.startRevealCountdown();
-    }
-
-    // syncClockFrom recomputes clockOffset from the serverNow that
-    // travels with every question payload. A per-question reset keeps
-    // drift bounded without needing a separate clock-sync endpoint;
-    // the only remaining error is one-way network delay (RTT/2), which
-    // is negligible against a 10-second answer window. A missing
-    // serverNow (older server) leaves clockOffset at 0 — the existing
-    // skew-vulnerable behaviour, not a regression.
-    syncClockFrom(question) {
-        const offset = clockOffsetFromServerNow(question && question.serverNow);
-        if (offset !== null) this.clockOffset = offset;
     }
 
     // serverTime returns the current time in ms as the server sees it,
