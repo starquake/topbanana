@@ -13,8 +13,9 @@ import (
 const uniqueActiveRoomVersion = 20260925150000
 
 // TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces pins the #1336
-// migration: a host's extra active rooms are finished (the newest stays open),
-// other hosts' rooms are untouched, and afterwards a second active room is
+// migration: a host's extra active rooms are finished (a running game, then the
+// latest host heartbeat, then the newest room stays open), other hosts' rooms
+// are untouched, and afterwards a second active room is
 // rejected while a finished one is still allowed. The Down drops the index.
 func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 	t.Parallel()
@@ -30,27 +31,39 @@ func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 	if err := goose.DownTo(db, ".", uniqueActiveRoomVersion-1); err != nil {
 		t.Fatalf("goose.DownTo err = %v, want nil", err)
 	}
-	var otherHost int64
-	if err := db.QueryRowContext(
-		ctx, `INSERT INTO players (display_name, role) VALUES ('uar-other-host', 'host') RETURNING id`,
-	).Scan(&otherHost); err != nil {
-		t.Fatalf("seed other host err = %v, want nil", err)
+	hostID := func(name string) int64 {
+		t.Helper()
+		var id int64
+		if err := db.QueryRowContext(
+			ctx, `INSERT INTO players (display_name, role) VALUES (?, 'host') RETURNING id`, name,
+		).Scan(&id); err != nil {
+			t.Fatalf("seed host %q err = %v, want nil", name, err)
+		}
+
+		return id
 	}
+	beatHost, tieHost, otherHost := hostID("uar-beat-host"), hostID("uar-tie-host"), hostID("uar-other-host")
 	seed := []struct {
 		id, code, phase, createdAt string
+		hostLastSeenAt             any
 		host                       int64
 	}{
-		{"uar-old", "UAR001", "lobby", "2026-06-01 10:00:00", 1},
-		{"uar-tie-a", "UAR002", "question", "2026-06-02 10:00:00", 1},
-		{"uar-tie-b", "UAR003", "intermission", "2026-06-02 10:00:00", 1},
-		{"uar-done", "UAR004", "finished", "2026-06-03 10:00:00", 1},
-		{"uar-other", "UAR005", "lobby", "2026-06-01 09:00:00", otherHost},
+		{"uar-running", "UAR001", "question", "2026-06-01 10:00:00", "2026-06-01 10:05:00", 1},
+		{"uar-dup-lobby", "UAR002", "lobby", "2026-06-01 10:00:05", "2026-06-01 10:05:30", 1},
+		{"uar-done", "UAR004", "finished", "2026-06-03 10:00:00", nil, 1},
+		{"uar-beat-old", "UAR009", "lobby", "2026-06-01 10:00:00", "2026-06-02 10:00:00", beatHost},
+		{"uar-beat-new", "UAR010", "intermission", "2026-06-01 11:00:00", "2026-06-01 11:00:00", beatHost},
+		{"uar-beat-none", "UAR011", "lobby", "2026-06-01 12:00:00", nil, beatHost},
+		{"uar-tie-a", "UAR012", "lobby", "2026-06-02 10:00:00", nil, tieHost},
+		{"uar-tie-b", "UAR013", "intermission", "2026-06-02 10:00:00", nil, tieHost},
+		{"uar-other", "UAR005", "lobby", "2026-06-01 09:00:00", nil, otherHost},
 	}
 	for _, s := range seed {
 		if _, err := db.ExecContext(
 			ctx,
-			`INSERT INTO sessions (id, host_player_id, join_code, phase, created_at) VALUES (?, ?, ?, ?, ?)`,
-			s.id, s.host, s.code, s.phase, s.createdAt,
+			`INSERT INTO sessions (id, host_player_id, join_code, phase, created_at, host_last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			s.id, s.host, s.code, s.phase, s.createdAt, s.hostLastSeenAt,
 		); err != nil {
 			t.Fatalf("seed session %q err = %v, want nil", s.id, err)
 		}
@@ -60,13 +73,18 @@ func TestUniqueActiveRoomMigration_ClosesDuplicatesAndEnforces(t *testing.T) {
 		t.Fatalf("goose.Up err = %v, want nil", err)
 	}
 
-	// The newest active room wins; a created_at tie falls to the higher id.
+	// A game in flight beats a newer lobby, then the latest host heartbeat
+	// wins, then the newest room, and a created_at tie falls to the higher id.
 	wantPhases := map[string]string{
-		"uar-old":   "finished",
-		"uar-tie-a": "finished",
-		"uar-tie-b": "intermission",
-		"uar-done":  "finished",
-		"uar-other": "lobby",
+		"uar-running":   "question",
+		"uar-dup-lobby": "finished",
+		"uar-done":      "finished",
+		"uar-beat-old":  "lobby",
+		"uar-beat-new":  "finished",
+		"uar-beat-none": "finished",
+		"uar-tie-a":     "finished",
+		"uar-tie-b":     "intermission",
+		"uar-other":     "lobby",
 	}
 	for id, wantPhase := range wantPhases {
 		var phase string

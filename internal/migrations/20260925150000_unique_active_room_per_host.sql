@@ -1,7 +1,8 @@
 -- +goose Up
 -- One active room per host (#1336). Rooms that already break the rule are
--- closed first, keeping the newest one open: the same room
--- GetActiveSessionForHost returns (created_at DESC, id DESC).
+-- closed first. The survivor is the room with a game in flight, then the one
+-- the host beat on most recently, then the newest, so a deploy never ends a
+-- running game in favour of an empty duplicate lobby.
 -- +goose StatementBegin
 UPDATE sessions
 SET phase               = 'finished',
@@ -9,13 +10,19 @@ SET phase               = 'finished',
     question_started_at = NULL,
     question_expires_at = NULL,
     finished_at         = CURRENT_TIMESTAMP
-WHERE phase != 'finished'
-  AND EXISTS (SELECT 1
-              FROM sessions newer
-              WHERE newer.host_player_id = sessions.host_player_id
-                AND newer.phase != 'finished'
-                AND (newer.created_at > sessions.created_at
-                     OR (newer.created_at = sessions.created_at AND newer.id > sessions.id)));
+WHERE id IN (SELECT id
+             FROM (SELECT id,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY host_player_id
+                              ORDER BY phase IN ('round_intro', 'question', 'reveal', 'round_results') DESC,
+                                  host_last_seen_at IS NULL,
+                                  host_last_seen_at DESC,
+                                  created_at DESC,
+                                  id DESC
+                              ) AS keep_rank
+                   FROM sessions
+                   WHERE phase != 'finished') ranked
+             WHERE keep_rank > 1);
 -- +goose StatementEnd
 
 -- +goose StatementBegin
