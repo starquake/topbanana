@@ -43,6 +43,7 @@ go.work.sum
 # Uploaded media (default MEDIA_DIR; see internal/config). Runtime uploads,
 # never tracked.
 media/
+!internal/media/
 
 # Editor/IDE
 # .idea/
