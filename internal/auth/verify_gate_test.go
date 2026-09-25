@@ -77,7 +77,7 @@ func TestRequireVerifiedEmail_UnverifiedHXRedirects(t *testing.T) {
 	rec := httptest.NewRecorder()
 	p := &Player{ID: 1, Email: "alice@example.test", EmailVerifiedAt: nil}
 	req := httptest.NewRequestWithContext(WithPlayer(t.Context(), p),
-		http.MethodPost, "/admin/quizzes/1/questions/2/move/up", nil)
+		http.MethodPost, "/admin/quizzes/1/questions/2/position", nil)
 	req.Header.Set("Hx-Request", "true")
 	gate.ServeHTTP(rec, req)
 

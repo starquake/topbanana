@@ -36,7 +36,7 @@ type roundsFixture struct {
 
 // seedRoundsQuiz persists a single-question quiz owned by the admin and
 // returns it alongside the question's id and a freshly created second
-// round so the move/delete handlers have real targets. The store stamps a
+// round so the move-to-round/delete handlers have real targets. The store stamps a
 // default round on CreateQuiz; the seeded question lands in it.
 func seedRoundsQuiz(t *testing.T, env *adminEnv) roundsFixture {
 	t.Helper()
@@ -223,60 +223,6 @@ func TestHandleQuestionMoveToRound(t *testing.T) {
 			url.Values{"round_id": {strconv.FormatInt(f.secondRound, 10)}}, adminActor,
 		)
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
-			t.Errorf("status = %d, want %d", got, want)
-		}
-	})
-}
-
-func postRoundMove(
-	t *testing.T, env *adminEnv, quizID, roundID, direction string,
-	actor func(*http.Request) *http.Request,
-) *httptest.ResponseRecorder {
-	t.Helper()
-	handler := HandleRoundMove(slog.New(slog.DiscardHandler), newRoundsCSRF(), env.quizzes)
-
-	req := httptest.NewRequestWithContext(
-		t.Context(), http.MethodPost,
-		"/admin/quizzes/"+quizID+"/rounds/"+roundID+"/move/"+direction, nil,
-	)
-	req.SetPathValue("quizID", quizID)
-	req.SetPathValue("roundID", roundID)
-	req.SetPathValue("direction", direction)
-	req = actor(req)
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	return rec
-}
-
-func TestHandleRoundMove(t *testing.T) {
-	t.Parallel()
-
-	t.Run("invalid direction renders a 400", func(t *testing.T) {
-		t.Parallel()
-
-		env := newAdminEnv(t)
-		f := seedRoundsQuiz(t, env)
-
-		rec := postRoundMove(
-			t, env, strconv.FormatInt(f.quiz.ID, 10), strconv.FormatInt(f.secondRound, 10), "sideways", adminActor,
-		)
-		if got, want := rec.Code, http.StatusBadRequest; got != want {
-			t.Errorf("status = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("unknown round renders a 404", func(t *testing.T) {
-		t.Parallel()
-
-		env := newAdminEnv(t)
-		f := seedRoundsQuiz(t, env)
-
-		rec := postRoundMove(
-			t, env, strconv.FormatInt(f.quiz.ID, 10), "999999", "up", adminActor,
-		)
-		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
