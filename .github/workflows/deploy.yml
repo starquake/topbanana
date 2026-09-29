@@ -15,6 +15,9 @@ on:
           - staging
           - production
           - demo
+  # Development deploys off a label instead: see deploy-development.
+  pull_request:
+    types: [labeled, synchronize]
 
 env:
   REGISTRY: ghcr.io
@@ -533,6 +536,156 @@ jobs:
         run: |
           for i in $(seq 1 12); do
             if curl -fsS "${{ secrets.HEALTH_URL }}" >/dev/null; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Health check attempt $i/12 failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 12 attempts (60s); failing the deploy" >&2
+          exit 1
+
+
+  # Deploy a labeled pull request to the development sandbox (#1242).
+  # Unlike the other environments this one builds the PR's own code rather
+  # than pulling an image CI already published, so the loop is label ->
+  # build -> deploy with no wait on the suite. Gated so a missing
+  # development host does not red the PR pipeline.
+  deploy-development:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    # Label-only, and same-repo only. A fork PR gets no secrets from
+    # GitHub anyway; the head-repo check makes that refusal explicit.
+    # Fires on the labeling event and on any later push while it stays
+    # labeled, so pushing to a labeled PR redeploys it.
+    if: >-
+      vars.DEVELOPMENT_DEPLOY_ENABLED == 'true' &&
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'deploy:dev') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    # Single development slot: a newer labeled push cancels an in-flight
+    # deploy rather than queueing behind it.
+    concurrency:
+      group: deploy-development
+      cancel-in-progress: true
+    environment:
+      name: development
+      url: "${{ vars.SERVER_URL }}"
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Copy docker-compose file
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deployments/app/docker-compose.development.yml"
+          target: "~/topbanana-development"
+          strip_components: 2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the PR's code and push a pr-<n> tag. No cosign: the digest
+      # comes straight out of this build step, so there is no untrusted
+      # registry hop for a signature to protect. Development is a
+      # throwaway sandbox fed only by the operator's own labeled PRs.
+      - name: Build and push PR image
+        id: build-and-push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number }}
+          build-args: |
+            COMMIT=${{ github.event.pull_request.head.sha }}
+            DATE=${{ github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resolve image digest
+        id: digest
+        env:
+          BUILD_DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BUILD_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: build did not return a digest (got '${BUILD_DIGEST}')" >&2
+            exit 1
+          fi
+          echo "digest=${BUILD_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to development server
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          SESSION_KEY: ${{ secrets.SESSION_KEY }}
+          INITIAL_ADMIN_EMAIL: ${{ secrets.INITIAL_ADMIN_EMAIL }}
+          INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
+          IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          # appleboy/ssh-action only forwards env vars named here; missing
+          # one means the script sees an empty value and the .env heredoc
+          # bakes in a blank, which the compose ${VAR:?...} guard then
+          # rejects on boot. Keep this list in lockstep with the env block
+          # above and the .env heredoc below.
+          envs: SESSION_KEY,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD,IMAGE_NAME,IMAGE_DIGEST,PR_NUMBER,GITHUB_TOKEN,GITHUB_ACTOR
+          script: |
+            set -e
+            if [ -z "$SESSION_KEY" ]; then
+              echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
+              exit 1
+            fi
+            mkdir -p ~/topbanana-development
+            cd ~/topbanana-development
+            umask 077
+            cat > .env <<EOF
+            SESSION_KEY='${SESSION_KEY}'
+            INITIAL_ADMIN_EMAIL='${INITIAL_ADMIN_EMAIL}'
+            INITIAL_ADMIN_PASSWORD='${INITIAL_ADMIN_PASSWORD}'
+            IMAGE_NAME='${IMAGE_NAME}'
+            IMAGE_DIGEST='${IMAGE_DIGEST}'
+            EOF
+            mv -f docker-compose.development.yml docker-compose.yml
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Switching to a different PR starts from an empty database, so
+            # one PR's schema or data can never explain the next one's
+            # behaviour. Re-deploying the same PR keeps its data.
+            if [ "$(cat .pr 2>/dev/null)" != "$PR_NUMBER" ]; then
+              echo "Development is switching to PR #${PR_NUMBER}; recreating its volume."
+              docker compose down -v || true
+            fi
+            echo "$PR_NUMBER" > .pr
+            docker compose pull
+            docker compose up -d
+            docker logout ghcr.io
+
+      - name: Verify development deployment
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "$HEALTH_URL" >/dev/null; then
               echo "Health check passed (attempt $i)"
               exit 0
             fi
