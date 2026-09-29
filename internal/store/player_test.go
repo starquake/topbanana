@@ -1667,11 +1667,13 @@ func TestPlayerStore_CreatePlayerFromOAuth_DuplicateEmail(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayerFromOAuth(t.Context(), "first", "same@example.test"); err != nil {
+	if _, err := ps.CreatePlayerFromOAuth(
+		t.Context(), "first", "same@example.test", "google", "sub-dup-email-1",
+	); err != nil {
 		t.Fatalf("first CreatePlayerFromOAuth err = %v, want nil", err)
 	}
 
-	_, err := ps.CreatePlayerFromOAuth(t.Context(), "second", "Same@Example.Test")
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "second", "Same@Example.Test", "google", "sub-dup-email-2")
 	if got, want := err, auth.ErrEmailTaken; !errors.Is(got, want) {
 		t.Errorf("CreatePlayerFromOAuth err = %v, want %v", got, want)
 	}
