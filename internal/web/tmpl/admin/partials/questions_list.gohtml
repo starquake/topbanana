@@ -9,8 +9,8 @@
 
      Rendered two ways:
        - Inlined by quizview.gohtml as part of the full page response.
-       - Returned alone by HandleQuestionMove / HandleRoundMove when the
-         request carries HX-Request: true.
+       - Returned alone by HandleQuestionPosition / HandleRoundPosition
+         after a drag-and-drop reorder.
 
      The wrapper carries id="questions-list" because hx-swap="outerHTML"
      replaces the entire element; the new fragment must keep the id so

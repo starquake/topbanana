@@ -338,12 +338,9 @@ func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	return nil
 }
 
-// UpdateQuiz updates a quiz using a transaction.
+// UpdateQuiz updates the quiz's own row only, so a stale qz.Questions cannot clobber questions.
 func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		return s.execUpdateQuiz(ctx, q, qz)
-	})
-	if err != nil {
+	if err := execUpdateQuiz(ctx, s.q, qz); err != nil {
 		return fmt.Errorf("failed to update quiz: %w", err)
 	}
 
@@ -602,97 +599,6 @@ func (s *QuizStore) CreateQuestionAtNextPosition(ctx context.Context, qs *quiz.Q
 	)
 }
 
-// SwapQuestionPositions atomically swaps the question's position with
-// its neighbour on the given side. The pair runs in one transaction
-// so a concurrent read never sees a half-swapped state.
-func (s *QuizStore) SwapQuestionPositions(
-	ctx context.Context, quizID, questionID int64, direction string,
-) error {
-	if direction != quiz.DirectionUp && direction != quiz.DirectionDown {
-		return quiz.ErrInvalidDirection
-	}
-
-	rows, err := s.q.ListQuestionsByQuizID(ctx, quizID)
-	if err != nil {
-		return fmt.Errorf("failed to list questions for swap: %w", err)
-	}
-
-	idx := -1
-	for i := range rows {
-		if rows[i].ID == questionID {
-			idx = i
-
-			break
-		}
-	}
-	if idx == -1 {
-		return quiz.ErrQuestionNotFound
-	}
-
-	var neighbourIdx int
-	switch direction {
-	case quiz.DirectionUp:
-		if idx == 0 {
-			return quiz.ErrQuestionAtTop
-		}
-		neighbourIdx = idx - 1
-	case quiz.DirectionDown:
-		if idx == len(rows)-1 {
-			return quiz.ErrQuestionAtBottom
-		}
-		neighbourIdx = idx + 1
-	default:
-		// Guarded above by the early return for invalid directions,
-		// so this branch is unreachable. The explicit default keeps
-		// revive's enforce-switch-style happy.
-		return quiz.ErrInvalidDirection
-	}
-
-	current, neighbour := rows[idx], rows[neighbourIdx]
-
-	err = database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		return execSwapQuestionPositions(ctx, q, current.ID, current.Position, neighbour.ID, neighbour.Position)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to swap question positions: %w", err)
-	}
-
-	return nil
-}
-
-// execSwapQuestionPositions is the three-step swap body of
-// [QuizStore.SwapQuestionPositions]; pulled out so the public method
-// stays under revive's function-length limit. SQLite checks
-// UNIQUE(quiz_id, position) per statement (no deferred uniqueness),
-// so a naive two-step swap trips the constraint on the first UPDATE.
-// Park the current row at -current.ID - guaranteed unique because IDs
-// are positive - move the neighbour into the current row's slot,
-// then settle the current row into the neighbour's old slot.
-func execSwapQuestionPositions(
-	ctx context.Context, q *db.Queries, currentID, currentPos, neighbourID, neighbourPos int64,
-) error {
-	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
-		Position: -currentID,
-		ID:       currentID,
-	}); err != nil {
-		return fmt.Errorf("park current question position: %w", err)
-	}
-	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
-		Position: currentPos,
-		ID:       neighbourID,
-	}); err != nil {
-		return fmt.Errorf("update neighbour question position: %w", err)
-	}
-	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
-		Position: neighbourPos,
-		ID:       currentID,
-	}); err != nil {
-		return fmt.Errorf("update current question position: %w", err)
-	}
-
-	return nil
-}
-
 // MoveQuestionToPosition moves a question to a 1-based slot within a
 // target round (which may differ from its current round), then recomputes
 // every question's quiz-wide position so the questions of each round stay
@@ -940,10 +846,9 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	for _, qs := range qz.Questions {
 		qs.ID = 0
 		qs.QuizID = qz.ID
-	}
-
-	if err = s.handleQuestions(ctx, q, qz); err != nil {
-		return fmt.Errorf("failed to handle questions: %w", err)
+		if err = s.execCreateQuestion(ctx, q, qs); err != nil {
+			return fmt.Errorf("failed to create question: %w", err)
+		}
 	}
 
 	return nil
@@ -1001,7 +906,7 @@ func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz 
 	return nil
 }
 
-func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
+func execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
 	if qz.ID == 0 {
 		return quiz.ErrCannotUpdateQuizWithIDZero
 	}
@@ -1028,53 +933,6 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 
 	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrUpdatingQuizNoRowsAffected
-	}
-
-	for _, qs := range qz.Questions {
-		qs.QuizID = qz.ID
-	}
-
-	if err = s.handleQuestions(ctx, q, qz); err != nil {
-		return fmt.Errorf("failed to handle questions: %w", err)
-	}
-
-	return nil
-}
-
-func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
-	var err error
-	existingIDs, err := q.ListQuestionIDsByQuizID(ctx, qz.ID)
-	if err != nil {
-		return fmt.Errorf("failed to list existing question IDs for quiz %d: %w", qz.ID, err)
-	}
-
-	incomingIDs := make(map[int64]bool)
-	for _, qs := range qz.Questions {
-		if qs.ID == 0 {
-			// CREATE
-			if createErr := s.execCreateQuestion(ctx, q, qs); createErr != nil {
-				return fmt.Errorf("failed to create question: %w", createErr)
-			}
-		} else {
-			// UPDATE
-			incomingIDs[qs.ID] = true
-
-			if updateErr := s.execUpdateQuestion(ctx, q, qs); updateErr != nil {
-				return fmt.Errorf("failed to update question: %w", updateErr)
-			}
-		}
-	}
-
-	// DELETE
-	deleteIDs := make([]int64, 0, len(existingIDs))
-	for _, id := range existingIDs {
-		if !incomingIDs[id] {
-			deleteIDs = append(deleteIDs, id)
-		}
-	}
-
-	if err = s.execDeleteQuestions(ctx, q, deleteIDs); err != nil {
-		return fmt.Errorf("failed to delete questions: %w", err)
 	}
 
 	return nil

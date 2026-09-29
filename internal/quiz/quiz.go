@@ -64,7 +64,7 @@ type Store interface {
 	GetQuizVisibility(ctx context.Context, id int64) (string, error)
 	// CreateQuiz creates a quiz.
 	CreateQuiz(ctx context.Context, qz *Quiz) error
-	// UpdateQuiz updates a quiz.
+	// UpdateQuiz updates the quiz's own fields; it never touches qz.Questions.
 	UpdateQuiz(ctx context.Context, qz *Quiz) error
 	// SetQuizMode flips just the play mode of a quiz between ModeSolo and
 	// ModeLive without touching its questions (#830). Returns ErrInvalidMode
@@ -98,14 +98,6 @@ type Store interface {
 	// clearing that reference. Returns ErrUpdatingQuestionNoRowsAffected when
 	// the id does not match a row.
 	SetQuestionMedia(ctx context.Context, questionID int64, imageMediaID, audioMediaID *int64, audioRepeat bool) error
-	// SwapQuestionPositions swaps the question with questionID against
-	// its neighbour on the given side ("up" = previous position,
-	// "down" = next position) within the same quiz, atomically.
-	// Returns ErrQuestionAtTop / ErrQuestionAtBottom when there is no
-	// neighbour in that direction, ErrQuestionNotFound when the id
-	// does not belong to the quiz, and ErrInvalidDirection on any
-	// direction other than "up"/"down".
-	SwapQuestionPositions(ctx context.Context, quizID, questionID int64, direction string) error
 	// GetOption returns an option by its ID.
 	GetOption(ctx context.Context, optionID int64) (*Option, error)
 	// GetOptionsByIDs returns options for the given IDs.
@@ -144,13 +136,6 @@ type Store interface {
 	// DeleteRound removes a round by ID. Returns
 	// ErrDeletingRoundNoRowsAffected when the id does not match a row.
 	DeleteRound(ctx context.Context, id int64) error
-	// MoveRound shifts a round by one slot in the given direction
-	// ("up" = decrement position, "down" = increment position) within
-	// the same quiz. Returns ErrRoundNotFound when the round id does
-	// not belong to the quiz, ErrInvalidDirection when direction is
-	// neither "up" nor "down", and ErrRoundMoveImpossible when the
-	// target slot is out of range or already occupied by another round.
-	MoveRound(ctx context.Context, quizID, groupID int64, direction string) error
 	// MoveQuestionToRound reassigns the question with questionID to the
 	// round with groupID. Both must belong to quizID; a mismatch returns
 	// ErrQuestionNotFound (question not on quiz) or ErrRoundNotFound
@@ -196,17 +181,6 @@ var (
 	ErrCannotUpdateQuizWithIDZero = errors.New("cannot update quiz with ID 0")
 	// ErrCannotUpdateQuestionWithIDZero is returned when trying to update a question with ID 0.
 	ErrCannotUpdateQuestionWithIDZero = errors.New("cannot update question with ID 0")
-	// ErrQuestionAtTop is returned by SwapQuestionPositions when the
-	// caller asked to move a question up but it already has the
-	// lowest position in its quiz.
-	ErrQuestionAtTop = errors.New("question is already at the top")
-	// ErrQuestionAtBottom is returned by SwapQuestionPositions when the
-	// caller asked to move a question down but it already has the
-	// highest position in its quiz.
-	ErrQuestionAtBottom = errors.New("question is already at the bottom")
-	// ErrInvalidDirection is returned by SwapQuestionPositions when the
-	// supplied direction is neither "up" nor "down".
-	ErrInvalidDirection = errors.New("invalid direction")
 	// ErrInvalidMode is returned by SetQuizMode when the supplied mode is
 	// neither ModeSolo nor ModeLive (#830).
 	ErrInvalidMode = errors.New("invalid play mode")
@@ -239,16 +213,6 @@ var (
 	// ErrCannotUpdateRoundWithIDZero guards UpdateRound against a caller
 	// that forgot to set the ID (#444).
 	ErrCannotUpdateRoundWithIDZero = errors.New("cannot update round with ID 0")
-	// ErrRoundMoveImpossible is returned by MoveRound when the requested
-	// direction has no valid target slot - either the resulting position
-	// is out of range or another round already occupies it (#444).
-	ErrRoundMoveImpossible = errors.New("round cannot move in that direction")
-)
-
-// Reorder directions accepted by [Store.SwapQuestionPositions].
-const (
-	DirectionUp   = "up"
-	DirectionDown = "down"
 )
 
 // Per-question / per-quiz answer-window bounds (#99). The DB CHECK on

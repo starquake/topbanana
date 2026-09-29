@@ -244,9 +244,6 @@ func (stubQuizStore) SetQuestionMedia(_ context.Context, _ int64, _, _ *int64, _
 	return errStub
 }
 
-func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
-	return errStub
-}
 func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return errStub }
 func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
 	return nil, errStub
@@ -286,10 +283,6 @@ func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, e
 func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errStub }
 func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errStub }
 func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errStub }
-func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
-	return errStub
-}
-
 func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
 	return errStub
 }
