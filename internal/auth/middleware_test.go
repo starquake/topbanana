@@ -759,35 +759,49 @@ func TestEnsurePlayer_LoginApproval_AnonymousGuestNotHeld(t *testing.T) {
 	}
 }
 
-// TestEnsurePlayer_LoginApproval_HeldAccountReplaced pins that EnsurePlayer does
-// not serve the API as a held account: it mints a fresh guest instead.
+// TestEnsurePlayer_LoginApproval_HeldAccountReplaced pins that EnsurePlayer never
+// serves the API as a held account: an unsafe method gets a fresh guest, and a
+// safe one runs with no player, like any request without a usable session.
 func TestEnsurePlayer_LoginApproval_HeldAccountReplaced(t *testing.T) {
 	t.Parallel()
 
-	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
-	if _, err := players.CreatePlayer(t.Context(), "boot", "boot@example.test", "h", RolePlayer); err != nil {
-		t.Fatalf("bootstrap CreatePlayer err = %v, want nil", err)
+	tests := []struct {
+		method    string
+		wantGuest bool
+	}{
+		{method: http.MethodGet, wantGuest: false},
+		{method: http.MethodPost, wantGuest: true},
 	}
-	held, err := players.CreatePlayer(t.Context(), "held", "held@example.test", "h", RolePlayer)
-	if err != nil {
-		t.Fatalf("CreatePlayer err = %v, want nil", err)
-	}
-	sessions := session.New([]byte("k"), true).WithLoginApprovalRequired(true)
-	var seen *Player
-	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seen, _ = PlayerFromContext(r.Context())
-	})
-	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			t.Parallel()
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/players/me", nil)
-	req.AddCookie(sessionCookieFor(t, sessions, held))
-	mw.ServeHTTP(httptest.NewRecorder(), req)
+			players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+			if _, err := players.CreatePlayer(t.Context(), "boot", "boot@example.test", "h", RolePlayer); err != nil {
+				t.Fatalf("bootstrap CreatePlayer err = %v, want nil", err)
+			}
+			held, err := players.CreatePlayer(t.Context(), "held", "held@example.test", "h", RolePlayer)
+			if err != nil {
+				t.Fatalf("CreatePlayer err = %v, want nil", err)
+			}
+			sessions := session.New([]byte("k"), true).WithLoginApprovalRequired(true)
+			var seen *Player
+			next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				seen, _ = PlayerFromContext(r.Context())
+			})
+			mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
-	if seen == nil {
-		t.Fatal("no player on context")
-	}
-	if seen.ID == held.ID {
-		t.Errorf("player.ID = %d, want a fresh guest, not the held account", seen.ID)
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/api/players/me", nil)
+			req.AddCookie(sessionCookieFor(t, sessions, held))
+			mw.ServeHTTP(httptest.NewRecorder(), req)
+
+			if seen != nil && seen.ID == held.ID {
+				t.Fatalf("player.ID = %d, want anything but the held account", seen.ID)
+			}
+			if got, want := seen != nil, tt.wantGuest; got != want {
+				t.Errorf("player on context = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
