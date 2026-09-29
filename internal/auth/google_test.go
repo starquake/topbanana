@@ -1127,17 +1127,15 @@ func TestGoogleAuthenticator_ConcurrentInitRetry(t *testing.T) {
 	ctx := t.Context()
 	const goroutines = 16
 	var wg sync.WaitGroup
-	wg.Add(goroutines)
 	for range goroutines {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/login/google", nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if got, want := rec.Code, http.StatusInternalServerError; got != want {
 				t.Errorf("HandleGoogleLogin status = %d, want %d for an unreachable issuer", got, want)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

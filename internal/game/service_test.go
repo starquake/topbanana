@@ -1835,14 +1835,12 @@ func TestService_CreateGame_Race(t *testing.T) {
 	games := make([]*Game, parallel)
 
 	var wg sync.WaitGroup
-	wg.Add(parallel)
 	for i := range parallel {
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			g, gerr := svc.CreateGame(context.Background(), qz.ID, player.ID, false)
-			games[idx] = g
-			results[idx] = gerr
-		}(i)
+			games[i] = g
+			results[i] = gerr
+		})
 	}
 	wg.Wait()
 
@@ -1951,17 +1949,15 @@ func TestService_GetNextQuestion_Race(t *testing.T) {
 
 	const parallel = 4
 	var wg sync.WaitGroup
-	wg.Add(parallel)
 	results := make([]*Question, parallel)
 	errs := make([]error, parallel)
 
 	for i := range parallel {
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			gq, gerr := svc.GetNextQuestion(context.Background(), game.ID, player.ID)
-			results[idx] = gq
-			errs[idx] = gerr
-		}(i)
+			results[i] = gq
+			errs[i] = gerr
+		})
 	}
 	wg.Wait()
 

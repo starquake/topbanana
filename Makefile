@@ -47,13 +47,13 @@ SHA256SUM := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || e
 # the prereq evaluates to empty and the download never fires. The
 # version MUST match `with: version:` in the lint job of .github/workflows/ci.yml
 # — bump both together; dependabot does not track this field.
-GOLANGCI_VERSION := v2.13.2
+GOLANGCI_VERSION := v2.14.0
 GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
 # From the release's golangci-lint-<version>-checksums.txt; update with the version.
-GOLANGCI_SHA256_linux-amd64  := 2277d43b98ec0054280f2ac26b53268bae97682444678a59a657dd565da021d6
-GOLANGCI_SHA256_linux-arm64  := a2a4e0065aa41be71f7c5ac90f271b61751331e5d04314e62afe4027855f0893
-GOLANGCI_SHA256_darwin-amd64 := 8a13aaf9cbbb1dee52824e862cf0d0720e5bb97c1f4260d1e51623a09492b57b
-GOLANGCI_SHA256_darwin-arm64 := f4bf83f0b64f055c42b28fc9a38861839f69c096e61c788e72dfaae412011789
+GOLANGCI_SHA256_linux-amd64  := ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab
+GOLANGCI_SHA256_linux-arm64  := ee7ec5f3453d15ddf106fae5a4d6c71737712348a979d1fe9cd52ec7ea299bae
+GOLANGCI_SHA256_darwin-amd64 := a5667c1c3536be1740133213e1e822bfb8f0d98ea12903174d6d5f635e4ed68d
+GOLANGCI_SHA256_darwin-arm64 := 5ef5f36a7147e91dc58ef9ef4d11bb7bad5ead0c76eb6c01327a73c641d1dcc3
 
 # sqlc version + binary path. Same parse-time-expansion reason for the
 # placement. Dependabot watches /tools/go.mod for new releases; mirror

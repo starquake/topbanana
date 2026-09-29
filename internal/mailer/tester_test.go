@@ -250,16 +250,14 @@ func TestTester_ConcurrentSendsKeepBufferOrdered(t *testing.T) {
 	// order, which requires the full set to be observable.
 	const senders = LogCapacity
 	var wg sync.WaitGroup
-	wg.Add(senders)
 	for i := range senders {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = tester.Send(t.Context(), Message{
 				To:      "x@y",
 				Subject: "send-" + strconv.Itoa(i),
 				Kind:    KindTest,
 			})
-		}()
+		})
 	}
 	wg.Wait()
 

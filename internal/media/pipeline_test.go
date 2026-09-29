@@ -273,14 +273,12 @@ func TestProcess_Concurrent(t *testing.T) {
 
 	const workers = 16
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := Process(t.Context(), bytes.NewReader(inputPNG), MaxUploadBytes); err != nil {
 				t.Errorf("Process err = %v, want nil", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
