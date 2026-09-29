@@ -1249,7 +1249,11 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session, qz *quiz
 		return standings, nil
 	}
 
-	played := newQuestionPlan(qz).rounds
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, qz.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
+	}
+	played := newQuestionPlan(qz, rounds).rounds
 	if len(played) == 0 {
 		return standings, nil
 	}
