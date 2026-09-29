@@ -536,6 +536,7 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	}
 
 	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	openQuestion(t, sessionStore, sess.ID, q)
 	if err = sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, p.ID, correctOpt.ID, answeredAt); err != nil {
 		t.Fatalf("RecordAnswer err = %v, want nil", err)
 	}
@@ -603,6 +604,7 @@ func TestLiveSessionStore_RecordAnswer_RefreshesLastSeen(t *testing.T) {
 	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
 	setLastSeen(t, db, sess.ID, p.ID, answeredAt.Add(-time.Hour))
 
+	openQuestion(t, sessionStore, sess.ID, q)
 	if err = sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, p.ID, q.Options[0].ID, answeredAt); err != nil {
 		t.Fatalf("RecordAnswer err = %v, want nil", err)
 	}
@@ -768,6 +770,7 @@ func TestLiveSessionStore_ActiveCounts(t *testing.T) {
 	}
 
 	// Once the fresh player answers, no active player is unanswered.
+	openQuestion(t, sessionStore, sess.ID, q)
 	if err = sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, fresh.ID, q.Options[0].ID, now); err != nil {
 		t.Fatalf("RecordAnswer err = %v, want nil", err)
 	}
@@ -894,6 +897,7 @@ func seedFinishedSession(
 	}
 	q := qz.Questions[0]
 	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	openQuestion(t, sessionStore, sess.ID, q)
 	if err := sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, playerID, q.Options[0].ID, answeredAt); err != nil {
 		t.Fatalf("RecordAnswer err = %v, want nil", err)
 	}
@@ -940,10 +944,10 @@ func TestLiveSessionStore_Standings(t *testing.T) {
 
 	// Winner scores 100 in each round-1 question and 50 in round 2; loser only
 	// answers (and never scores) round-1 question 1.
-	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, winner.ID, r1q1.Options[0].ID, at, 100)
-	scoreAnswer(t, sessionStore, sess.ID, r1q2.ID, winner.ID, r1q2.Options[0].ID, at, 100)
-	scoreAnswer(t, sessionStore, sess.ID, r2q1.ID, winner.ID, r2q1.Options[0].ID, at, 50)
-	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, loser.ID, r1q1.Options[1].ID, at, 0)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1, winner.ID, r1q1.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r1q2, winner.ID, r1q2.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r2q1, winner.ID, r2q1.Options[0].ID, at, 50)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1, loser.ID, r1q1.Options[1].ID, at, 0)
 
 	round1Standings, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round1)
 	if err != nil {
@@ -1137,17 +1141,39 @@ func TestLiveSessionStore_StaleTransitionDoesNotResurrectFinished(t *testing.T) 
 	}
 }
 
+// openQuestion moves the session onto q in the question phase, from whatever
+// phase it is in, so RecordAnswer accepts picks for it.
+func openQuestion(t *testing.T, s *LiveSessionStore, sessionID string, q *quiz.Question) {
+	t.Helper()
+	sess, err := s.GetSessionByID(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if sess.Phase == livesession.PhaseQuestion && sess.CurrentQuestionID != nil && *sess.CurrentQuestionID == q.ID {
+		return
+	}
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	applied, err := s.EnterQuestion(t.Context(), sessionID, sess.Phase, q.RoundID, q.ID, start, start.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+	if !applied {
+		t.Fatal("EnterQuestion applied = false, want true")
+	}
+}
+
 // scoreAnswer records a pick and immediately writes its score, the
 // record-then-score-at-close sequence the runner performs.
 func scoreAnswer(
-	t *testing.T, s *LiveSessionStore, sessionID string, questionID, playerID, optionID int64,
+	t *testing.T, s *LiveSessionStore, sessionID string, q *quiz.Question, playerID, optionID int64,
 	answeredAt time.Time, score int,
 ) {
 	t.Helper()
-	if err := s.RecordAnswer(t.Context(), sessionID, questionID, playerID, optionID, answeredAt); err != nil {
+	openQuestion(t, s, sessionID, q)
+	if err := s.RecordAnswer(t.Context(), sessionID, q.ID, playerID, optionID, answeredAt); err != nil {
 		t.Fatalf("RecordAnswer err = %v, want nil", err)
 	}
-	if err := s.SetAnswerScore(t.Context(), sessionID, questionID, playerID, score); err != nil {
+	if err := s.SetAnswerScore(t.Context(), sessionID, q.ID, playerID, score); err != nil {
 		t.Fatalf("SetAnswerScore err = %v, want nil", err)
 	}
 }
@@ -1327,8 +1353,8 @@ func TestLiveSessionStore_MarkPlayerLeft_KeepsPlayedInStandings(t *testing.T) {
 
 	// Stayer and playedLeaver both answer and score round-1 question 1; the
 	// playedLeaver out-scores the stayer. lobbyLeaver never answers.
-	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, stayer.ID, r1q1.Options[0].ID, at, 100)
-	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, playedLeaver.ID, r1q1.Options[0].ID, at, 200)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1, stayer.ID, r1q1.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1, playedLeaver.ID, r1q1.Options[0].ID, at, 200)
 
 	if err = sessionStore.MarkPlayerLeft(t.Context(), "LSTN23", playedLeaver.ID); err != nil {
 		t.Fatalf("MarkPlayerLeft playedLeaver err = %v, want nil", err)
@@ -1469,5 +1495,138 @@ func TestLiveSessionStore_Intermission_RepeatCallDoesNotDoubleBump(t *testing.T)
 
 	if got, want := readQuizPlayCount(t, db, qz.ID), int64(1); got != want {
 		t.Errorf("play_count after repeat intermission = %d, want %d (no double-bump)", got, want)
+	}
+}
+
+// TestLiveSessionStore_RecordAnswer_OnlyWhileQuestionOpen pins #1334: a pick is
+// written only while the session is in the question phase on that question,
+// and never replaces a scored pick; otherwise it reports ErrQuestionNotOpen.
+func TestLiveSessionStore_RecordAnswer_OnlyWhileQuestionOpen(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newTwoRoundLiveQuiz(t, quizStore)
+	q1, q2 := qz.Questions[0], qz.Questions[1]
+
+	sess := &livesession.Session{QuizID: new(qz.ID), HostPlayerID: seededAdminID, JoinCode: "OPEN23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	p, err := playerStore.CreateAnonymousPlayer(t.Context(), "open-p1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	at := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	record := func(q *quiz.Question, optionID int64) error {
+		return sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, p.ID, optionID, at)
+	}
+
+	if got, want := record(q1, q1.Options[0].ID), livesession.ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("RecordAnswer in lobby err = %v, want %v", got, want)
+	}
+
+	openQuestion(t, sessionStore, sess.ID, q1)
+	if got, want := record(q2, q2.Options[0].ID), livesession.ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("RecordAnswer for another question err = %v, want %v", got, want)
+	}
+	if err = record(q1, q1.Options[0].ID); err != nil {
+		t.Fatalf("RecordAnswer on the open question err = %v, want nil", err)
+	}
+	if err = sessionStore.SetAnswerScore(t.Context(), sess.ID, q1.ID, p.ID, 500); err != nil {
+		t.Fatalf("SetAnswerScore err = %v, want nil", err)
+	}
+	if got, want := record(q1, q1.Options[1].ID), livesession.ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("RecordAnswer over a scored pick err = %v, want %v", got, want)
+	}
+	answers, err := sessionStore.ListAnswers(t.Context(), sess.ID, q1.ID)
+	if err != nil {
+		t.Fatalf("ListAnswers err = %v, want nil", err)
+	}
+	if got, want := answers[0].OptionID, q1.Options[0].ID; got != want {
+		t.Errorf("scored pick option = %d, want %d (unchanged)", got, want)
+	}
+
+	applied, err := sessionStore.EnterReveal(t.Context(), sess.ID, livesession.PhaseQuestion, q1.ID)
+	if err != nil || !applied {
+		t.Fatalf("EnterReveal = (%v, %v), want (true, nil)", applied, err)
+	}
+	p2, err := playerStore.CreateAnonymousPlayer(t.Context(), "open-p2")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p2.ID); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	err = sessionStore.RecordAnswer(t.Context(), sess.ID, q1.ID, p2.ID, q1.Options[0].ID, at)
+	if got, want := err, livesession.ErrQuestionNotOpen; !errors.Is(got, want) {
+		t.Errorf("RecordAnswer after reveal err = %v, want %v", got, want)
+	}
+}
+
+// TestLiveSessionStore_CreateSession_OneActiveRoomPerHost pins #1336: a host
+// with an active room cannot open a second one, but can once it is finished.
+func TestLiveSessionStore_CreateSession_OneActiveRoomPerHost(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+
+	first := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "ONE234"}
+	if err := sessionStore.CreateSession(t.Context(), first); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	second := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "TWO234"}
+	if got, want := sessionStore.CreateSession(t.Context(), second), livesession.ErrHostHasActiveRoom; !errors.Is(
+		got, want,
+	) {
+		t.Errorf("second CreateSession err = %v, want %v", got, want)
+	}
+
+	if err := sessionStore.Finish(t.Context(), first.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+	if err := sessionStore.CreateSession(t.Context(), second); err != nil {
+		t.Errorf("CreateSession after finish err = %v, want nil", err)
+	}
+}
+
+// TestLiveSessionStore_FinishFrom pins the idle-close guard (#1336): the finish
+// is written only from the expected phase.
+func TestLiveSessionStore_FinishFrom(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	sess := &livesession.Session{HostPlayerID: seededAdminID, JoinCode: "FIN234"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	applied, err := sessionStore.FinishFrom(t.Context(), sess.ID, livesession.PhaseIntermission)
+	if err != nil {
+		t.Fatalf("FinishFrom wrong phase err = %v, want nil", err)
+	}
+	if applied {
+		t.Error("FinishFrom from the wrong phase applied = true, want false")
+	}
+	applied, err = sessionStore.FinishFrom(t.Context(), sess.ID, livesession.PhaseLobby)
+	if err != nil {
+		t.Fatalf("FinishFrom err = %v, want nil", err)
+	}
+	if !applied {
+		t.Error("FinishFrom from the loaded phase applied = false, want true")
+	}
+	got, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if got, want := got.Phase, livesession.PhaseFinished; got != want {
+		t.Errorf("phase after FinishFrom = %q, want %q", got, want)
 	}
 }

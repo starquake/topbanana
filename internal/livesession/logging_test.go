@@ -286,6 +286,10 @@ func TestService_LogsCreateSession(t *testing.T) {
 	ctx := t.Context()
 
 	const hostID int64 = 1
+	// A host has one active room, so close the harness room first.
+	if err := h.service.EndSession(ctx, h.code, hostID); err != nil {
+		t.Fatalf("EndSession err = %v, want nil", err)
+	}
 	sess, err := h.service.CreateSession(ctx, nil, hostID, false)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
@@ -297,6 +301,13 @@ func TestService_LogsCreateSession(t *testing.T) {
 	if _, ok := attrs["quiz"]; ok {
 		t.Error("quiz attr present for a quiz-less room, want absent")
 	}
+
+	if _, err = h.service.CreateSession(ctx, nil, hostID, false); err != nil {
+		t.Fatalf("second CreateSession err = %v, want nil", err)
+	}
+	reuseAttrs := assertLog(t, h.logs, "live session create reused the host's active room", slog.LevelInfo)
+	assertStringAttr(t, reuseAttrs, "joinCode", sess.JoinCode)
+	assertInt64Attr(t, reuseAttrs, "host", hostID)
 }
 
 // TestService_LogsClosedRoomJoinRejection pins that a join into a finished room
