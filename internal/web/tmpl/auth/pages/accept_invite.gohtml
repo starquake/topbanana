@@ -14,7 +14,7 @@
             <input type="hidden" name="token" value="{{.Token}}">
             <label class="flex flex-col gap-1 text-sm">
                 <span class="text-text-dim">{{t "common.name"}}</span>
-                <input type="text" name="display_name" value="{{.DisplayName}}" autocomplete="nickname" required class="form-input">
+                <input type="text" name="display_name" value="{{.DisplayName}}" autocomplete="nickname" maxlength="50" required class="form-input">
             </label>
             <label class="flex flex-col gap-1 text-sm">
                 <span class="text-text-dim">{{t "common.password"}}</span>

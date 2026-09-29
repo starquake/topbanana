@@ -44,7 +44,7 @@ export class PlayerService {
     // returns a discriminated result the component can branch on
     // without inspecting raw status codes. The shape is:
     //   { ok: true,  player: {...} }                                       on 200
-    //   { ok: false, status, kind: 'taken'|'already_claimed'|'empty'|'error', message }
+    //   { ok: false, status, kind: 'taken'|'already_claimed'|'empty'|'invalid'|'error', message }
     //
     // The two distinct 409 cases (#289) — "name in use by another row"
     // versus "this account is already non-anonymous" — surface as
@@ -82,6 +82,10 @@ export class PlayerService {
             return { ok: false, status: 409, kind: 'taken', message: t('claim.nameTaken') };
         }
         if (response.status === 400) {
+            const { code } = await readClaimNameError(response);
+            if (code === 'display_name_too_long' || code === 'display_name_invalid') {
+                return { ok: false, status: 400, kind: 'invalid', message: t('claim.nameInvalid') };
+            }
             return { ok: false, status: 400, kind: 'empty', message: t('claim.enterName') };
         }
         return { ok: false, status: response.status, kind: 'error', message: t('claim.saveError') };
