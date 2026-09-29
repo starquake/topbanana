@@ -73,7 +73,70 @@ async function dropStream(page: import('./fixtures').Page): Promise<boolean> {
 // no next action. These specs pin the two new controls: a "Reconnect now" button
 // that forces an immediate re-subscribe + state re-read, and a "Back to join"
 // link that returns the player to the entry screen.
+// hardCloseStream reproduces a fatal SSE close (e.g. a proxy 502 during a
+// deploy): EventSource ends CLOSED and raises the error event it fires when it
+// gives up for good.
+async function hardCloseStream(page: import('./fixtures').Page): Promise<boolean> {
+  await waitForAlpineComponent(page, '[x-data="joinApp"]', 'eventSource');
+  return page.evaluate(() => {
+    const root = document.querySelector('[x-data="joinApp"]');
+    const cmp = (window as unknown as {
+      Alpine: { $data: (el: Element) => { eventSource: EventSource | null } };
+    }).Alpine.$data(root!);
+    const source = cmp.eventSource;
+    if (!source) return false;
+    source.close();
+    source.dispatchEvent(new Event('error'));
+    return source.readyState === EventSource.CLOSED;
+  });
+}
+
 test.describe('live reconnect and recovery', () => {
+  // A hard-closed stream shows the banner and re-subscribes on a backoff (#1342).
+  test('a hard-closed stream shows the banner and recovers via backoff re-subscribe', async ({ page, hostSessions }) => {
+    test.setTimeout(60_000);
+
+    const stamp = Date.now();
+    const quizTitle = `Hard Close ${stamp}`;
+    const ava = `Ava-${stamp}`;
+    const ben = `Ben-${stamp}`;
+
+    const host = await hostSessions.adminHost();
+    await seedQuiz(host, quizTitle);
+    const quizID = makeQuizLive(quizTitle);
+    const { joinCode } = await hostSessions.openViaApi(quizID);
+
+    await page.goto(`/join/${joinCode}`);
+    await page.getByTestId('join-name-input').fill(ava);
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('lobby-view')).toBeVisible();
+    const roster = page.getByTestId('lobby-roster');
+    await expect(roster.getByText(ava)).toBeVisible();
+
+    // Hold GET /state failing so the banner stays up until the stream is back.
+    await page.route(`**/api/sessions/${joinCode}/state`, (route) =>
+      route.fulfill({ status: 502, body: 'bad gateway' }),
+    );
+    expect(await hardCloseStream(page)).toBe(true);
+    await expect(page.getByTestId('connection-trouble')).toBeVisible();
+    await page.unroute(`**/api/sessions/${joinCode}/state`);
+
+    const benContext = await hostSessions.newPlayerContext();
+    await claimAndJoin(benContext.request, joinCode, ben);
+
+    // The backoff timer re-opens the stream and re-reads state with no
+    // foreground return or tap, so the second player appears.
+    await expect(roster.getByText(ben)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('connection-trouble')).toHaveCount(0, { timeout: 10_000 });
+    await expect.poll(() => page.evaluate(() => {
+      const root = document.querySelector('[x-data="joinApp"]');
+      const cmp = (window as unknown as {
+        Alpine: { $data: (el: Element) => { eventSource: EventSource | null } };
+      }).Alpine.$data(root!);
+      return cmp.eventSource !== null && cmp.eventSource.readyState !== EventSource.CLOSED;
+    })).toBe(true);
+  });
+
   test('the Reconnect now control recovers the live view after the stream drops', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
@@ -105,8 +168,16 @@ test.describe('live reconnect and recovery', () => {
     await page.route(`**/api/sessions/${joinCode}/state`, (route) =>
       route.fulfill({ status: 500, body: 'boom' }),
     );
+    // Wait out each read: overlapping reads coalesce, so a burst counts as fewer failures.
     for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.evaluate(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        const root = document.querySelector('[x-data="joinApp"]');
+        const cmp = (window as unknown as {
+          Alpine: { $data: (el: Element) => { stateReads: { pending: () => Promise<void> | null } } };
+        }).Alpine.$data(root!);
+        await cmp.stateReads.pending();
+      });
     }
     await expect(page.getByTestId('connection-trouble')).toBeVisible({ timeout: 10_000 });
     // A non-404 failure is the connection-trouble signal, not the room-gone one.

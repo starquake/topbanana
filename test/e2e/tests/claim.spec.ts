@@ -51,6 +51,11 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   await page.getByRole('button', { name: 'Set your name' }).click();
   const modal = page.locator('[role="dialog"]');
   await expect(modal).toBeVisible();
+  // The panel caps its height to the visual viewport via a class, not an inline style (#1344).
+  const panel = modal.locator('[x-data^="claimNameForm"]');
+  await expect(panel).not.toHaveAttribute('style');
+  const viewportHeight = page.viewportSize()!.height;
+  expect(Number.parseFloat(await panel.evaluate((el) => getComputedStyle(el).maxHeight))).toBeLessThanOrEqual(viewportHeight);
 
   // Unique-per-run name so chromium and firefox don't collide on the shared
   // SQLite file, and reruns against a populated DB still work.

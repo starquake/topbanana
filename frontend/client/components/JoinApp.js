@@ -2,6 +2,8 @@ import { sessionService } from '../services/SessionService.js';
 import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
+import { createCoalescedRead } from '@shared/coalescedRead.js';
+import { createReconnectBackoff } from '@shared/reconnectBackoff.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import {
@@ -109,6 +111,8 @@ export class JoinApp {
         this.sessionClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
+        this.reconnect = createReconnectBackoff();
+        this.readBeat = {};
         // The bound visibility/focus handler, wired once in init. Held on the
         // instance so a single shared reference backs all three listeners. Null
         // until init attaches it.
@@ -204,6 +208,9 @@ export class JoinApp {
         // Monotonic id per GET /state read; ignore a superseded response so an
         // out-of-order read can't regress the surface (e.g. reveal->question) (#1178).
         this.stateSeq = 0;
+        // Assigned in init so the read runs on the reactive proxy: a burst of
+        // ticks shares one in-flight GET /state plus one follow-up.
+        this.stateReads = null;
         // Guards the connection-trouble banner's "Reconnect now" control (#1121)
         // so a double-tap does not fire two overlapping recoveries, and drives
         // the button's in-flight "Reconnecting..." label.
@@ -255,6 +262,7 @@ export class JoinApp {
     // /join/{code} deep link otherwise lands on the name form; the bare /join
     // entry with no remembered session shows the enter-code form first.
     async init() {
+        this.stateReads = createCoalescedRead((signal) => this.readState(signal));
         // Capture the component root so the standings FLIP can scope its row
         // queries to this island. $root resolves here because init() runs in
         // Alpine context; the later SSE-driven syncStandingsFromState path does
@@ -538,18 +546,23 @@ export class JoinApp {
         await this.refreshState();
     }
 
-    // refreshState performs the authoritative read. A null result (404) means
+    refreshState() {
+        return this.stateReads.run();
+    }
+
+    // readState performs the authoritative read. A null result (404) means
     // the session is gone or the viewer is no longer a participant; the
     // component flips sessionClosed and tears down the stream so the UI stops
     // polling a dead room. A thrown read (network drop, 5xx) leaves the prior
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
-    async refreshState() {
+    async readState(signal) {
         const seq = ++this.stateSeq;
         let state;
         try {
-            state = await sessionService.getState(this.code);
+            state = await sessionService.getState(this.code, { signal });
         } catch {
+            if (signal?.aborted) return;
             // Count every failure, even a superseded one: seq-gating this would
             // drop a fast-superseded run and never trip the banner (#1178). A
             // transient read failure leaves the prior roster on screen; the next
@@ -800,6 +813,7 @@ export class JoinApp {
             setRevealing: (revealing) => { this.revealing = revealing; },
             setTimer: (handle) => { this.questionTimer = handle; },
             clearTimer: () => this.clearQuestionTimer(),
+            readBeat: this.readBeat,
         });
     }
 
@@ -915,22 +929,38 @@ export class JoinApp {
         if (typeof EventSource === 'undefined') return;
         const url = `/api/sessions/${encodeURIComponent(this.code)}/events`;
         const source = new EventSource(url);
+        source.onopen = () => {
+            this.reconnect.reset();
+        };
         source.onmessage = () => {
+            this.reconnect.reset();
             this.refreshState();
         };
         source.onerror = () => {
             // EventSource auto-reconnects, and a reconnect resends the current
-            // version (the resync path), so a transient drop self-heals. Only
-            // tear down on a hard close so we don't leak a dead socket.
+            // version (the resync path), so a transient drop self-heals. A hard
+            // close never retries, so drive our own backoff.
             if (source.readyState === EventSource.CLOSED) {
                 this.eventSource = null;
+                this.connectionTrouble = true;
+                this.scheduleReconnect();
             }
         };
         this.eventSource = source;
     }
 
+    // scheduleReconnect re-opens the stream and re-reads state after a hard close.
+    scheduleReconnect() {
+        this.reconnect.schedule(() => {
+            if (this.sessionClosed || this.step !== 'lobby' || !this.code) return;
+            this.subscribe();
+            this.refreshState();
+        });
+    }
+
     // closeStream is safe to call regardless of subscription state.
     closeStream() {
+        this.reconnect.cancel();
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
