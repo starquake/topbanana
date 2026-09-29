@@ -1637,6 +1637,25 @@ func TestPlayerStore_CreatePlayerFromOAuth_DuplicateDisplayName(t *testing.T) {
 	}
 }
 
+// TestPlayerStore_CreatePlayerFromOAuth_DuplicateEmail pins that an email
+// collision maps to auth.ErrEmailTaken rather than the display-name sentinel
+// the OAuth handler retries on.
+func TestPlayerStore_CreatePlayerFromOAuth_DuplicateEmail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayerFromOAuth(t.Context(), "first", "same@example.test"); err != nil {
+		t.Fatalf("first CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "second", "Same@Example.Test")
+	if got, want := err, auth.ErrEmailTaken; !errors.Is(got, want) {
+		t.Errorf("CreatePlayerFromOAuth err = %v, want %v", got, want)
+	}
+}
+
 // TestPlayerStore_CreatePlayerFromOAuth_ClosedDBWraps pins the
 // store-error branch: a closed DB surfaces a wrapped "failed to create
 // player from oauth" rather than a bare driver error.

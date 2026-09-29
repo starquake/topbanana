@@ -2,7 +2,9 @@
 package dbtest
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,6 +103,7 @@ func buildTemplate() {
 		return
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	if err = goose.Up(db, "."); err != nil {
 		templateErr = fmt.Errorf("run migrations on template db: %w", err)
@@ -182,4 +185,73 @@ func OpenUnmigrated(t *testing.T) *sql.DB {
 	db.SetConnMaxLifetime(connMaxLifetime)
 
 	return db
+}
+
+// UnmigratedDSN returns a DSN for an empty on-disk SQLite database with no
+// migrations applied, for tests that migrate a file database themselves.
+func UnmigratedDSN(t *testing.T) string {
+	t.Helper()
+
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
+
+	return fmt.Sprintf(
+		"file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate",
+		filepath.Join(t.TempDir(), "unmigrated.sqlite"),
+	)
+}
+
+// QueryRecorder is a sqlc DBTX that records the SQL and arguments of a query or
+// exec instead of running it, so a test can EXPLAIN the exact generated statement.
+type QueryRecorder struct {
+	*sql.DB
+
+	Query string
+	Args  []any
+}
+
+// ExecContext records query and args and returns [errors.ErrUnsupported].
+func (r *QueryRecorder) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
+	r.Query, r.Args = query, args
+
+	return nil, errors.ErrUnsupported
+}
+
+// QueryContext records query and args and returns [errors.ErrUnsupported].
+func (r *QueryRecorder) QueryContext(_ context.Context, query string, args ...any) (*sql.Rows, error) {
+	r.Query, r.Args = query, args
+
+	return nil, errors.ErrUnsupported
+}
+
+// QueryPlan returns the detail column of each EXPLAIN QUERY PLAN row for query
+// bound to args.
+func QueryPlan(t *testing.T, db *sql.DB, query string, args ...any) []string {
+	t.Helper()
+
+	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN %q err = %v", query, err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			t.Errorf("rows.Close err = %v", cerr)
+		}
+	}()
+
+	var plan []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err = rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan plan row err = %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatalf("plan rows err = %v", err)
+	}
+
+	return plan
 }

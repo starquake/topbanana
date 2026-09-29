@@ -3135,6 +3135,74 @@ func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
 	}
 }
 
+// TestQuizStore_QuestionOnlyWrites_BumpParentQuizUpdatedAt pins the question
+// triggers on writes that touch no options (#1346).
+func TestQuizStore_QuestionOnlyWrites_BumpParentQuizUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		write func(t *testing.T, quizStore *QuizStore, parent *quiz.Quiz) error
+	}{
+		{
+			name: "move",
+			write: func(t *testing.T, quizStore *QuizStore, parent *quiz.Quiz) error {
+				t.Helper()
+				round, err := quizStore.GetDefaultRound(t.Context(), parent.ID)
+				if err != nil {
+					t.Fatalf("GetDefaultRound err = %v, want nil", err)
+				}
+
+				return quizStore.MoveQuestionToPosition(
+					t.Context(), parent.ID, parent.Questions[0].ID, round.ID, len(parent.Questions),
+				)
+			},
+		},
+		{
+			name: "set media",
+			write: func(t *testing.T, quizStore *QuizStore, parent *quiz.Quiz) error {
+				t.Helper()
+
+				return quizStore.SetQuestionMedia(t.Context(), parent.Questions[0].ID, nil, nil, true)
+			},
+		},
+		{
+			name: "delete",
+			write: func(t *testing.T, quizStore *QuizStore, parent *quiz.Quiz) error {
+				t.Helper()
+
+				return quizStore.DeleteQuestion(t.Context(), parent.Questions[0].ID)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbtest.Open(t)
+			quizStore := NewQuizStore(db, slog.Default())
+
+			parent := newTestQuizzes()[0]
+			if err := quizStore.CreateQuiz(t.Context(), parent); err != nil {
+				t.Fatalf("CreateQuiz err = %v, want nil", err)
+			}
+			before := rewindQuizUpdatedAt(t, db, parent.ID)
+
+			if err := tt.write(t, quizStore, parent); err != nil {
+				t.Fatalf("%s err = %v, want nil", tt.name, err)
+			}
+
+			got, err := quizStore.GetQuiz(t.Context(), parent.ID)
+			if err != nil {
+				t.Fatalf("GetQuiz err = %v, want nil", err)
+			}
+			if !got.UpdatedAt.After(before) {
+				t.Errorf("UpdatedAt = %v, want after %v", got.UpdatedAt, before)
+			}
+		})
+	}
+}
+
 // TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID: an option UPDATE
 // targeting another question's option id affects no rows (#1165).
 func TestQuizStore_UpdateQuestion_RejectsCrossQuestionOptionID(t *testing.T) {
