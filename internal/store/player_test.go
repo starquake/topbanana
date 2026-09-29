@@ -1279,15 +1279,13 @@ func TestPlayerStore_DemoteAdmin_ConcurrentDemotionsKeepOneAdmin(t *testing.T) {
 		errs    = make(map[int64]error, 2)
 		targets = []int64{adminA, adminB}
 	)
-	wg.Add(len(targets))
 	for _, id := range targets {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := ps.DemoteAdmin(t.Context(), id, auth.RoleHost)
 			mu.Lock()
 			errs[id] = err
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 

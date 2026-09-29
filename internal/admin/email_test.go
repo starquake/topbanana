@@ -158,15 +158,13 @@ func TestEmailRateLimiter_ConcurrentAllowAdmitsExactlyOne(t *testing.T) {
 	var admitted atomic.Int64
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(goroutines)
 	for range goroutines {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			if ok, _, _ := l.Allow("1.2.3.4"); ok {
 				admitted.Add(1)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
