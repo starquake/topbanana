@@ -1124,7 +1124,10 @@ func addAPIRoutes(
 	mintLimiter := auth.NewIPBudgetLimiter(cfg.GuestMintBudget, config.GuestLimitWindow, cfg.TrustedProxyCIDRs)
 	renameLimiter := auth.NewIPBudgetLimiter(cfg.GuestRenameBudget, config.GuestLimitWindow, cfg.TrustedProxyCIDRs)
 	ensurePlayer := func(h http.Handler) http.Handler {
-		return sameOriginCheck(expectedOrigin, noStore(auth.EnsurePlayer(h, stores.Players, sessions, mintLimiter, logger)))
+		return sameOriginCheck(
+			expectedOrigin,
+			noStore(auth.EnsurePlayer(h, stores.Players, sessions, mintLimiter, logger)),
+		)
 	}
 
 	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
