@@ -9,11 +9,13 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	_ "image/png" // register the png decoder with image.Decode
 	"io"
@@ -38,6 +40,35 @@ const (
 	// decode. 50 MP is far above any real photo yet rejects the bombs, and the
 	// output is only MaxLongEdge px so a larger source is never needed.
 	MaxPixels = 50_000_000
+
+	// MaxDecodedBytes caps the peak decode memory estimated from the header:
+	// the decoded pixel buffer plus the decoder's working buffers. A 16-bit png
+	// decodes at 8 bytes per pixel, so MaxPixels alone still allows a ~400 MB
+	// buffer from a small file.
+	MaxDecodedBytes = 200 << 20
+
+	// maxConcurrentDecodes bounds how many uploads decode at once, so parallel
+	// uploads cannot multiply the per-image peak memory.
+	maxConcurrentDecodes = 2
+
+	grayPixelBytes   = 1
+	gray16PixelBytes = 2
+	ycbcrPixelBytes  = 3
+	rgbaPixelBytes   = 4
+	rgba64PixelBytes = 8
+
+	progressiveCoefficientBytes = 4
+
+	grayComponents  = 1
+	ycbcrComponents = 3
+	cmykComponents  = 4
+
+	pngInterlaceOffset = 28 // signature (8) + IHDR length and type (8) + IHDR field offset (12)
+	pngInterlaceAdam7  = 1
+	adam7PeakFactor    = 2
+
+	preshrinkFactor = 2
+	halve           = 2
 
 	// MaxLongEdge caps the stored full image's long edge in pixels. The image
 	// is only ever downscaled to this; a smaller image passes through at its
@@ -70,9 +101,13 @@ var ErrEmptyUpload = errors.New("upload is empty")
 var ErrUnsupportedImage = errors.New("unsupported or undecodable image")
 
 // ErrImageTooLarge is returned when the decoded image's pixel dimensions exceed
-// MaxPixels - a decode-bomb guard checked from the header before the full
-// decode allocates the pixel buffer.
+// MaxPixels or its estimated decoded size exceeds MaxDecodedBytes - a
+// decode-bomb guard checked from the header before the full decode allocates
+// the pixel buffer.
 var ErrImageTooLarge = errors.New("image dimensions exceed maximum")
+
+//nolint:gochecknoglobals // process-wide decode semaphore.
+var decodeSlots = make(chan struct{}, maxConcurrentDecodes)
 
 // Processed is the output of the pipeline: the normalised full-image and
 // thumbnail jpeg bytes plus the metadata a media row stores. Width, Height,
@@ -96,26 +131,40 @@ type Processed struct {
 
 // Process decodes the upload (jpeg or png), downscales it so its long edge is
 // at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
-// ThumbLongEdge jpeg thumbnail from the same decoded source. It is pure: no
-// disk or network. The reader is fully consumed. maxBytes caps the raw upload
-// size; zero or negative disables the cap.
+// ThumbLongEdge jpeg thumbnail from the same decoded source. A jpeg's EXIF
+// Orientation is applied to both outputs. It is pure: no disk or network. The
+// reader is fully consumed. maxBytes caps the raw upload size; zero or negative
+// disables the cap.
+//
+// At most maxConcurrentDecodes calls decode at once; a call waiting for a slot
+// returns ctx's error when ctx ends first.
 //
 // Returns ErrUploadTooLarge when the raw bytes exceed maxBytes, ErrEmptyUpload
 // for a zero-byte upload, and ErrUnsupportedImage when the bytes are not a
 // decodable jpeg or png.
-func Process(r io.Reader, maxBytes int64) (*Processed, error) {
+func Process(ctx context.Context, r io.Reader, maxBytes int64) (*Processed, error) {
 	raw, err := readCapped(r, maxBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	src, err := decodeGuarded(raw)
+	release, err := acquireDecodeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	src, format, err := decodeGuarded(raw)
 	if err != nil {
 		return nil, err
 	}
 
-	full := resizeLongEdge(src, MaxLongEdge)
-	thumb := resizeLongEdge(src, ThumbLongEdge)
+	orientation := orientationNormal
+	if format == "jpeg" {
+		orientation = jpegOrientation(raw)
+	}
+	full := applyOrientation(resizeLongEdge(src, MaxLongEdge), orientation)
+	thumb := applyOrientation(resizeLongEdge(src, ThumbLongEdge), orientation)
 
 	fullBytes, err := encodeJPEG(full)
 	if err != nil {
@@ -140,26 +189,123 @@ func Process(r io.Reader, maxBytes int64) (*Processed, error) {
 	}, nil
 }
 
-// decodeGuarded decodes raw (jpeg or png). It rejects a decode bomb
-// from the header first (DecodeConfig reads only the header; PNG's max declared
-// edge of 2^31 keeps the int64 area product in range, so it cannot overflow),
-// then decodes the full image. Returns ErrImageTooLarge for an oversized
-// declared area and ErrUnsupportedImage for undecodable bytes.
-func decodeGuarded(raw []byte) (image.Image, error) {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+// acquireDecodeSlot blocks until a decode slot is free or ctx ends, and
+// returns the func that frees the slot.
+func acquireDecodeSlot(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("waiting for decode slot: %w", err)
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
-		return nil, ErrImageTooLarge
+	select {
+	case decodeSlots <- struct{}{}:
+		return func() { <-decodeSlots }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for decode slot: %w", ctx.Err())
+	}
+}
+
+// decodeGuarded decodes raw (jpeg or png) and returns the image and its format
+// name. It rejects a decode bomb from the header first (DecodeConfig reads only
+// the header; PNG's max declared edge of 2^31 keeps the int64 area product in
+// range, so it cannot overflow), then decodes the full image. Returns
+// ErrImageTooLarge for an oversized declared area or decoded size and
+// ErrUnsupportedImage for undecodable bytes.
+func decodeGuarded(raw []byte) (image.Image, string, error) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, "", ErrImageTooLarge
+	}
+	area := int64(cfg.Width) * int64(cfg.Height)
+	if area > MaxPixels || area*decodedPixelBytes(raw, cfg.ColorModel, format) > MaxDecodedBytes {
+		return nil, "", ErrImageTooLarge
 	}
 
-	src, _, err := image.Decode(bytes.NewReader(raw))
+	src, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
 	}
 
-	return src, nil
+	return src, format, nil
+}
+
+// decodedPixelBytes is the worst-case decode memory per pixel for an image of
+// model m in format, as the stdlib decoders allocate it.
+func decodedPixelBytes(raw []byte, m color.Model, format string) int64 {
+	switch format {
+	case "jpeg":
+		return jpegPixelBytes(raw, m)
+	case "png":
+		return pngPixelBytes(raw, m)
+	default:
+		return bytesPerPixel(m)
+	}
+}
+
+// pngPixelBytes is image/png's peak decode memory per pixel. DecodeConfig has
+// already validated raw's IHDR, so its interlace byte is at a fixed offset.
+func pngPixelBytes(raw []byte, m color.Model) int64 {
+	var cost int64
+	switch m {
+	case color.GrayModel:
+		// A tRNS chunk, which DecodeConfig does not read, promotes gray to NRGBA.
+		cost = rgbaPixelBytes
+	case color.Gray16Model:
+		cost = rgba64PixelBytes
+	default:
+		cost = bytesPerPixel(m)
+	}
+	if len(raw) > pngInterlaceOffset && raw[pngInterlaceOffset] == pngInterlaceAdam7 {
+		// Adam7 decodes each pass into its own image before merging it into the full one.
+		cost *= adam7PeakFactor
+	}
+
+	return cost
+}
+
+// jpegPixelBytes is image/jpeg's peak decode memory per pixel: a byte per
+// component sample, an int32 coefficient per sample when progressive, and an
+// RGBA-sized output when it converts CMYK, YCCK, or RGB samples.
+func jpegPixelBytes(raw []byte, m color.Model) int64 {
+	var components int64
+	switch m {
+	case color.GrayModel:
+		components = grayComponents
+	case color.CMYKModel:
+		components = cmykComponents
+	default:
+		components = ycbcrComponents
+	}
+	cost := components
+	if jpegProgressive(raw) {
+		cost += progressiveCoefficientBytes * components
+	}
+	if m == color.CMYKModel || m == color.RGBAModel {
+		cost += rgbaPixelBytes
+	}
+
+	return cost
+}
+
+// bytesPerPixel is the decoded buffer cost per pixel of the image type the
+// stdlib decoders return for m; an unknown model assumes the 16-bit worst case.
+func bytesPerPixel(m color.Model) int64 {
+	if _, ok := m.(color.Palette); ok {
+		return grayPixelBytes
+	}
+	switch m {
+	case color.GrayModel, color.AlphaModel:
+		return grayPixelBytes
+	case color.Gray16Model, color.Alpha16Model:
+		return gray16PixelBytes
+	case color.YCbCrModel:
+		return ycbcrPixelBytes
+	case color.RGBAModel, color.NRGBAModel, color.CMYKModel, color.NYCbCrAModel:
+		return rgbaPixelBytes
+	default:
+		return rgba64PixelBytes
+	}
 }
 
 // readCapped reads the upload, capping it at maxBytes (plus one byte to detect
@@ -208,10 +354,28 @@ func resizeLongEdge(src image.Image, maxLongEdge int) image.Image {
 	dw := max(int(float64(w)*scale), 1)
 	dh := max(int(float64(h)*scale), 1)
 
+	src = preshrink(src, maxLongEdge)
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
-	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
 
 	return dst
+}
+
+// preshrink halves src until its long edge is at most preshrinkFactor times
+// maxLongEdge. CatmullRom allocates a 32-byte buffer per destination column
+// per source row, so bounding the source bounds that buffer. An exact halving
+// with ApproxBiLinear averages each 2x2 block, a box filter.
+func preshrink(src image.Image, maxLongEdge int) image.Image {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	for max(w, h) > preshrinkFactor*maxLongEdge {
+		w, h = max(w/halve, 1), max(h/halve, 1)
+		dst := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
+		src = dst
+	}
+
+	return src
 }
 
 // encodeJPEG encodes img as lossy jpeg at jpegQuality.
