@@ -87,12 +87,12 @@ func (s *Service) StoreImage(
 ) (*Media, error) {
 	// Two ctx.Err checks around Process: the first skips Process if the
 	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
-	// the second catches a cancel that arrived during Process, which is sync
-	// and doesn't observe ctx itself.
+	// the second catches a cancel that arrived during Process, which observes
+	// ctx only while waiting for a decode slot.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("upload cancelled before processing: %w", ctxErr)
 	}
-	processed, err := Process(r, s.imageMaxBytes)
+	processed, err := Process(ctx, r, s.imageMaxBytes)
 	if err != nil {
 		return nil, err
 	}
