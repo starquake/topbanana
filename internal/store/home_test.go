@@ -1,12 +1,17 @@
 package store_test
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	dbgen "github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -546,5 +551,54 @@ func TestHomeStore_EmptyDB(t *testing.T) {
 	}
 	if got, want := len(players), 0; got != want {
 		t.Errorf("len(players) = %d, want %d", got, want)
+	}
+}
+
+// TestHomeStore_RankingQueriesSeekRecentGames pins that the home rankings
+// start from the 30-day range on games_created_at_idx instead of scanning
+// every game or participant ever recorded (#1348).
+func TestHomeStore_RankingQueriesSeekRecentGames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		call func(ctx context.Context, q *dbgen.Queries) error
+	}{
+		{
+			name: "ListPopularQuizzes",
+			call: func(ctx context.Context, q *dbgen.Queries) error {
+				_, err := q.ListPopularQuizzes(ctx)
+
+				return err
+			},
+		},
+		{
+			name: "ListMostActivePlayers",
+			call: func(ctx context.Context, q *dbgen.Queries) error {
+				_, err := q.ListMostActivePlayers(ctx)
+
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			conn := dbtest.Open(t)
+			rec := &dbtest.QueryRecorder{DB: conn}
+			if got, want := tt.call(t.Context(), dbgen.New(rec)), errors.ErrUnsupported; !errors.Is(got, want) {
+				t.Fatalf("%s err = %v, want %v", tt.name, got, want)
+			}
+
+			plan := dbtest.QueryPlan(t, conn, rec.Query, rec.Args...)
+			joined := strings.Join(plan, "\n")
+			if got, want := joined, "games_created_at_idx"; !strings.Contains(got, want) {
+				t.Errorf("plan = %q, should contain %q", got, want)
+			}
+			if slices.ContainsFunc(plan, func(step string) bool { return strings.HasPrefix(step, "SCAN ") }) {
+				t.Errorf("plan = %q, should have no SCAN step", joined)
+			}
+		})
 	}
 }
