@@ -745,7 +745,7 @@ func TestEnsurePlayer_LoginApproval_AnonymousGuestNotHeld(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen, _ = PlayerFromContext(r.Context())
 	})
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/players/me", nil)
 	req.AddCookie(sessionCookieFor(t, sessions, guest))
@@ -777,7 +777,7 @@ func TestEnsurePlayer_LoginApproval_HeldAccountReplaced(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen, _ = PlayerFromContext(r.Context())
 	})
-	mw := EnsurePlayer(next, players, sessions, discardLogger())
+	mw := EnsurePlayer(next, players, sessions, unlimited(), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/players/me", nil)
 	req.AddCookie(sessionCookieFor(t, sessions, held))

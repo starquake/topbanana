@@ -36,6 +36,8 @@ func TestProfile_SignOutOtherDevices(t *testing.T) {
 			ctx,
 			"signout-google",
 			"signout-google@example.test",
+			"google",
+			"sub-signout-google",
 		); err != nil {
 			t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 		}
