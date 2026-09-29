@@ -197,3 +197,53 @@ test('the grip handle reorders questions and rounds by keyboard', async ({ page,
   await page.reload();
   expect(await roundTitles(page)).toEqual(['Round Beta', 'Round Alpha']);
 });
+
+// An expired session 303s the POST to /login; the move reverts with a session
+// message and the handles keep working (#1343).
+test('an expired session snaps the reorder back and keeps the handles working', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+  await openQuiz(page, `E2E Reorder Expired ${browserName} ${Date.now()}`);
+
+  const original = ['Alpha Q1', 'Alpha Q2', 'Alpha Q3', 'Beta Q1', 'Beta Q2'];
+  // Drop only the session cookie: the CSRF nonce outlives an expired session.
+  const cookies = await page.context().cookies();
+  await page.context().clearCookies({ name: 'topbanana_session' });
+
+  const alphaQ2 = page.locator('article.q-row', { hasText: 'Alpha Q2' });
+  await alphaQ2.locator('[data-question-handle]').focus();
+  await page.keyboard.press('ArrowUp');
+
+  await expect(page.locator('[data-reorder-error]')).toContainText('Your session has expired');
+  await expect.poll(async () => questionTexts(page)).toEqual(original);
+
+  // Signed back in, the same handle reorders again without a reload.
+  await page.context().addCookies(cookies);
+  await page.locator('article.q-row', { hasText: 'Alpha Q2' }).locator('[data-question-handle]').focus();
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await questionTexts(page)).slice(0, 2)).toEqual(['Alpha Q2', 'Alpha Q1']);
+});
+
+test('arrow presses while a reorder is saving send one request', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+  await openQuiz(page, `E2E Reorder In Flight ${browserName} ${Date.now()}`);
+
+  let posts = 0;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/questions/*/position', async (route) => {
+    posts++;
+    await held;
+    await route.continue();
+  });
+
+  const alphaQ3 = page.locator('article.q-row', { hasText: 'Alpha Q3' });
+  await alphaQ3.locator('[data-question-handle]').focus();
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(() => posts).toBe(1);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  release();
+
+  await expect.poll(async () => questionTexts(page)).toEqual(['Alpha Q1', 'Alpha Q3', 'Alpha Q2', 'Beta Q1', 'Beta Q2']);
+  expect(posts).toBe(1);
+});

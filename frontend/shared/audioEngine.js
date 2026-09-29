@@ -154,13 +154,16 @@ export function createAudioEngine(view) {
         if (!howl) { callback(); return; }
         const token = sequenceToken;
         try {
-            howl.once('end', () => {
+            const id = howl.play();
+            // Scoped to this play's sound id; whichever of end / stop fires first
+            // removes both, so the unfired one does not pile up on the shared Howl.
+            const done = () => {
+                howl.off('end', done, id);
+                howl.off('stop', done, id);
                 if (token === sequenceToken) callback();
-            });
-            howl.once('stop', () => {
-                if (token === sequenceToken) callback();
-            });
-            howl.play();
+            };
+            howl.once('end', done, id);
+            howl.once('stop', done, id);
         } catch {
             callback();
         }
