@@ -88,17 +88,16 @@ func recoverPanic(next http.Handler) http.Handler {
 				return
 			}
 			// http.ErrAbortHandler is the documented sentinel for
-			// "I'm aborting this response on purpose"; net/http treats
-			// it as silent - log at Warn but skip the stack dump and
-			// the 500. Anything else is a real bug. recover() returns
-			// `any`, so type-assert to error before errors.Is.
+			// "I'm aborting this response on purpose": log at Warn, skip the
+			// stack dump and the 500, and re-panic so net/http still resets
+			// the connection instead of ending the response as if complete.
+			// recover() returns `any`, so type-assert to error before errors.Is.
 			if recErr, ok := rec.(error); ok && errors.Is(recErr, http.ErrAbortHandler) {
 				logger.WarnContext(ctx, "handler aborted via http.ErrAbortHandler",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
 				)
-
-				return
+				panic(rec)
 			}
 			logger.ErrorContext(ctx, "handler panic recovered",
 				slog.Any("panic", rec),

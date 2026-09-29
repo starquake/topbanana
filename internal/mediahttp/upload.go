@@ -345,6 +345,8 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 		http.Error(w, "image file is empty", http.StatusBadRequest)
 	case errors.Is(err, media.ErrUnsupportedImage):
 		http.Error(w, "unsupported image format (use jpg or png)", http.StatusBadRequest)
+	case errors.Is(err, media.ErrQuizMediaLimit):
+		http.Error(w, "this quiz has reached its image limit", http.StatusConflict)
 	case errors.Is(err, context.Canceled):
 		// nginx-style "client closed request"; the response will not be
 		// delivered (TCP is already closed), but the status stamp keeps
@@ -477,6 +479,8 @@ func uploadFailureReason(err error) string {
 		return "file is empty"
 	case errors.Is(err, media.ErrUnsupportedImage):
 		return "unsupported image format (use jpg or png)"
+	case errors.Is(err, media.ErrQuizMediaLimit):
+		return "this quiz has reached its image limit"
 	default:
 		return "upload failed"
 	}
@@ -502,7 +506,8 @@ func isPipelineRejection(err error) bool {
 	return errors.Is(err, media.ErrUploadTooLarge) ||
 		errors.Is(err, media.ErrImageTooLarge) ||
 		errors.Is(err, media.ErrEmptyUpload) ||
-		errors.Is(err, media.ErrUnsupportedImage)
+		errors.Is(err, media.ErrUnsupportedImage) ||
+		errors.Is(err, media.ErrQuizMediaLimit)
 }
 
 // authorizeQuizEdit gates the request on the creator-or-admin edit rule (mirrors

@@ -463,3 +463,52 @@ func countOrFatal(t *testing.T, s *MediaStore, quizID int64, mediaType string) i
 
 	return n
 }
+
+// TestMediaStore_MarkMediaReadyWithinLimit pins the #1355 cap re-check: rows
+// that were all created not-ready (concurrent uploads past the up-front check)
+// flip ready only up to the limit, the cap is per type, and an unknown id is
+// still ErrMediaNotFound rather than a cap error.
+func TestMediaStore_MarkMediaReadyWithinLimit(t *testing.T) {
+	t.Parallel()
+
+	s, quizID := newMediaStoreWithQuiz(t)
+	const limit = 2
+
+	ids := make([]int64, 0, limit+1)
+	for range limit + 1 {
+		created, err := s.CreateMedia(t.Context(), newMediaRow(quizID))
+		if err != nil {
+			t.Fatalf("CreateMedia err = %v, want nil", err)
+		}
+		ids = append(ids, created.ID)
+	}
+	for _, id := range ids[:limit] {
+		if err := s.MarkMediaReadyWithinLimit(t.Context(), id, limit); err != nil {
+			t.Fatalf("MarkMediaReadyWithinLimit(%d) err = %v, want nil", id, err)
+		}
+	}
+	err := s.MarkMediaReadyWithinLimit(t.Context(), ids[limit], limit)
+	if got, want := err, media.ErrQuizMediaLimit; !errors.Is(got, want) {
+		t.Errorf("MarkMediaReadyWithinLimit over cap err = %v, want %v", got, want)
+	}
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(limit); got != want {
+		t.Errorf("ready image count = %d, want %d", got, want)
+	}
+
+	if err = s.MarkMediaReadyWithinLimit(t.Context(), ids[0], limit); err != nil {
+		t.Errorf("re-flipping a ready row at the cap err = %v, want nil", err)
+	}
+
+	audio, err := s.CreateMedia(t.Context(), newAudioMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia(audio) err = %v, want nil", err)
+	}
+	if err = s.MarkMediaReadyWithinLimit(t.Context(), audio.ID, limit); err != nil {
+		t.Errorf("MarkMediaReadyWithinLimit(audio) err = %v, want nil (image cap does not apply)", err)
+	}
+
+	err = s.MarkMediaReadyWithinLimit(t.Context(), 999, limit)
+	if got, want := err, media.ErrMediaNotFound; !errors.Is(got, want) {
+		t.Errorf("MarkMediaReadyWithinLimit(missing) err = %v, want %v", got, want)
+	}
+}

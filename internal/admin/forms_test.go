@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"strings"
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/admin"
@@ -374,5 +375,191 @@ func TestParseOptionalTimeLimit(t *testing.T) {
 				t.Errorf("ParseOptionalTimeLimit(%q) = %d, want %d", tc.raw, *got, tc.want)
 			}
 		})
+	}
+}
+
+// TestQuizForm_Valid_Caps pins the length and count caps: a value at the cap
+// passes, one rune past it is flagged under the field's problem key.
+func TestQuizForm_Valid_Caps(t *testing.T) {
+	t.Parallel()
+
+	validQuestion := func() *quiz.Question {
+		return &quiz.Question{Text: "Q", Options: []*quiz.Option{{Text: "a", Correct: true}, {Text: "b"}}}
+	}
+	validQuiz := func() *quiz.Quiz {
+		return &quiz.Quiz{Title: "T", Slug: "t", Description: "D"}
+	}
+	questions := func(n int) []*quiz.Question {
+		qs := make([]*quiz.Question, n)
+		for i := range qs {
+			qs[i] = validQuestion()
+		}
+
+		return qs
+	}
+	rounds := func(n int) []*quiz.Round {
+		rs := make([]*quiz.Round, n)
+		for i := range rs {
+			rs[i] = &quiz.Round{Title: "R"}
+		}
+
+		return rs
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*quiz.Quiz)
+		wantKey string
+		wantBad bool
+	}{
+		{name: "title at cap", mutate: func(q *quiz.Quiz) { q.Title = strings.Repeat("\u00e9", MaxTitleLength) }},
+		{
+			name: "title over cap", wantKey: "title", wantBad: true,
+			mutate: func(q *quiz.Quiz) { q.Title = strings.Repeat("a", MaxTitleLength+1) },
+		},
+		{
+			name: "description over cap", wantKey: "description", wantBad: true,
+			mutate: func(q *quiz.Quiz) { q.Description = strings.Repeat("a", MaxDescriptionLength+1) },
+		},
+		{name: "questions at cap", mutate: func(q *quiz.Quiz) { q.Questions = questions(MaxQuestionsPerQuiz) }},
+		{
+			name: "questions over cap", wantKey: "questions", wantBad: true,
+			mutate: func(q *quiz.Quiz) { q.Questions = questions(MaxQuestionsPerQuiz + 1) },
+		},
+		{name: "rounds at cap", mutate: func(q *quiz.Quiz) { q.Rounds = rounds(MaxRoundsPerQuiz) }},
+		{
+			name: "rounds over cap", wantKey: "rounds", wantBad: true,
+			mutate: func(q *quiz.Quiz) { q.Rounds = rounds(MaxRoundsPerQuiz + 1) },
+		},
+		{
+			name: "question text over cap", wantKey: "questions[0][text]", wantBad: true,
+			mutate: func(q *quiz.Quiz) {
+				qs := validQuestion()
+				qs.Text = strings.Repeat("a", MaxQuestionTextLength+1)
+				q.Questions = []*quiz.Question{qs}
+			},
+		},
+		{
+			name: "option text over cap", wantKey: "questions[0].options[1][text]", wantBad: true,
+			mutate: func(q *quiz.Quiz) {
+				qs := validQuestion()
+				qs.Options[1].Text = strings.Repeat("a", MaxOptionTextLength+1)
+				q.Questions = []*quiz.Question{qs}
+			},
+		},
+		{
+			name: "round title over cap", wantKey: "rounds[0][title]", wantBad: true,
+			mutate: func(q *quiz.Quiz) { q.Rounds = []*quiz.Round{{Title: strings.Repeat("a", MaxTitleLength+1)}} },
+		},
+		{
+			name: "round summary over cap", wantKey: "rounds[0][summary]", wantBad: true,
+			mutate: func(q *quiz.Quiz) {
+				q.Rounds = []*quiz.Round{{Title: "R", Summary: strings.Repeat("a", MaxDescriptionLength+1)}}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			qz := validQuiz()
+			tc.mutate(qz)
+			problems := ValidateQuizForm(t.Context(), qz)
+			if !tc.wantBad {
+				if got, want := len(problems), 0; got != want {
+					t.Errorf("len(problems) = %d, want %d (problems=%v)", got, want, problems)
+				}
+
+				return
+			}
+			if _, ok := problems[tc.wantKey]; !ok {
+				t.Errorf("problems[%q] missing, want present (problems=%v)", tc.wantKey, problems)
+			}
+		})
+	}
+}
+
+// TestQuestionForm_Valid_Caps pins the standalone question form's length caps,
+// including option text, which the question form checks under "options".
+func TestQuestionForm_Valid_Caps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		question quiz.Question
+		wantKey  string
+	}{
+		{
+			name: "text over cap",
+			question: quiz.Question{
+				Text:    strings.Repeat("a", MaxQuestionTextLength+1),
+				Options: []*quiz.Option{{Text: "a"}},
+			},
+			wantKey: "text",
+		},
+		{
+			name: "option over cap",
+			question: quiz.Question{
+				Text:    "Q",
+				Options: []*quiz.Option{{Text: "a"}, {Text: strings.Repeat("a", MaxOptionTextLength+1)}},
+			},
+			wantKey: "options",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			problems := ValidateQuestionForm(t.Context(), &tc.question)
+			if _, ok := problems[tc.wantKey]; !ok {
+				t.Errorf("problems[%q] missing, want present (problems=%v)", tc.wantKey, problems)
+			}
+		})
+	}
+}
+
+// TestTitleSlug pins that a title whose transliteration outgrows the slug cap
+// is cut back at a word boundary rather than left for validation to reject.
+func TestTitleSlug(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{name: "short title", title: "Capital Cities", want: "capital-cities"},
+		{name: "exactly at cap", title: strings.Repeat("a", MaxSlugLength), want: strings.Repeat("a", MaxSlugLength)},
+		{
+			name:  "one word over cap is hard cut",
+			title: strings.Repeat("a", MaxSlugLength+5),
+			want:  strings.Repeat("a", MaxSlugLength),
+		},
+		{
+			name:  "cut at the last word boundary",
+			title: strings.Repeat("abcd ", 60),
+			want:  strings.TrimSuffix(strings.Repeat("abcd-", MaxSlugLength/5), "-"),
+		},
+		{
+			name:  "boundary right after the cap keeps the full word",
+			title: strings.Repeat("a", MaxSlugLength) + " b",
+			want:  strings.Repeat("a", MaxSlugLength),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := TitleSlug(tc.title), tc.want; got != want {
+				t.Errorf("TitleSlug(%q) = %q, want %q", tc.title, got, want)
+			}
+		})
+	}
+
+	for _, title := range []string{strings.Repeat("\u53cc", 45), strings.Repeat("\u0449", 60)} {
+		got := TitleSlug(title)
+		if got == "" || len(got) > MaxSlugLength || strings.HasSuffix(got, "-") {
+			t.Errorf("TitleSlug(%q) = %q (len %d), want non-empty, <= %d, no trailing '-'",
+				title, got, len(got), MaxSlugLength)
+		}
 	}
 }

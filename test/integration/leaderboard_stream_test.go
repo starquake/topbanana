@@ -370,6 +370,69 @@ func TestLeaderboardStream_UnknownQuiz_Returns404(t *testing.T) {
 	}
 }
 
+// TestLeaderboardStream_ShutdownEndsOpenStream pins #1351: an open SSE stream
+// must not pin graceful shutdown for its whole timeout. The server ends the
+// stream as shutdown begins, so Run returns promptly and without error.
+func TestLeaderboardStream_ShutdownEndsOpenStream(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	db, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+	qz := &quiz.Quiz{
+		Title:             "Shutdown Stream Quiz",
+		Published:         true,
+		Slug:              "shutdown-stream-quiz",
+		Description:       "seed for the shutdown test",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if cerr := store.New(db, slog.Default()).Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	// The stream's own context outlives the server's shutdown budget, so only
+	// the server can end it in time.
+	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer streamCancel()
+	streamURL := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard/stream", srv.BaseURL, qz.Slug, qz.ID)
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, streamURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest stream err = %v, want nil", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream Do err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("stream Body.Close err = %v, want nil", cerr)
+		}
+	})
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("stream status = %d, want %d", got, want)
+	}
+	readSSEEvent(t, bufio.NewScanner(resp.Body))
+
+	start := time.Now()
+	if serr := srv.Shutdown(); serr != nil {
+		t.Fatalf("Shutdown err = %v, want nil", serr)
+	}
+	if got, want := time.Since(start), 3*time.Second; got >= want {
+		t.Errorf("Shutdown took %v with an open stream, want under %v", got, want)
+	}
+}
+
 // TestQuizLeaderboard_ShowsParticipantBeforeAnyAnswer pins #335: a
 // player who has clicked Start (POST /api/games) but has not yet
 // submitted an answer must already appear on the GET /leaderboard

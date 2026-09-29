@@ -71,14 +71,13 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if len(trustedCIDRs) == 0 {
-		return host
-	}
-	if !ipInCIDRs(host, trustedCIDRs) {
+	if !FromTrustedProxy(r, trustedCIDRs) {
 		return host
 	}
 
-	xff := r.Header.Get("X-Forwarded-For")
+	// A proxy may append its hop as a separate header line rather than
+	// extending the client's, so the client-supplied line is not always last.
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
 	if xff == "" {
 		return host
 	}
@@ -97,6 +96,18 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	// would trust a value the immediate peer could spoof, so return the
 	// directly-connected trusted hop instead.
 	return host
+}
+
+// FromTrustedProxy reports whether r arrived directly from a peer inside
+// trustedCIDRs, so its X-Forwarded-* headers were set by that proxy rather
+// than by the client. An empty list trusts nothing.
+func FromTrustedProxy(r *http.Request, trustedCIDRs []*net.IPNet) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	return ipInCIDRs(host, trustedCIDRs)
 }
 
 // ipInCIDRs reports whether ip parses as an IP literal and is contained
