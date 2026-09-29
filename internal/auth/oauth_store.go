@@ -24,24 +24,33 @@ type OAuthIdentityStore interface {
 	// player. Returns ErrPlayerNotFound when no row matches.
 	GetPlayerByEmail(ctx context.Context, email string) (*Player, error)
 	// CreatePlayerFromOAuth inserts a new players row for a first-time
-	// OAuth sign-in. password_hash is left NULL, email is the supplied
+	// OAuth sign-in and links the (provider, subject) identity onto it in
+	// one transaction. password_hash is left NULL, email is the supplied
 	// verified address, and displayName is the caller-generated petname.
 	// Returns ErrDisplayNameTaken if the petname collides (the OAuth
-	// handler retries with a fresh petname on this sentinel).
-	CreatePlayerFromOAuth(ctx context.Context, displayName, email string) (*Player, error)
+	// handler retries with a fresh petname on this sentinel) and
+	// ErrIdentityAlreadyLinked if the identity is already linked.
+	CreatePlayerFromOAuth(ctx context.Context, displayName, email, provider, subject string) (*Player, error)
 	// LinkProviderIdentity attaches a (provider, subject) pair to the
-	// given player id. Returns ErrIdentityAlreadyLinked when the
-	// (provider, subject) pair already exists (UNIQUE collision).
-	LinkProviderIdentity(ctx context.Context, playerID int64, provider, subject string) error
+	// given player id and treats the row's email as provider-proven in
+	// the same transaction: an unverified row is stamped verified, its
+	// unproven password dropped, and its sessions invalidated. Returns
+	// the row as it stands afterwards, or ErrIdentityAlreadyLinked when
+	// the (provider, subject) pair already exists (UNIQUE collision).
+	LinkProviderIdentity(ctx context.Context, playerID int64, provider, subject string) (*Player, error)
 	// ClaimPlayerForOAuth attaches the supplied verified email to an
-	// existing anonymous (no password_hash, no email) players row, so
-	// a visitor's pre-sign-in identity carries onto their first OAuth
+	// existing anonymous (no password_hash, no email) players row and
+	// links the (provider, subject) identity onto it in one transaction,
+	// so a visitor's pre-sign-in identity carries onto their first OAuth
 	// login. Returns ErrPlayerNotFound when the row is missing, has
 	// already been credentialled, or already carries an email - in
 	// each case the caller falls through to the create-fresh-player
-	// path. The displayName on the row is left untouched.
-	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email string) (*Player, error)
-	// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when
-	// currently NULL. Idempotent.
-	MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error
+	// path - and ErrIdentityAlreadyLinked when the identity is already
+	// linked elsewhere (the claim is rolled back). The displayName on the
+	// row is left untouched.
+	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email, provider, subject string) (*Player, error)
+	// MarkPlayerEmailVerifiedByOAuth applies the provider-attested proof
+	// LinkProviderIdentity applies, for a row whose identity is already
+	// linked. Returns the row as it stands afterwards.
+	MarkPlayerEmailVerifiedByOAuth(ctx context.Context, playerID int64) (*Player, error)
 }

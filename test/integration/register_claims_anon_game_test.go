@@ -1,6 +1,8 @@
 package integration_test
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/quiz"
@@ -54,4 +56,43 @@ func TestRegister_PreservesAnonymousGame(t *testing.T) {
 		t.Errorf("registered player id = %d, want %d (the upgraded anonymous row)", got, want)
 	}
 	requirePlayerGameCount(t, setup.DBURI, registered.ID, 1)
+}
+
+// TestRegister_ApprovalRequired_ClaimedGuestCookieDies pins #1327 on the
+// password path: a guest who keeps a copy of their anonymous cookie, registers
+// from it and then verifies the address cannot use the copy to reach the
+// unapproved account.
+func TestRegister_ApprovalRequired_ClaimedGuestCookieDies(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"LOGIN_APPROVAL_REQUIRED": "true"})
+
+	// The bootstrap admin comes first, so the guest's claim lands as a plain,
+	// unapproved player.
+	registerForPending(ctx, t, authClient(t), setup.BaseURL, "claim-boot", "correct-battery-boot-13")
+
+	guest := authClient(t)
+	primeAnonymousPlayer(ctx, t, guest, setup.BaseURL)
+	anon := lookupAnonPlayer(ctx, t, setup.Stores.Players, "admin", "claim-boot")
+	stolen := freshClientSharingSession(t, guest, setup.BaseURL)
+
+	registerForPending(ctx, t, guest, setup.BaseURL, "claim-guest", "correct-battery-guest-13")
+	verifyPlayerEmail(ctx, t, setup.DBURI, "claim-guest")
+
+	claimed, err := setup.Stores.Players.GetPlayerByDisplayName(ctx, "claim-guest")
+	if err != nil {
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
+	}
+	if got, want := claimed.ID, anon.ID; got != want {
+		t.Fatalf("registered id = %d, want %d (claimed in place)", got, want)
+	}
+
+	resp := httpGet(ctx, t, stolen, setup.BaseURL+"/profile")
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("GET /profile status = %d, want %d", got, want)
+	}
+	if got, want := resp.Header.Get("Location"), "/login"; !strings.HasPrefix(got, want) {
+		t.Errorf("GET /profile Location = %q, want prefix %q", got, want)
+	}
 }

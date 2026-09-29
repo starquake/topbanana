@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestHandleVerifyEmail_MismatchedSessionClears(t *testing.T) {
 		Roles:    stores.AdminPlayers,
 		Sessions: sessions,
 	})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	req := verifyPostRequest(t, raw)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
@@ -159,7 +160,7 @@ func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 		Roles:    stores.AdminPlayers,
 		Sessions: sessions,
 	})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	req := verifyPostRequest(t, raw)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
@@ -259,15 +260,147 @@ func runVerifyEmailWithAdminEmails(
 		AdminEmails: adminEmails,
 	})
 
-	target := "/verify-email"
-	if raw != "" {
-		target += "?token=" + raw
-	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+	req := verifyPostRequest(t, raw)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	return rec
+}
+
+// verifyPostRequest builds the POST /verify-email the confirm page submits.
+func verifyPostRequest(t *testing.T, raw string) *http.Request {
+	t.Helper()
+
+	form := url.Values{}
+	if raw != "" {
+		form.Set("token", raw)
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/verify-email",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	return req
+}
+
+// TestHandleVerifyEmailConfirm_RendersFormWithoutConsuming pins #1328: the
+// GET a mail scanner follows renders a confirm form and leaves the token live.
+func TestHandleVerifyEmailConfirm_RendersFormWithoutConsuming(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	player := createVerifyPlayer(t, stores.Players, "alice", "alice@example.test", RolePlayer)
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	HandleVerifyEmailConfirm(discardLogger(), nil).ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
+	body := rec.Body.String()
+	if got, want := body, `action="/verify-email" method="POST"`; !strings.Contains(got, want) {
+		t.Errorf("body missing confirm form %q", want)
+	}
+	if got, want := body, `name="token" value="`+raw+`"`; !strings.Contains(got, want) {
+		t.Errorf("body missing token field %q", want)
+	}
+	after, err := stores.Players.GetPlayerByID(t.Context(), player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if after.EmailVerifiedAt != nil {
+		t.Error("EmailVerifiedAt set by GET, want nil until the form is posted")
+	}
+	if _, err := stores.VerifyTokens.ConsumeVerifyToken(t.Context(), HashVerifyToken(raw)); err != nil {
+		t.Errorf("ConsumeVerifyToken after GET err = %v, want nil (token still live)", err)
+	}
+}
+
+// TestHandleVerifyEmailConfirm_MissingToken pins the 400 for a bare link.
+func TestHandleVerifyEmailConfirm_MissingToken(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email", nil)
+	HandleVerifyEmailConfirm(discardLogger(), nil).ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+}
+
+// TestHandleVerifyEmail_EmailChangeRefreshesOnlyLiveSession pins #1329: the
+// email-change consume re-mints the current cookie only when it was live
+// before the consume, so a verify click cannot revive a revoked cookie.
+func TestHandleVerifyEmail_EmailChangeRefreshesOnlyLiveSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		staleCookie bool
+		wantRefresh bool
+	}{
+		{name: "live cookie", staleCookie: false, wantRefresh: true},
+		{name: "stale cookie", staleCookie: true, wantRefresh: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbtest.Open(t)
+			stores := store.New(db, discardLogger())
+			player := createVerifyPlayer(t, stores.Players, "mover", "mover@example.test", RolePlayer)
+			raw, hash, err := GenerateVerifyToken()
+			if err != nil {
+				t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+			}
+			if err := stores.VerifyTokens.CreateVerifyToken(
+				t.Context(), hash, player.ID, time.Now().Add(time.Hour), "moved@example.test",
+			); err != nil {
+				t.Fatalf("CreateVerifyToken err = %v, want nil", err)
+			}
+			sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), false)
+			cookieVersion := player.SessionVersion
+			if tt.staleCookie {
+				cookieVersion--
+			}
+			seed := httptest.NewRecorder()
+			sessions.Set(seed, player.ID, cookieVersion)
+
+			handler := HandleVerifyEmail(discardLogger(), nil, VerifyEmailDeps{
+				Tokens:   stores.VerifyTokens,
+				Players:  stores.Players,
+				Roles:    stores.AdminPlayers,
+				Sessions: sessions,
+			})
+			req := verifyPostRequest(t, raw)
+			req.AddCookie(seed.Result().Cookies()[0])
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, req)
+
+			if got, want := out.Code, http.StatusOK; got != want {
+				t.Fatalf("status = %d, want %d", got, want)
+			}
+			refreshed := false
+			for _, c := range out.Result().Cookies() {
+				if c.Name == session.CookieName && c.Value != "" {
+					refreshed = true
+				}
+			}
+			if got, want := refreshed, tt.wantRefresh; got != want {
+				t.Errorf("session cookie re-minted = %v, want %v", got, want)
+			}
+		})
+	}
 }
 
 // createVerifyPlayer inserts a credentialled player through the real
@@ -331,7 +464,7 @@ func TestHandleVerifyEmail_ApprovalRequired_NotifiesUserAndAdmins(t *testing.T) 
 		BaseURL:               "https://tb.example",
 		Tasks:                 tracker,
 	})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	req := verifyPostRequest(t, raw)
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 	if err := tracker.Wait(t.Context()); err != nil {
 		t.Fatalf("tracker.Wait err = %v, want nil", err)
@@ -379,7 +512,7 @@ func TestHandleVerifyEmail_ApprovalOff_SendsNoApprovalMail(t *testing.T) {
 		BaseURL:               "https://tb.example",
 		Tasks:                 tracker,
 	})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
+	req := verifyPostRequest(t, raw)
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 	if err := tracker.Wait(t.Context()); err != nil {
 		t.Fatalf("tracker.Wait err = %v, want nil", err)
