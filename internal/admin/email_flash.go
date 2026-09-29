@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/starquake/topbanana/internal/auth"
 )
 
 // One-shot cookie carrying the POST /admin/email/test banner across
@@ -30,6 +32,10 @@ const (
 // without leaving a stale banner if the user closes the tab mid-hop.
 const flashMaxAge = 15
 
+// emailFlashDerivationLabel derives the flash HMAC key from SESSION_KEY so a
+// flash signature can never double as a session one.
+const emailFlashDerivationLabel = "admin-email-flash-v1"
+
 // flashWaitSep separates the optional wait-seconds hint from the
 // message in the payload. ASCII unit separator so a verbatim SMTP
 // error cannot collide.
@@ -41,10 +47,14 @@ type EmailFlash struct {
 	secureCookies bool
 }
 
-// NewEmailFlash returns a flash helper. secureCookies follows
-// session.Manager: production true, dev false (#205).
-func NewEmailFlash(key []byte, secureCookies bool) *EmailFlash {
-	return &EmailFlash{key: key, secureCookies: secureCookies}
+// NewEmailFlash returns a flash helper signing with a key derived from
+// sessionKey. secureCookies follows session.Manager: production true, dev
+// false (#205).
+func NewEmailFlash(sessionKey []byte, secureCookies bool) *EmailFlash {
+	return &EmailFlash{
+		key:           auth.DeriveSigningKey(sessionKey, emailFlashDerivationLabel),
+		secureCookies: secureCookies,
+	}
 }
 
 // SetNotice stashes a success banner for the next GET /admin/email.

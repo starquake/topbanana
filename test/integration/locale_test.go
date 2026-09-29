@@ -205,22 +205,22 @@ func TestLocaleAuthPages_Integration(t *testing.T) {
 	})
 
 	// A handler-supplied Heading/Message (not a {{t}} template string) must
-	// also localize: an unknown verify token renders the invalid-link page.
-	badToken := baseURL + "/verify-email?token=nonexistent-token"
+	// also localize: a verify link renders the confirm page.
+	verifyLink := baseURL + "/verify-email?token=any-token"
 
-	t.Run("verify-email invalid state defaults to English", func(t *testing.T) {
+	t.Run("verify-email confirm page defaults to English", func(t *testing.T) {
 		t.Parallel()
-		body := getBodyWithHeaderCookie(ctx, t, badToken, "", nil)
-		assertContains(t, body, "Link is no longer valid")
+		body := getBodyWithHeaderCookie(ctx, t, verifyLink, "", nil)
+		assertContains(t, body, "Confirm your email")
 		assertContains(t, body, `<html lang="en">`)
 	})
 
-	t.Run("verify-email invalid state renders Dutch handler message", func(t *testing.T) {
+	t.Run("verify-email confirm page renders Dutch handler message", func(t *testing.T) {
 		t.Parallel()
-		body := getBodyWithHeaderCookie(ctx, t, badToken, "", &http.Cookie{Name: "lang", Value: "nl"})
-		assertContains(t, body, "Link is niet meer geldig")
+		body := getBodyWithHeaderCookie(ctx, t, verifyLink, "", &http.Cookie{Name: "lang", Value: "nl"})
+		assertContains(t, body, "Bevestig je e-mailadres")
 		assertContains(t, body, `<html lang="nl">`)
-		assertNotContains(t, body, "Link is no longer valid")
+		assertNotContains(t, body, "Confirm your email")
 	})
 
 	// The password-help text is a Go-side template func (not a {{t}} string);

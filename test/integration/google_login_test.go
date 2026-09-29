@@ -1062,3 +1062,44 @@ func bigIntBytesForExponent(e int) []byte {
 
 	return []byte{0}
 }
+
+// TestGoogleLogin_ApprovalRequired_ClaimedGuestCookieDies pins #1327 on the
+// Google path: a guest who claims their anonymous row through Google while
+// LOGIN_APPROVAL_REQUIRED is on is held at the approval page, and a copy of the
+// guest's pre-sign-in cookie no longer opens the now-credentialled account.
+// Registration is off to show the claim branch is still held.
+func TestGoogleLogin_ApprovalRequired_ClaimedGuestCookieDies(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "guest@example.test"
+	mock.subject = "google-sub-guest"
+	mock.emailVerified = true
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{
+		"REGISTRATION_ENABLED":    "false",
+		"LOGIN_APPROVAL_REQUIRED": "true",
+	})
+	// A credentialled row first, so the guest's claim lands as a plain,
+	// unapproved player instead of the bootstrap admin.
+	seedCredentialledPlayer(t, srv.DBURI, "boot", "boot@example.test")
+
+	guest := authClient(t)
+	primeAnonymousPlayer(ctx, t, guest, srv.BaseURL)
+	stolen := freshClientSharingSession(t, guest, srv.BaseURL)
+
+	blocked := driveGoogleFlow(ctx, t, guest, srv.BaseURL, mock)
+	if got, want := blocked.Location, "/login/pending-approval"; got != want {
+		t.Fatalf("guest Google sign-in Location = %q, want %q", got, want)
+	}
+	requireDBRowCounts(t, srv.DBURI, "guest@example.test", 1, 1)
+
+	for name, client := range map[string]*http.Client{"guest jar": guest, "copied cookie": stolen} {
+		resp := doGet(ctx, t, client, srv.BaseURL+"/profile")
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Errorf("%s: GET /profile status = %d, want %d", name, got, want)
+		}
+		if got, want := resp.Location, "/login"; !strings.HasPrefix(got, want) {
+			t.Errorf("%s: GET /profile Location = %q, want prefix %q", name, got, want)
+		}
+	}
+}
