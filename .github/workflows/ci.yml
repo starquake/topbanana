@@ -173,7 +173,7 @@ jobs:
         persist-credentials: false
 
     - name: Download coverage profile
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: coverage-profile
         path: build/coverage
