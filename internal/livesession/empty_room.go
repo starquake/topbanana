@@ -32,16 +32,19 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64, 
 	}
 
 	if active == nil {
-		var sess *Session
-		if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID, isAdmin); err != nil {
+		var created bool
+		if active, created, err = s.openOrReuseRoom(ctx, &quizID, hostPlayerID, isAdmin); err != nil {
 			return nil, err
 		}
-		s.logger.InfoContext(ctx, "host started hosting: opened new room",
-			slog.String(logJoinCodeKey, sess.JoinCode),
-			slog.Int64(logHostKey, hostPlayerID),
-			slog.Int64(logQuizKey, quizID))
+		if created {
+			s.logger.InfoContext(ctx, "host started hosting: opened new room",
+				slog.String(logJoinCodeKey, active.JoinCode),
+				slog.Int64(logHostKey, hostPlayerID),
+				slog.Int64(logQuizKey, quizID))
 
-		return sess, nil
+			return active, nil
+		}
+		// A concurrent request opened the host's room first; treat it as active.
 	}
 
 	if !canArmQuiz(active) {
@@ -142,8 +145,13 @@ func (s *Service) EndSession(ctx context.Context, joinCode string, hostPlayerID 
 	}
 
 	// The room is now terminal; signal subscribers to re-GET so every surface
-	// lands on the finished state and the live clients tear down.
+	// lands on the finished state and the live clients tear down. The version
+	// entry is evicted after that last tick; the runner drops its own
+	// bookkeeping once the room leaves the live list.
 	s.publish(sess.JoinCode, PhaseFinished)
+	if s.publisher != nil {
+		s.publisher.Forget(sess.JoinCode)
+	}
 
 	s.logger.InfoContext(ctx, "live session ended",
 		slog.String(logJoinCodeKey, sess.JoinCode),

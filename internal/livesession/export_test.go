@@ -37,6 +37,10 @@ func ExportHubHasVersion(h *Hub, code string) bool {
 	return ok
 }
 
+// ExportScoreFailureLogInterval re-exports scoreFailureLogInterval so a test
+// can step past the scoring-failure log throttle. Test-only.
+const ExportScoreFailureLogInterval = scoreFailureLogInterval
+
 // ExportRunnerTick drives one runner scan at the given instant, so a test can
 // advance a session through its phases off a controlled clock without waiting
 // on the beat ticker. Test-only.
@@ -48,4 +52,16 @@ func ExportRunnerTick(ctx context.Context, r *Runner, now time.Time) {
 // for the given quiz and rounds. Test-only.
 func ExportQuestionPlanRounds(qz *quiz.Quiz, rounds []*quiz.Round) []int64 {
 	return newQuestionPlan(qz, rounds).rounds
+}
+
+// ExportRunnerHasPhaseClock reports whether the runner still holds a phase
+// clock for the session, so a test can assert an ended room is forgotten.
+// Test-only.
+func ExportRunnerHasPhaseClock(r *Runner, sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, ok := r.phaseSince[sessionID]
+
+	return ok
 }

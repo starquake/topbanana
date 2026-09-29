@@ -867,6 +867,29 @@ func (q *Queries) SetSessionFinished(ctx context.Context, id string) error {
 	return err
 }
 
+const setSessionFinishedFromPhase = `-- name: SetSessionFinishedFromPhase :execresult
+UPDATE sessions
+SET phase               = 'finished',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = ?1
+  AND phase = ?2
+`
+
+type SetSessionFinishedFromPhaseParams struct {
+	ID            string
+	ExpectedPhase string
+}
+
+// The idle-close variant of SetSessionFinished: an optimistic write against the
+// phase the runner loaded, so a stale snapshot cannot close a room the host
+// has just moved on (see SetSessionRoundIntro).
+func (q *Queries) SetSessionFinishedFromPhase(ctx context.Context, arg SetSessionFinishedFromPhaseParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionFinishedFromPhase, arg.ID, arg.ExpectedPhase)
+}
+
 const setSessionIntermission = `-- name: SetSessionIntermission :execresult
 UPDATE sessions
 SET phase               = 'intermission',
@@ -963,7 +986,8 @@ type SetSessionRevealParams struct {
 // Moves the session into the reveal phase, leaving the current question and
 // its window in place so a reader still sees which question is being revealed.
 // Optimistic write; see SetSessionRoundIntro. The current_question_id guard also
-// pins the reveal to the question the runner scored.
+// pins the reveal to the question the runner closed; it scores the picks after
+// this write, once no more can land.
 func (q *Queries) SetSessionReveal(ctx context.Context, arg SetSessionRevealParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, setSessionReveal, arg.ID, arg.ExpectedPhase, arg.CurrentQuestionID)
 }
@@ -1069,25 +1093,30 @@ func (q *Queries) TouchSessionPlayerLastSeen(ctx context.Context, arg TouchSessi
 	return q.db.ExecContext(ctx, touchSessionPlayerLastSeen, arg.PlayerID, arg.JoinCode)
 }
 
-const upsertSessionAnswer = `-- name: UpsertSessionAnswer :exec
+const upsertSessionAnswer = `-- name: UpsertSessionAnswer :execresult
 INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at, game_seq)
-VALUES (?1,
-        ?2,
-        ?3,
-        ?4,
-        ?5,
-        (SELECT game_seq FROM sessions WHERE id = ?1))
+SELECT s.id,
+       s.current_question_id,
+       ?1,
+       ?2,
+       ?3,
+       s.game_seq
+FROM sessions s
+WHERE s.id = ?4
+  AND s.phase = 'question'
+  AND s.current_question_id = ?5
 ON CONFLICT (session_id, question_id, player_id, game_seq)
     DO UPDATE SET option_id   = excluded.option_id,
                   answered_at = excluded.answered_at
+    WHERE session_answers.score IS NULL
 `
 
 type UpsertSessionAnswerParams struct {
-	SessionID  string
-	QuestionID int64
 	PlayerID   int64
 	OptionID   int64
 	AnsweredAt time.Time
+	SessionID  string
+	QuestionID sql.NullInt64
 }
 
 // Records a player's pick for the current session question, tagged with the
@@ -1097,15 +1126,17 @@ type UpsertSessionAnswerParams struct {
 // player_id, game_seq): a re-submit within the same game overwrites the option
 // and timestamp rather than duplicating, so a double-tap before close is the
 // last pick rather than an error. score stays NULL until the question closes.
-func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnswerParams) error {
-	_, err := q.db.ExecContext(ctx, upsertSessionAnswer,
-		arg.SessionID,
-		arg.QuestionID,
+// The write happens only while the session is still in the question phase on
+// this question, and never replaces a scored pick, so a pick racing the close
+// writes no row (#1334) and the store reports it as closed.
+func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnswerParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, upsertSessionAnswer,
 		arg.PlayerID,
 		arg.OptionID,
 		arg.AnsweredAt,
+		arg.SessionID,
+		arg.QuestionID,
 	)
-	return err
 }
 
 const upsertSessionPlayer = `-- name: UpsertSessionPlayer :one
