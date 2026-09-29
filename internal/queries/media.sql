@@ -51,6 +51,21 @@ UPDATE media
 SET ready = 1
 WHERE id = sqlc.arg('id');
 
+-- name: MarkMediaReadyWithinLimit :execresult
+-- MarkMediaReady that flips only while the quiz holds fewer than max_ready other
+-- ready rows of the type; one statement, so concurrent uploads cannot overshoot.
+UPDATE media
+SET ready = 1
+WHERE media.id = sqlc.arg('id')
+  AND (
+    SELECT COUNT(*)
+    FROM media AS other
+    WHERE other.quiz_id = media.quiz_id
+      AND other.type = media.type
+      AND other.ready = 1
+      AND other.id <> media.id
+  ) < CAST(sqlc.arg('max_ready') AS INTEGER);
+
 -- name: UpdateMediaDescription :execresult
 -- Sets the host-supplied description label of a media row (#1072). The caller
 -- checks RowsAffected to confirm the row still exists (a missing id maps to

@@ -213,3 +213,43 @@ func TestClientIP(t *testing.T) {
 		})
 	}
 }
+
+// TestClientIP_MultipleXFFLines pins #1354: a proxy's hop on its own header line
+// must be read, not only the client-supplied first line.
+func TestClientIP_MultipleXFFLines(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/anything", nil)
+	req.RemoteAddr = "127.0.0.1:55555"
+	req.Header.Add("X-Forwarded-For", "6.6.6.6")
+	req.Header.Add("X-Forwarded-For", "1.2.3.4")
+
+	if got, want := ClientIP(req, mustCIDRs(t, "127.0.0.1/32")), "1.2.3.4"; got != want {
+		t.Errorf("ClientIP = %q, want %q", got, want)
+	}
+}
+
+func TestFromTrustedProxy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		trusted    string
+		remoteAddr string
+		want       bool
+	}{
+		{name: "peer inside the list", trusted: "10.0.0.0/8", remoteAddr: "10.1.2.3:80", want: true},
+		{name: "peer outside the list", trusted: "10.0.0.0/8", remoteAddr: "203.0.113.9:80", want: false},
+		{name: "empty list trusts nothing", trusted: "", remoteAddr: "10.1.2.3:80", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/anything", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if got, want := FromTrustedProxy(req, mustCIDRs(t, tc.trusted)), tc.want; got != want {
+				t.Errorf("FromTrustedProxy = %v, want %v", got, want)
+			}
+		})
+	}
+}

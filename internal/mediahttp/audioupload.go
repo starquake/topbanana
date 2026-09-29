@@ -201,6 +201,8 @@ func writeAudioUploadError(w http.ResponseWriter, r *http.Request, logger *slog.
 		http.Error(w, "audio file is empty", http.StatusBadRequest)
 	case errors.Is(err, media.ErrUnsupportedAudio):
 		http.Error(w, "unsupported audio format (use mp3, m4a, ogg, or wav)", http.StatusBadRequest)
+	case errors.Is(err, media.ErrQuizMediaLimit):
+		http.Error(w, "this quiz has reached its audio limit", http.StatusConflict)
 	case errors.Is(err, context.Canceled):
 		w.WriteHeader(httpStatusClientClosedRequest)
 	default:

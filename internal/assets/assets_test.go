@@ -3,6 +3,7 @@ package assets_test
 import (
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -261,4 +262,50 @@ func serveAndReadBody(t *testing.T, h http.Handler, target string) string {
 	}
 
 	return rr.Body.String()
+}
+
+// TestHandler_ValidatorsAndNoDirectoryListing pins #1355: embedded assets carry
+// a content ETag plus Cache-Control: no-cache so a revisit revalidates to a
+// 304, and a directory is a 404 rather than a browsable index.
+func TestHandler_ValidatorsAndNoDirectoryListing(t *testing.T) {
+	t.Parallel()
+
+	h := assets.Handler(&config.Config{})
+
+	get := func(t *testing.T, target string, header http.Header) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+		maps.Copy(req.Header, header)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+
+		return rr
+	}
+
+	first := get(t, "/static/css/app.css", nil)
+	if got, want := first.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := first.Header().Get("Cache-Control"), "no-cache"; got != want {
+		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
+	etag := first.Header().Get("ETag")
+	if !strings.HasPrefix(etag, `"`) || len(etag) < 3 {
+		t.Fatalf("ETag = %q, want a quoted strong validator", etag)
+	}
+
+	revisit := get(t, "/static/css/app.css", http.Header{"If-None-Match": {etag}})
+	if got, want := revisit.Code, http.StatusNotModified; got != want {
+		t.Errorf("revalidation status = %d, want %d", got, want)
+	}
+
+	if got := get(t, "/static/js/dist/share.js", nil).Header().Get("ETag"); got == etag {
+		t.Errorf("share.js ETag = %q, want it to differ from app.css's", got)
+	}
+
+	for _, dir := range []string{"/static/", "/static/js/", "/static/js"} {
+		if got, want := get(t, dir, nil).Code, http.StatusNotFound; got != want {
+			t.Errorf("GET %s status = %d, want %d", dir, got, want)
+		}
+	}
 }

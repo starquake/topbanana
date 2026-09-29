@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gosimple/slug"
-
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -236,7 +234,7 @@ func parseImportPayload(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
 	renderErr func(http.ResponseWriter, *http.Request, string, string, string),
 ) (parsedImport, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportFormSize)
 	if err := r.ParseForm(); err != nil {
 		logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
 		renderErr(w, r, "", "", "request body too large or malformed")
@@ -351,7 +349,7 @@ func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, error) {
 	}
 	qz := &quiz.Quiz{
 		Title:            p.Title,
-		Slug:             slug.Make(p.Title),
+		Slug:             titleSlug(p.Title),
 		Description:      p.Description,
 		TimeLimitSeconds: timeLimit,
 		// Empty maps to LanguageEN in the store; unrecognised is caught by

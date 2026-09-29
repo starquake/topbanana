@@ -805,3 +805,95 @@ func TestService_RemoveQuizDir(t *testing.T) {
 		t.Errorf("RemoveQuizDir(absent) err = %v, want nil", err)
 	}
 }
+
+// TestServiceStoreImageQuizLimit pins #1355: with WithQuizLimit the ready flip
+// re-checks the per-quiz cap, so an upload past it fails with ErrQuizMediaLimit
+// and leaves neither its row nor its files behind.
+func TestServiceStoreImageQuizLimit(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+	quizID := seedQuiz(t, db, "media-svc-quiz-limit")
+	root := t.TempDir()
+	svc := NewService(
+		store.NewMediaStore(db, slog.Default()), root, testImageMaxBytes, testAudioMaxBytes, slog.Default(),
+		WithQuizLimit(1),
+	)
+
+	first, err := svc.StoreImage(t.Context(), quizID, seededAdminID, "a.png", bytes.NewReader(pngUpload(t, 32, 32)))
+	if err != nil {
+		t.Fatalf("first StoreImage err = %v, want nil", err)
+	}
+	_, err = svc.StoreImage(t.Context(), quizID, seededAdminID, "b.png", bytes.NewReader(pngUpload(t, 32, 32)))
+	if got, want := err, ErrQuizMediaLimit; !errors.Is(got, want) {
+		t.Fatalf("second StoreImage err = %v, want %v", got, want)
+	}
+
+	var rows int
+	if err = db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM media`).Scan(&rows); err != nil {
+		t.Fatalf("count media err = %v, want nil", err)
+	}
+	if got, want := rows, 1; got != want {
+		t.Errorf("media rows = %d, want %d (the rejected row is removed)", got, want)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, filepath.Dir(first.Path)))
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	if got, want := len(entries), 2; got != want {
+		t.Errorf("files in quiz dir = %d, want %d (only the first upload's full + thumb)", got, want)
+	}
+}
+
+// TestServiceDeleteRefusesPathOutsideRoot pins #1355: file deletes go through
+// the same root confinement as reads, so a row whose stored path climbs out of
+// the media root drops the row but leaves the outside file alone.
+func TestServiceDeleteRefusesPathOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+	quizID := seedQuiz(t, db, "media-svc-delete-escape")
+	parent := t.TempDir()
+	root := filepath.Join(parent, "media")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatalf("Mkdir err = %v, want nil", err)
+	}
+	victim := filepath.Join(parent, "victim.txt")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("WriteFile err = %v, want nil", err)
+	}
+	mediaStore := store.NewMediaStore(db, slog.Default())
+	svc := NewService(mediaStore, root, testImageMaxBytes, testAudioMaxBytes, slog.New(slog.DiscardHandler))
+
+	row, err := mediaStore.CreateMedia(t.Context(), &Media{
+		QuizID: quizID, Type: TypeImage, MIME: "image/jpeg", Path: "../victim.txt", ThumbPath: ".",
+		SHA256: "x", CreatedByPlayerID: seededAdminID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+
+	if err = svc.Delete(t.Context(), row.ID); err != nil {
+		t.Fatalf("Delete err = %v, want nil", err)
+	}
+
+	if _, err = os.Stat(victim); err != nil {
+		t.Errorf("stat outside file err = %v, want it left in place", err)
+	}
+	if _, err = os.Stat(root); err != nil {
+		t.Errorf("stat media root err = %v, want it left in place", err)
+	}
+	if _, err = svc.Get(t.Context(), row.ID); !errors.Is(err, ErrMediaNotFound) {
+		t.Errorf("Get after delete err = %v, want ErrMediaNotFound", err)
+	}
+}

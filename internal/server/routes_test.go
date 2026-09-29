@@ -3,12 +3,16 @@ package server_test
 import (
 	"database/sql"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -443,5 +447,192 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 
 	if got, want := rec.Code, http.StatusForbidden; got != want {
 		t.Errorf("status = %d, want %d (CSRF must reject before the auth layer redirects)", got, want)
+	}
+}
+
+// formBodyCap mirrors admin.MaxFormSizeMiddleware's 1 MB cap, and
+// importBodyCap admin.MaxImportFormSizeMiddleware's 5 MB one.
+const (
+	formBodyCap   = 1 << 20
+	importBodyCap = 5 << 20
+)
+
+// countingReader yields an endless urlencoded value up to limit bytes and
+// records how many bytes the handler chain consumed.
+type countingReader struct {
+	read  int64
+	limit int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	if c.read >= c.limit {
+		return 0, io.EOF
+	}
+	n := min(int64(len(p)), c.limit-c.read)
+	for i := range n {
+		p[i] = 'a'
+	}
+	c.read += n
+
+	return int(n), nil
+}
+
+// registeredPOSTPatterns returns every "POST ..." pattern literal passed to a
+// Handle call in the package's non-test sources, so a newly added route is
+// covered wherever it is registered. *http.ServeMux cannot list its patterns.
+func registeredPOSTPatterns(t *testing.T) []string {
+	t.Helper()
+
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("filepath.Glob(*.go) err = %v, want nil", err)
+	}
+	fset := token.NewFileSet()
+	var patterns []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parser.ParseFile(%s) err = %v, want nil", name, err)
+		}
+		patterns = append(patterns, postPatternsIn(t, f)...)
+	}
+
+	return patterns
+}
+
+// postPatternsIn returns the "POST ..." pattern literals passed to Handle
+// calls in f.
+func postPatternsIn(t *testing.T, f *ast.File) []string {
+	t.Helper()
+
+	var patterns []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Handle" {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		pattern, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			t.Fatalf("strconv.Unquote(%s) err = %v, want nil", lit.Value, err)
+		}
+		if strings.HasPrefix(pattern, http.MethodPost+" ") {
+			patterns = append(patterns, pattern)
+		}
+
+		return true
+	})
+
+	return patterns
+}
+
+// TestAddRoutes_POSTBodiesAreBounded sends an oversized urlencoded body to every
+// registered POST route and fails if any layer before the handler's own limit
+// reads past the route's form cap (#1350).
+func TestAddRoutes_POSTBodiesAreBounded(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		SessionKey:          "test-session-key",
+		RegistrationEnabled: true,
+		DemoMode:            true,
+		ProfileEnabled:      true,
+		SMTPHost:            "smtp.example.com",
+		SMTPPort:            587,
+		SMTPFrom:            "quiz@example.com",
+		MediaDir:            t.TempDir(),
+	}
+	mux := newRouter(t, dbtest.Open(t), cfg)
+
+	patterns := registeredPOSTPatterns(t)
+	if got, want := len(patterns), 40; got < want {
+		t.Fatalf("len(POST patterns) = %d, want at least %d", got, want)
+	}
+	wildcard := regexp.MustCompile(`\{[^}]+\}`)
+
+	for _, pattern := range patterns {
+		t.Run(pattern, func(t *testing.T) {
+			t.Parallel()
+			path := wildcard.ReplaceAllString(strings.TrimPrefix(pattern, http.MethodPost+" "), "1")
+			limit := int64(formBodyCap)
+			if pattern == "POST /admin/quizzes/import" {
+				limit = importBodyCap
+			}
+			body := &countingReader{limit: 2 * importBodyCap}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, body)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			// Any nonce gets CSRF validation as far as ParseForm; an attacker picks it.
+			req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "attacker-nonce"})
+			if _, got := mux.Handler(req); got != pattern {
+				t.Fatalf("mux.Handler(POST %s) pattern = %q, want %q", path, got, pattern)
+			}
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := body.read, limit+1; got > want {
+				t.Errorf("POST %s read %d body bytes, want at most %d", path, got, want)
+			}
+		})
+	}
+}
+
+// TestAddRoutes_OversizedFormIs413 pins that a form whose declared length is
+// over its route's cap gets a 413, not the CSRF layer's misleading 403, while
+// the JSON import accepts a body the ordinary form cap would refuse.
+func TestAddRoutes_OversizedFormIs413(t *testing.T) {
+	t.Parallel()
+
+	mux := newRouter(t, dbtest.Open(t), &config.Config{SessionKey: "test-session-key"})
+
+	tests := []struct {
+		name string
+		path string
+		size int
+		want int
+	}{
+		{
+			name: "quiz save over the form cap",
+			path: "/admin/quizzes",
+			size: formBodyCap + 1,
+			want: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name: "import under its own cap reaches CSRF",
+			path: "/admin/quizzes/import",
+			size: 2 * formBodyCap,
+			want: http.StatusForbidden,
+		},
+		{
+			name: "import over its cap",
+			path: "/admin/quizzes/import",
+			size: importBodyCap + 1,
+			want: http.StatusRequestEntityTooLarge,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := strings.NewReader("json=" + strings.Repeat("a", tc.size))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, body)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := rec.Code, tc.want; got != want {
+				t.Errorf("POST %s (%d bytes) status = %d, want %d", tc.path, tc.size, got, want)
+			}
+		})
 	}
 }
