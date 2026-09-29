@@ -37,6 +37,10 @@ toolpin = $(if $(MAKE_DRY_RUN),,$(shell [ "$$(cat $(1).version 2>/dev/null)" = "
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
+# Verifies the downloaded tool archives against the SHA-256 pins below.
+# macOS ships shasum but not always sha256sum.
+SHA256SUM := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
+
 # golangci-lint version + binary path. Defined up here (not next to the
 # download rule lower down) because Make expands prerequisites at parse
 # time: if `lint: $(GOLANGCI_BIN)` runs before this variable is defined,
@@ -45,10 +49,16 @@ UNAME_M := $(shell uname -m)
 # — bump both together; dependabot does not track this field.
 GOLANGCI_VERSION := v2.13.2
 GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
+# From the release's golangci-lint-<version>-checksums.txt; update with the version.
+GOLANGCI_SHA256_linux-amd64  := 2277d43b98ec0054280f2ac26b53268bae97682444678a59a657dd565da021d6
+GOLANGCI_SHA256_linux-arm64  := a2a4e0065aa41be71f7c5ac90f271b61751331e5d04314e62afe4027855f0893
+GOLANGCI_SHA256_darwin-amd64 := 8a13aaf9cbbb1dee52824e862cf0d0720e5bb97c1f4260d1e51623a09492b57b
+GOLANGCI_SHA256_darwin-arm64 := f4bf83f0b64f055c42b28fc9a38861839f69c096e61c788e72dfaae412011789
 
 # sqlc version + binary path. Same parse-time-expansion reason for the
 # placement. Dependabot watches /tools/go.mod for new releases; mirror
-# any bump there into the version below.
+# any bump there into the version below. Not checksum-verified: no published
+# checksums were found for its releases.
 SQLC_VERSION := v1.31.1
 SQLC_BIN     := $(BIN_DIR)/sqlc
 
@@ -57,7 +67,8 @@ SQLC_BIN     := $(BIN_DIR)/sqlc
 # email round-trips (the app sends to mailpit; the specs read the
 # message back over mailpit's HTTP API). Pinned like the Tailwind binary:
 # mailpit is not a Go module tool, so dependabot does not track it - bump
-# the version here manually.
+# the version here manually. Unlike the other tools it is not checksum-verified:
+# its releases publish no checksums.
 MAILPIT_VERSION := v1.30.1
 MAILPIT_BIN     := $(BIN_DIR)/mailpit
 
@@ -310,6 +321,11 @@ seed-dev-demo:
 # CI can call `make tailwind-check` to catch drift.
 
 TAILWIND_VERSION    := v4.3.0
+# From the release's sha256sums.txt; update with the version.
+TAILWIND_SHA256_tailwindcss-linux-x64   := 73f0e5459054e5cfaa8ab6f3b940f3fbe0f13cc7fd83bc24e7c655033c203400
+TAILWIND_SHA256_tailwindcss-linux-arm64 := 8f48dcb72be3b351c10563c5329b4638ba8516820dc3b3a1609625a166e87cbd
+TAILWIND_SHA256_tailwindcss-macos-x64   := 2ba252f770817091e6d0d12a84e0dd531bcc29aad1bfd9d976a3aff1a071b67a
+TAILWIND_SHA256_tailwindcss-macos-arm64 := 56b4bbc62dbdc4614a78930d9c6986423a2ec63e4e640144a59a5d95c914322e
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
 TOOLPIN_CHECKED += $(call toolpin,$(TAILWIND_BIN),$(TAILWIND_VERSION))
 TAILWIND_INPUT      := frontend/web/css/tailwind.css
@@ -338,8 +354,11 @@ endif
 $(TAILWIND_BIN):
 	@mkdir -p $(BIN_DIR)
 	@echo "Downloading Tailwind CLI $(TAILWIND_VERSION) ($(TAILWIND_ASSET))..."
-	curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $@ \
+	curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $@.download \
 	    https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
+	@echo "$(TAILWIND_SHA256_$(TAILWIND_ASSET))  $@.download" | $(SHA256SUM) -c - >/dev/null || \
+	    { echo "ERROR: $(TAILWIND_ASSET) does not match its pinned SHA-256"; rm -f $@.download; exit 1; }
+	@mv $@.download $@
 	chmod +x $@
 	@echo $(TAILWIND_VERSION) > $@.version
 
@@ -360,7 +379,8 @@ tailwind-watch: $(TAILWIND_BIN)
 .PHONY: tailwind-check
 tailwind-check: $(TAILWIND_BIN)
 	@tmp=$$(mktemp) && \
-	    $(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $$tmp --minify 2>/dev/null && \
+	    { out=$$($(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $$tmp --minify 2>&1) || \
+	        { echo "$$out"; echo "ERROR: Tailwind build of $(TAILWIND_INPUT) failed."; rm -f $$tmp; exit 1; }; } && \
 	    if ! diff -q $$tmp $(TAILWIND_OUTPUT) >/dev/null; then \
 	        echo "ERROR: $(TAILWIND_OUTPUT) is out of date — run \`make tailwind\` and commit the result."; \
 	        diff -u $(TAILWIND_OUTPUT) $$tmp || true; \
@@ -485,7 +505,8 @@ js-check: $(JS_DEPS)
 .PHONY: js-check-one
 js-check-one:
 	@tmp=$$(mktemp -d) && \
-	    $(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(JS_CHECK_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
+	    { out=$$($(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(JS_CHECK_FLAGS) --outdir=$$tmp 2>&1) || \
+	        { echo "$$out"; echo "ERROR: esbuild build for $(JS_CHECK_OUT) failed."; rm -rf $$tmp; exit 1; }; } && \
 	    if ! diff -rq $$tmp $(JS_CHECK_OUT) >/dev/null; then \
 	        echo "ERROR: $(JS_CHECK_OUT) is out of date — run \`make js\` and commit the result."; \
 	        diff -ru $(JS_CHECK_OUT) $$tmp || true; \
@@ -533,6 +554,8 @@ $(GOLANGCI_BIN):
 	@tmp=$$(mktemp -d) && \
 	    curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $$tmp/golangci.tar.gz \
 	        https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_VERSION)/$(GOLANGCI_TARBALL) && \
+	    { echo "$(GOLANGCI_SHA256_$(GOLANGCI_ASSET))  $$tmp/golangci.tar.gz" | $(SHA256SUM) -c - >/dev/null || \
+	        { echo "ERROR: $(GOLANGCI_TARBALL) does not match its pinned SHA-256"; rm -rf $$tmp; exit 1; }; } && \
 	    tar -xzf $$tmp/golangci.tar.gz -C $$tmp && \
 	    mv $$tmp/$(GOLANGCI_DIR)/golangci-lint $@ && \
 	    rm -rf $$tmp
