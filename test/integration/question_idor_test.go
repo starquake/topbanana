@@ -21,8 +21,7 @@ import (
 // or delete a question on quizB by mounting it as
 // /admin/quizzes/{A-id}/questions/{B-question-id}. The cross-quiz
 // check now lives in admin.questionByID and is wired into the read +
-// write + delete paths; HandleQuestionMove already cross-checked via
-// SwapQuestionPositions.
+// write + delete paths.
 func TestQuestionIDOR_Integration(t *testing.T) {
 	t.Parallel()
 

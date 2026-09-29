@@ -155,7 +155,7 @@ func ensureDemoQuiz(
 	zr *zip.Reader,
 ) (*quiz.Quiz, error) {
 	limits := admin.NewArchiveImportLimits(
-		cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes,
+		cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes, cfg.MediaQuizImageLimit,
 	)
 	qz, err := admin.ImportQuizArchive(ctx, logger, quizzes, mediaSvc, zr, hostID, limits)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -111,7 +112,7 @@ func (r *mediaRestorer) resolveImage(ctx context.Context, ref *quizArchiveImageR
 
 	stored, err := r.mediaSvc.StoreImage(ctx, r.quizID, r.importerID, ref.OriginalFilename, rc)
 	if err != nil {
-		return nil, fmt.Errorf("restoring image %q: %w", ref.File, err)
+		return nil, restoreMediaErr("image", ref.File, err)
 	}
 	r.imageIDs[ref.File] = stored.ID
 
@@ -140,11 +141,34 @@ func (r *mediaRestorer) resolveAudio(ctx context.Context, ref *quizArchiveAudioR
 		ctx, r.quizID, r.importerID, durationMsFor(ref.DurationMs), ref.Description, ref.OriginalFilename, rc,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("restoring audio %q: %w", ref.File, err)
+		return nil, restoreMediaErr("audio", ref.File, err)
 	}
 	r.audioIDs[ref.File] = stored.ID
 
 	return &stored.ID, nil
+}
+
+// restoreMediaErr wraps a failed media restore, tagging the media pipeline's
+// validation rejections with ErrArchiveMediaRejected so they surface as a 400.
+func restoreMediaErr(kind, file string, err error) error {
+	if isMediaValidationErr(err) {
+		return fmt.Errorf("%w: %s %q: %w", ErrArchiveMediaRejected, kind, file, err)
+	}
+
+	return fmt.Errorf("restoring %s %q: %w", kind, file, err)
+}
+
+func isMediaValidationErr(err error) bool {
+	for _, target := range []error{
+		media.ErrUnsupportedImage, media.ErrImageTooLarge, media.ErrUploadTooLarge,
+		media.ErrEmptyUpload, media.ErrUnsupportedAudio, media.ErrAudioTooLarge,
+	} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // durationMsFor unwraps the manifest's optional duration into the int the media
@@ -200,7 +224,8 @@ func rollbackImport(
 // collision is a clear 409 with the rename guidance. An archive whose manifest
 // references a media file the archive does not contain is a malformed client
 // upload (400), not a server fault - the rollback has already removed the
-// partial quiz. Everything else is logged and rendered as a 500 (the import
+// partial quiz. So is a media file the media pipeline rejects; the message names
+// the file. Everything else is logged and rendered as a 500 (the import
 // already rolled back, so nothing partial remains either way).
 func writeArchiveImportError(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
@@ -218,6 +243,8 @@ func writeArchiveImportError(
 			w, r, http.StatusBadRequest,
 			"the archive's manifest references a media file the archive does not contain",
 		)
+	case errors.Is(err, ErrArchiveMediaRejected):
+		renderErr(w, r, http.StatusBadRequest, fmt.Sprintf("invalid archive: %v", err))
 	default:
 		logger.ErrorContext(r.Context(), "error importing quiz archive", slog.Any("err", err))
 		renderErr(w, r, http.StatusInternalServerError, "the import failed and was rolled back; please try again")

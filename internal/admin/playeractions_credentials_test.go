@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"bytes"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -326,6 +327,27 @@ func TestHandlePlayerCreateSubmit_EmailTakenRenders409(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), "Another account already uses that email."; !strings.Contains(got, want) {
 		t.Errorf("body should contain %q; body=%q", want, got)
+	}
+}
+
+func TestHandlePlayerCreateSubmit_StoreErrorLogged(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	env.closeStore(t)
+	var logBuf bytes.Buffer
+	handler := HandlePlayerCreateSubmit(slog.New(slog.NewTextHandler(&logBuf, nil)), nil, env.admin, newCredFlash(t))
+
+	req := newPlayerInputRequest(t, "Fresh Name", "fresh@example.test", "correct-horse-battery")
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusInternalServerError; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := logBuf.String(), "error creating player by admin"; !strings.Contains(got, want) {
+		t.Errorf("log = %q, should contain %q", got, want)
 	}
 }
 
