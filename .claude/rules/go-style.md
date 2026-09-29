@@ -6,7 +6,23 @@ globs:
 
 ## Assertion style
 
-Use the `got, want` inline declaration pattern for all assertions:
+**Write each value once.** Name the value under test `got` and the expected value `want`, and have both the condition and the failure message use those names. Then a copied assertion that is later edited cannot end up checking one value while reporting another.
+
+```go
+// BAD: x and 5 each appear twice; change one copy and the message goes stale
+if x != 5 {
+    t.Errorf("x = %d, want %d", x, 5)
+}
+
+// GOOD: each appears once
+if got, want := x, 5; got != want {
+    t.Errorf("x = %d, want %d", got, want)
+}
+```
+
+The format string counts too: `"x = %d, want 5"` writes the expected value a second time, so format `want` instead.
+
+Declare `got, want` in the `if` statement by default. That scopes them to one assertion, so the next assertion can reuse the names. The declaration may span several lines when an expression is long: the rule is about repetition, not line count. When the same expected value is checked more than once, declare `want` once above those checks instead.
 
 ```go
 // values
@@ -24,8 +40,6 @@ if got, want := err.Error(), "failed to delete options"; !strings.Contains(got, 
     t.Errorf("err.Error() = %q, should contain %q", got, want)
 }
 ```
-
-Never do `if err.Error() == "..."` or `if result != expected { t.Errorf(..., result, expected) }` inline — always use `got, want` declared in the `if` statement.
 
 ## Common linter pitfalls
 
