@@ -58,7 +58,7 @@ type verifyPendingData struct {
 func RequireVerifiedEmail(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PlayerFromContext(r.Context())
-		if !ok || p.IsEmailVerified() || p.Email == "" {
+		if !ok || !p.EmailVerificationPending() {
 			next.ServeHTTP(w, r)
 
 			return

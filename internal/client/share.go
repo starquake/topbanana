@@ -92,8 +92,9 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 		RegistrationEnabled: s.cfg.RegistrationEnabled,
 	}
 
-	if id, err := handlers.IDFromSlugID(r.PathValue("slugID")); err == nil {
-		s.applyQuizOG(r, id, &data)
+	slugID := r.PathValue("slugID")
+	if id, err := handlers.IDFromSlugID(slugID); err == nil {
+		s.applyQuizOG(r, id, handlers.SlugFromSlugID(slugID), &data)
 	}
 
 	s.render(w, r, "index.gohtml", data)
@@ -101,10 +102,11 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 
 // applyQuizOG overrides the share card's title/description with the named quiz's
 // own values, but keeps the sitewide defaults for a quiz that is missing, live,
-// private, or a draft: none is a publicly-playable solo quiz, so surfacing its
-// details to anonymous scrapers would spoiler a hosted game (#677) or leak a
-// non-public quiz (#103, #1192). All keep the default card, not a 404 (#678).
-func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) {
+// private, a draft, or unlisted and named without its own slug: none is a
+// publicly-playable solo quiz at this link, so surfacing its details to
+// anonymous scrapers would spoiler a hosted game (#677) or leak a non-public
+// quiz (#103, #1192). All keep the default card, not a 404 (#678).
+func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, slug string, data *shellData) {
 	q, err := s.quizStore.GetQuiz(r.Context(), id)
 	if err != nil {
 		if !errors.Is(err, quiz.ErrQuizNotFound) {
@@ -114,6 +116,9 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 		return
 	}
 	if q == nil || q.Mode == quiz.ModeLive || q.Visibility == quiz.VisibilityPrivate || !q.Published {
+		return
+	}
+	if q.Visibility == quiz.VisibilityUnlisted && q.Slug != slug {
 		return
 	}
 
@@ -153,6 +158,8 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The locale comes from the locale cookie or Accept-Language (locale.Resolve).
+	w.Header().Add("Vary", "Cookie, Accept-Language")
 	if err := t.Execute(w, data); err != nil {
 		// Headers are already flushed - log and let the client see a
 		// truncated response rather than a stray 500.
