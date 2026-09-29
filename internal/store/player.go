@@ -805,6 +805,22 @@ func revokeTokensAfterPasswordChange(ctx context.Context, q *db.Queries, playerI
 	return nil
 }
 
+// BumpSessionVersion increments the player's session_version, invalidating
+// every session cookie issued before the call, and returns the new version.
+// Returns auth.ErrPlayerNotFound when no row matches.
+func (s *PlayerStore) BumpSessionVersion(ctx context.Context, playerID int64) (int64, error) {
+	version, err := s.q.BumpPlayerSessionVersion(ctx, playerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, auth.ErrPlayerNotFound
+		}
+
+		return 0, fmt.Errorf("failed to bump player session version: %w", err)
+	}
+
+	return version, nil
+}
+
 // SetPlayerPasswordHash atomically overwrites the password_hash on the row
 // identified by email and revokes its live reset and email-change links.
 // Returns auth.ErrPlayerNotFound when no row matches; intended for the

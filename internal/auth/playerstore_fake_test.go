@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/session"
 )
 
 // fakePlayerStore is a fault-injection PlayerStore for the handful of
@@ -137,16 +138,30 @@ func (*fakePlayerStore) ChangePlayerPassword(_ context.Context, _ int64, _ strin
 	return errors.ErrUnsupported
 }
 
+// rowsCreated reports how many rows the fake has minted.
+func (s *fakePlayerStore) rowsCreated() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.nextID - 1
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-// findCookie returns the first response cookie with the given name and a
-// boolean reporting whether it was found. Used by the EnsurePlayer tests to
-// assert that a fresh session cookie is set on the response.
-func findCookie(rec *httptest.ResponseRecorder, name string) (*http.Cookie, bool) {
+// unlimited returns a disabled mint limiter for EnsurePlayer tests that do
+// not exercise the budget.
+func unlimited() *IPBudgetLimiter {
+	return NewIPBudgetLimiter(0, 0, nil)
+}
+
+// findSessionCookie returns the response's session cookie and a boolean
+// reporting whether it was set. Used by the EnsurePlayer tests to assert
+// whether a fresh session cookie is set on the response.
+func findSessionCookie(rec *httptest.ResponseRecorder) (*http.Cookie, bool) {
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == name {
+		if c.Name == session.CookieName {
 			return c, true
 		}
 	}

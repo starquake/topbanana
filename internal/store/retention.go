@@ -56,9 +56,9 @@ func NewRetentionStore(conn *sql.DB, logger *slog.Logger) *RetentionStore {
 // days ago and every game row that references them (#626). The dependent
 // game_* rows are dropped in foreign-key order before the player rows;
 // game_seen_rounds cascades from games on delete, so it needs no explicit
-// pass. Guests holding a finished game are excluded by
-// ListStaleAnonymousPlayerIDs and kept regardless of age, so the sweep
-// never erases a leaderboard score; only finished-game-free cruft is pruned.
+// pass. ListStaleAnonymousPlayerIDs keeps guests holding a finished game
+// regardless of age, so the sweep never erases a leaderboard score, and keeps
+// guests with a hosted-room answer or a recent room visit (#1361).
 //
 // Work is committed in batches (one transaction per player chunk) rather than
 // a single mega-transaction: the SQLite write-lock is released between
@@ -74,7 +74,7 @@ func (s *RetentionStore) SweepStaleAnonymousPlayers(ctx context.Context, days in
 	}
 
 	for playerBatch := range slices.Chunk(playerIDs, retentionBatchSize) {
-		if err := s.sweepPlayerBatch(ctx, playerBatch); err != nil {
+		if err := s.sweepPlayerBatch(ctx, playerBatch, days); err != nil {
 			return err
 		}
 	}
@@ -122,13 +122,17 @@ func (s *RetentionStore) SweepStaleAuditLog(ctx context.Context, days int) error
 
 // sweepPlayerBatch deletes one chunk of anonymous players and all their game
 // data inside a single transaction. The snapshot ids are re-filtered to the
-// still-anonymous subset first so a guest claimed after the snapshot keeps both
-// their row and their game data (#1175). The player rows go last so every
-// game_* row that references them is already gone; a batch may reference more
-// than retentionBatchSize games, so the game-id deletes are chunked too.
-func (s *RetentionStore) sweepPlayerBatch(ctx context.Context, playerIDs []int64) error {
+// still-anonymous, still-roomless subset first so a guest who claimed a name or
+// joined a hosted room after the snapshot keeps their row and game data
+// (#1175). The player rows go last so every game_* row that references them is
+// already gone; a batch may reference more than retentionBatchSize games, so
+// the game-id deletes are chunked too.
+func (s *RetentionStore) sweepPlayerBatch(ctx context.Context, playerIDs []int64, days int) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		stillAnon, err := q.FilterAnonymousPlayerIDs(ctx, playerIDs)
+		stillAnon, err := q.FilterAnonymousPlayerIDs(ctx, db.FilterAnonymousPlayerIDsParams{
+			Days: int64(days),
+			Ids:  playerIDs,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to re-filter anonymous players: %w", err)
 		}

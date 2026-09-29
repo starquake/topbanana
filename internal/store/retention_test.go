@@ -157,7 +157,7 @@ func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 	}
 
 	retention := NewRetentionStore(conn, slog.Default())
-	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}); err != nil {
+	if err := retention.SweepPlayerBatchForTest(ctx, []int64{guestID}, AnonymousRetentionDays); err != nil {
 		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
 	}
 
@@ -171,6 +171,124 @@ func TestSweepPlayerBatch_SparesClaimedPlayerGameData(t *testing.T) {
 		ctx, t, conn, `SELECT COUNT(*) FROM game_answers WHERE game_id = ?`, gameID,
 	), true; got != want {
 		t.Errorf("guest game answer exists = %v, want %v (must survive the sweep)", got, want)
+	}
+}
+
+// TestSweepStaleAnonymousPlayers_KeepsHostedRoomGuests: an old guest who only
+// plays hosted rooms survives while recently seen in a room or holding a room
+// answer; an old guest last seen in a room outside the window is swept.
+func TestSweepStaleAnonymousPlayers_KeepsHostedRoomGuests(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	hostID := insertSignedInPlayer(ctx, t, conn, "room-host", seedRecent)
+	q := seedQuiz(ctx, t, conn, "room-quiz", seedOld, hostID)
+	sessionID := insertSession(ctx, t, conn, "s-room", q.quizID, hostID, "ROOM1")
+
+	recentlySeenID := insertAnonPlayer(ctx, t, conn, "room-recent", seedOld)
+	insertSessionPlayer(ctx, t, conn, sessionID, recentlySeenID, seedRecent)
+
+	answeredID := insertAnonPlayer(ctx, t, conn, "room-answered", seedOld)
+	insertSessionPlayer(ctx, t, conn, sessionID, answeredID, seedOld)
+	insertSessionAnswer(ctx, t, conn, sessionID, q.q1, answeredID, q.opt1)
+
+	goneID := insertAnonPlayer(ctx, t, conn, "room-gone", seedOld)
+	insertSessionPlayer(ctx, t, conn, sessionID, goneID, seedOld)
+
+	retention := NewRetentionStore(conn, slog.Default())
+	if err := retention.SweepStaleAnonymousPlayers(ctx, AnonymousRetentionDays); err != nil {
+		t.Fatalf("SweepStaleAnonymousPlayers err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, recentlySeenID), true; got != want {
+		t.Errorf("recently seen room guest exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, answeredID), true; got != want {
+		t.Errorf("room guest with an answer exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, goneID), false; got != want {
+		t.Errorf("room guest last seen outside the window exists = %v, want %v", got, want)
+	}
+}
+
+// TestSweepPlayerBatch_SparesGuestWhoJoinedARoomLate: guests snapshotted as
+// stale who join a room or answer in one before their batch runs are kept,
+// while a still-stale guest in the same batch is swept.
+func TestSweepPlayerBatch_SparesGuestWhoJoinedARoomLate(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	conn := dbtest.Open(t)
+
+	hostID := insertSignedInPlayer(ctx, t, conn, "late-host", seedRecent)
+	q := seedQuiz(ctx, t, conn, "late-quiz", seedOld, hostID)
+	sessionID := insertSession(ctx, t, conn, "s-late", q.quizID, hostID, "LATE1")
+
+	staleID := insertAnonPlayer(ctx, t, conn, "late-stale", seedOld)
+	joinedID := insertAnonPlayer(ctx, t, conn, "late-joined", seedOld)
+	answeredID := insertAnonPlayer(ctx, t, conn, "late-answered", seedOld)
+
+	// Both join after the snapshot, before the batch runs.
+	insertSessionPlayer(ctx, t, conn, sessionID, joinedID, seedRecent)
+	insertSessionPlayer(ctx, t, conn, sessionID, answeredID, seedOld)
+	insertSessionAnswer(ctx, t, conn, sessionID, q.q1, answeredID, q.opt1)
+
+	retention := NewRetentionStore(conn, slog.Default())
+	// Several ids so a days parameter aliased onto a slice id would misfilter.
+	batch := []int64{staleID, joinedID, answeredID}
+	if err := retention.SweepPlayerBatchForTest(ctx, batch, AnonymousRetentionDays); err != nil {
+		t.Fatalf("SweepPlayerBatchForTest err = %v, want nil", err)
+	}
+
+	if got, want := playerExists(ctx, t, conn, staleID), false; got != want {
+		t.Errorf("stale guest exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, joinedID), true; got != want {
+		t.Errorf("guest who joined a room late exists = %v, want %v", got, want)
+	}
+	if got, want := playerExists(ctx, t, conn, answeredID), true; got != want {
+		t.Errorf("guest who answered in a room late exists = %v, want %v", got, want)
+	}
+}
+
+func insertSession(
+	ctx context.Context, t *testing.T, conn *sql.DB, id string, quizID, hostID int64, code string,
+) string {
+	t.Helper()
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES (?, ?, ?, ?)`,
+		id, quizID, hostID, code,
+	); err != nil {
+		t.Fatalf("insert session err = %v, want nil", err)
+	}
+
+	return id
+}
+
+// The at argument is a trusted SQLite datetime expression, inlined like insertQuiz's.
+func insertSessionPlayer(ctx context.Context, t *testing.T, conn *sql.DB, sessionID string, playerID int64, at string) {
+	t.Helper()
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO session_players (session_id, player_id, joined_at, last_seen_at)
+		 VALUES (?, ?, `+at+`, `+at+`)`,
+		sessionID, playerID,
+	); err != nil {
+		t.Fatalf("insert session player err = %v, want nil", err)
+	}
+}
+
+func insertSessionAnswer(
+	ctx context.Context, t *testing.T, conn *sql.DB, sessionID string, questionID, playerID, optionID int64,
+) {
+	t.Helper()
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at)
+		 VALUES (?, ?, ?, ?, `+seedOld+`)`,
+		sessionID, questionID, playerID, optionID,
+	); err != nil {
+		t.Fatalf("insert session answer err = %v, want nil", err)
 	}
 }
 

@@ -213,6 +213,11 @@ const workerServer = (workerIndex: number) => {
       // suite logs in repeatedly from 127.0.0.1, so the cooldown would
       // falsely trip "Too many attempts" on back-to-back same-IP logins.
       LOGIN_COOLDOWN: '0s',
+      // Disable the per-IP guest mint and rename budgets (#1359, default 60
+      // per minute each). Every browser context in the suite is a fresh guest
+      // from 127.0.0.1, so a busy worker could otherwise trip them.
+      GUEST_MINT_BUDGET: '0',
+      GUEST_RENAME_BUDGET: '0',
       ADMIN_EMAILS,
       // Point the mailer at the shared mailpit catch-all so the email
       // round-trip specs can read the verify and invite link back

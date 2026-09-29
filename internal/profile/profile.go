@@ -3,6 +3,7 @@
 //   - GET/POST /profile (display name editor, #410)
 //   - GET/POST /profile/email (email change, #111)
 //   - GET/POST /profile/password (password change, #112)
+//   - POST /profile/sign-out-other-devices (revoke every other session, #1360)
 //
 // Every route is mounted behind auth.RequireAuthenticated, so the handlers can
 // assume a *Player is on the request context.
@@ -33,17 +34,29 @@ import (
 // internal/auth/handler.go.
 const maxFormBodySize = 16 * 1024
 
+// logPlayerIDKey is the structured-log attribute key for the acting player.
+const logPlayerIDKey = "player_id"
+
+// FlashCookieName / FlashCookiePath scope the one-shot banner
+// GET /profile shows after a redirecting profile POST.
+const (
+	FlashCookieName = "topbanana_profile_flash"
+	FlashCookiePath = "/profile"
+)
+
 // pageData feeds profile.gohtml. Title flows into the auth layout's
 // <title>. DisplayName is the value pre-filled into the input. Message
 // surfaces server-side validation errors (taken display name, empty
 // input, etc.). Saved is true on a successful POST so the template
-// can show a small confirmation banner. Back* drive the form's
+// can show a small confirmation banner; Notice carries the flashed banner
+// of a redirecting POST. Back* drive the form's
 // return link so a visitor arriving from the admin chrome lands back
 // on the dashboard instead of the public home page.
 type pageData struct {
 	Title       string
 	DisplayName string
 	Message     string
+	Notice      string
 	Saved       bool
 	BackHref    string
 	BackLabel   string
@@ -79,8 +92,9 @@ func adminNextPath(raw string) string {
 
 // HandleProfile returns the [http.Handler] for GET /profile. The
 // auth.RequireAuthenticated middleware mounted upstream guarantees
-// the request context carries the signed-in player.
-func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+// the request context carries the signed-in player. flash holds the banner a
+// redirecting profile POST left behind.
+func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager, flash *auth.SignedFlash) http.Handler {
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,13 +111,18 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 
 		loc := locale.Resolve(r)
 		backHref, backLabel, next := profileBack(r)
-		renderer.render(w, r, http.StatusOK, pageData{
+		data := pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: player.DisplayName,
 			BackHref:    backHref,
 			BackLabel:   backLabel,
 			Next:        next,
-		})
+		}
+		if fr := flash.Read(w, r); fr.OK {
+			data.Notice = fr.Notice
+			data.Message = fr.Err
+		}
+		renderer.render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -142,14 +161,17 @@ func HandleProfileDisplayName(
 		}
 
 		raw := r.PostFormValue("display_name")
-		cleaned := strings.TrimSpace(raw)
 
 		// The return target rides the POST as a hidden field so the
 		// back link survives a re-render; re-validate it on the way in
 		// rather than trusting the submitted value.
 		next := adminNextPath(r.PostFormValue("next"))
 
-		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
+		cleaned, err := auth.CleanDisplayName(raw)
+		var updated *auth.Player
+		if err == nil {
+			updated, err = players.RenamePlayer(r.Context(), player.ID, cleaned)
+		}
 		if err != nil {
 			renderRenameError(renderer, logger, w, r, renameAttempt{
 				playerID:           player.ID,
@@ -219,7 +241,7 @@ func renderRenameError(
 	switch {
 	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
-			slog.Int64("player_id", a.playerID))
+			slog.Int64(logPlayerIDKey, a.playerID))
 		renderer.render(w, r, http.StatusBadRequest, pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.currentDisplayName,
@@ -228,9 +250,20 @@ func renderRenameError(
 			BackLabel:   backLabel,
 			Next:        a.next,
 		})
+	case errors.Is(err, auth.ErrDisplayNameTooLong), errors.Is(err, auth.ErrDisplayNameInvalid):
+		logger.InfoContext(r.Context(), "profile rename rejected: invalid name",
+			slog.Int64(logPlayerIDKey, a.playerID))
+		renderer.render(w, r, http.StatusBadRequest, pageData{
+			Title:       locale.Translate(loc, "profile.heading"),
+			DisplayName: a.currentDisplayName,
+			Message:     auth.DisplayNameErrorMessage(loc, err),
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        a.next,
+		})
 	case errors.Is(err, auth.ErrDisplayNameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
-			slog.Int64("player_id", a.playerID), slog.String("attempted", a.attempted))
+			slog.Int64(logPlayerIDKey, a.playerID), slog.String("attempted", a.attempted))
 		renderer.render(w, r, http.StatusConflict, pageData{
 			Title:       locale.Translate(loc, "profile.heading"),
 			DisplayName: a.attempted,
@@ -241,7 +274,7 @@ func renderRenameError(
 		})
 	default:
 		logger.ErrorContext(r.Context(), "profile rename failed",
-			slog.Int64("player_id", a.playerID), slog.Any("err", err))
+			slog.Int64(logPlayerIDKey, a.playerID), slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

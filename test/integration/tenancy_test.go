@@ -78,11 +78,10 @@ func TestGameTenancy_Integration(t *testing.T) {
 		t.Fatal("expected non-empty game ID for player A")
 	}
 
-	// Touch /api/quizzes from clientB so the EnsurePlayer middleware
-	// mints player B's row before any of the tenancy probes — otherwise
+	// Mint player B's row before any of the tenancy probes - otherwise
 	// the first 404 we observe could be from the absent-player path
 	// rather than the participant gate.
-	fetchAPIQuizzes(ctx, t, clientB, baseURL)
+	primeAnonymousPlayer(ctx, t, clientB, baseURL)
 
 	t.Run("GET /questions/next from a stranger returns 404", func(t *testing.T) {
 		t.Parallel()

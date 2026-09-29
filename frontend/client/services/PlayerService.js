@@ -1,8 +1,9 @@
 // PlayerService wraps the /api/players/me endpoints used by the
-// "claim your display name" flow. The same anonymous row is returned
-// across requests because EnsurePlayer middleware keeps the cookie
-// stable, so the component can re-fetch /me any time it wants the
-// latest displayName/isAnonymous/hasCustomName triple.
+// "claim your display name" flow. A visitor has no player until their
+// first action (starting a game, joining a room, claiming a name); after
+// that the session cookie keeps the same row, so the component can
+// re-fetch /me any time it wants the latest
+// displayName/isAnonymous/hasCustomName triple.
 
 import { t } from '../util/i18n.js';
 
@@ -21,10 +22,9 @@ async function readClaimNameError(response) {
 
 export class PlayerService {
     // getMe returns {id, displayName, isAnonymous, hasCustomName}, or null
-    // if the server somehow rejects the call (401 from a misconfigured
-    // route, network failure, etc.). The component treats null as "skip
-    // claim UI" so a broken auth wiring degrades to the previous
-    // experience instead of throwing on page load.
+    // when the visitor has no player yet (204) or the call fails (network
+    // failure, a non-2xx). The component treats null as "no name to show
+    // yet" so a failure degrades instead of throwing on page load.
     //
     // hasCustomName is what the frontend gates the claim affordances on
     // (#165): a registered or already-renamed visitor has it set, so the
@@ -33,7 +33,7 @@ export class PlayerService {
     async getMe() {
         try {
             const response = await fetch('/api/players/me');
-            if (!response.ok) return null;
+            if (!response.ok || response.status === 204) return null;
             return await response.json();
         } catch {
             return null;
@@ -44,7 +44,7 @@ export class PlayerService {
     // returns a discriminated result the component can branch on
     // without inspecting raw status codes. The shape is:
     //   { ok: true,  player: {...} }                                       on 200
-    //   { ok: false, status, kind: 'taken'|'already_claimed'|'empty'|'error', message }
+    //   { ok: false, status, kind: 'taken'|'already_claimed'|'empty'|'invalid'|'error', message }
     //
     // The two distinct 409 cases (#289) — "name in use by another row"
     // versus "this account is already non-anonymous" — surface as
@@ -82,6 +82,10 @@ export class PlayerService {
             return { ok: false, status: 409, kind: 'taken', message: t('claim.nameTaken') };
         }
         if (response.status === 400) {
+            const { code } = await readClaimNameError(response);
+            if (code === 'display_name_too_long' || code === 'display_name_invalid') {
+                return { ok: false, status: 400, kind: 'invalid', message: t('claim.nameInvalid') };
+            }
             return { ok: false, status: 400, kind: 'empty', message: t('claim.enterName') };
         }
         return { ok: false, status: response.status, kind: 'error', message: t('claim.saveError') };

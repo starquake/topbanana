@@ -177,6 +177,18 @@ var (
 // the per-IP cool-down without sleeping (#494).
 var NewLoginRateLimiterWithClock = newLoginRateLimiterWithClock
 
+// NewIPBudgetLimiterWithClock exposes the clock-injected constructor so tests
+// can age stamps out of the window without sleeping.
+var NewIPBudgetLimiterWithClock = newIPBudgetLimiterWithClock
+
+// IPBudgetLimiterTrackedIPs reports how many IPs l currently holds stamps for.
+func IPBudgetLimiterTrackedIPs(l *IPBudgetLimiter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return len(l.stamps)
+}
+
 // NewAccountLoginLimiterWithClock exposes the internal clock-injected
 // per-account limiter constructor so the external auth_test package can
 // pin the cooldown expiry and prune without sleeping (#786).

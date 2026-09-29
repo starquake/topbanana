@@ -1395,6 +1395,77 @@ func TestParse_MediaImportBudgetWindow(t *testing.T) {
 	})
 }
 
+func TestParse_GuestBudgets(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		field func(*Config) int
+		want  int
+	}{
+		{
+			"mint unset defaults",
+			"GUEST_MINT_BUDGET",
+			"",
+			func(c *Config) int { return c.GuestMintBudget },
+			GuestMintBudgetDefault,
+		},
+		{"mint zero disables", "GUEST_MINT_BUDGET", "0", func(c *Config) int { return c.GuestMintBudget }, 0},
+		{"mint parses a value", "GUEST_MINT_BUDGET", "7", func(c *Config) int { return c.GuestMintBudget }, 7},
+		{
+			"rename unset defaults",
+			"GUEST_RENAME_BUDGET",
+			"",
+			func(c *Config) int { return c.GuestRenameBudget },
+			GuestRenameBudgetDefault,
+		},
+		{"rename zero disables", "GUEST_RENAME_BUDGET", "0", func(c *Config) int { return c.GuestRenameBudget }, 0},
+		{"rename parses a value", "GUEST_RENAME_BUDGET", "3", func(c *Config) int { return c.GuestRenameBudget }, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, err := Parse(func(key string) string {
+				switch key {
+				case tt.key:
+					return tt.value
+				case "APP_ENV":
+					return "development"
+				default:
+					return ""
+				}
+			})
+			if err != nil {
+				t.Fatalf("Parse() err = %v, want nil", err)
+			}
+			if got, want := tt.field(c), tt.want; got != want {
+				t.Errorf("%s = %d, want %d", tt.key, got, want)
+			}
+		})
+	}
+
+	negatives := []struct {
+		key  string
+		want error
+	}{
+		{"GUEST_MINT_BUDGET", ErrGuestMintBudgetNegative},
+		{"GUEST_RENAME_BUDGET", ErrGuestRenameBudgetNegative},
+	}
+	for _, tt := range negatives {
+		t.Run(tt.key+" negative returns error", func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Parse(getenvFailure(tt.key, "-1"))
+			if got, want := err, tt.want; !errors.Is(got, want) {
+				t.Errorf("err = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestParse_AdminEmails(t *testing.T) {
 	t.Parallel()
 

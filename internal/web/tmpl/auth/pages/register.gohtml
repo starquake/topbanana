@@ -22,7 +22,7 @@
 
             <div class="form-field">
                 <label for="display_name" class="label-eyebrow">{{t "register.name"}}</label>
-                <input id="display_name" name="display_name" type="text"
+                <input id="display_name" name="display_name" type="text" maxlength="50"
                        autocomplete="nickname"
                        value="{{.DisplayName}}" class="form-input">
                 <p class="mt-2 text-xs text-text-mute">{{t "register.nameHint"}}</p>
