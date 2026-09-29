@@ -423,6 +423,17 @@ func TestSessionLobby_Authz(t *testing.T) {
 		}
 	})
 
+	t.Run("unverified host cannot create a session", func(t *testing.T) {
+		t.Parallel()
+		unverified := registerClientUnverified(ctx, t, baseURL, setup.DBURI, "authz-unverified")
+		makeHost(ctx, t, setup.DBURI, "authz-unverified")
+		resp := httpPostJSON(ctx, t, unverified, baseURL+"/api/sessions", `{}`)
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusForbidden; got != want {
+			t.Errorf("unverified create status = %d, want %d", got, want)
+		}
+	})
+
 	t.Run("host cannot host a solo quiz", func(t *testing.T) {
 		t.Parallel()
 		resp := httpPostJSON(ctx, t, host, baseURL+"/api/sessions", fmt.Sprintf(`{"quizId": %d}`, soloQz.ID))

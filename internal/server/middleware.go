@@ -125,3 +125,12 @@ func logRequests(next http.Handler) http.Handler {
 		)
 	})
 }
+
+// noStore marks every response of next as uncacheable. The player API answers
+// per player (and can mint a session cookie), so no cache may store or replay it.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}

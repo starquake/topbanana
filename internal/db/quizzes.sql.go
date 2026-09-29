@@ -349,23 +349,6 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 	return i, err
 }
 
-const getQuizVisibility = `-- name: GetQuizVisibility :one
-SELECT visibility
-FROM quizzes
-WHERE id = ?
-LIMIT 1
-`
-
-// Returns just the visibility column for a quiz. Used by the read-path
-// visibility gate, which only needs visibility + existence and must not
-// pay the questions/options fan-out that GetQuiz materialises.
-func (q *Queries) GetQuizVisibility(ctx context.Context, id int64) (string, error) {
-	row := q.db.QueryRowContext(ctx, getQuizVisibility, id)
-	var visibility string
-	err := row.Scan(&visibility)
-	return visibility, err
-}
-
 const listLiveQuizzes = `-- name: ListLiveQuizzes :many
 SELECT q.id,
        q.title,

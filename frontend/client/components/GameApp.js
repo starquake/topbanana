@@ -491,6 +491,13 @@ export class GameApp {
             .replace(/^\/play\//, '');
     }
 
+    // deepLinkSlug returns the slug portion of a /play/<slug>-<id> deep link.
+    deepLinkSlug() {
+        const slugId = this.deepLinkSlugId();
+        const i = slugId.lastIndexOf('-');
+        return i < 0 ? '' : slugId.slice(0, i);
+    }
+
     // startPreviewGame creates a preview game from the deep-link quiz id and drops into the normal play loop; a 403/404 surfaces the "not available" note (#1192).
     async startPreviewGame() {
         this.preview = true;
@@ -506,7 +513,7 @@ export class GameApp {
         await this.bootstrapGame({
             create: async () => {
                 try {
-                    const data = await gameService.startGame(quizId, true);
+                    const data = await gameService.startGame(quizId, this.deepLinkSlug(), true);
                     this.startStateResolved = true;
 
                     return data.id;
@@ -688,12 +695,14 @@ export class GameApp {
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return;
         this.quizSlugId = slugId;
+        const quizId = this.selectedQuizId;
+        const slug = this.selectedQuiz().slug;
         // The Start gesture armed the iOS keep-alive, so preload behind the loading screen and tear audio down on failure.
         await this.bootstrapGame({
             create: async () => {
                 if (existing) return existing.gameId;
                 try {
-                    const data = await gameService.startGame(this.selectedQuizId);
+                    const data = await gameService.startGame(quizId, slug);
 
                     return data.id;
                 } catch (err) {

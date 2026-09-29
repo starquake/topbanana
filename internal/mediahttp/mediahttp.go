@@ -13,6 +13,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/media"
+	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // Viewer resolves the authenticated (registered, non-anonymous) player from the
@@ -57,10 +58,10 @@ type MediaService interface {
 	CountByQuizAndType(ctx context.Context, quizID int64, mediaType string) (int64, error)
 }
 
-// QuizVisibilityLookup is the slice of the quiz store the serving handlers use
-// to mirror the owning quiz's access rule onto its media.
-type QuizVisibilityLookup interface {
-	// GetQuizVisibility returns just the visibility of a quiz by ID. Returns
-	// quiz.ErrQuizNotFound when the quiz does not exist.
-	GetQuizVisibility(ctx context.Context, id int64) (string, error)
+// QuizMetaLookup is the slice of the quiz store the serving handlers use to
+// mirror the owning quiz's access rule onto its media.
+type QuizMetaLookup interface {
+	// GetQuizMeta returns a quiz's own columns without its question tree.
+	// Returns quiz.ErrQuizNotFound when the quiz does not exist.
+	GetQuizMeta(ctx context.Context, id int64) (*quiz.Quiz, error)
 }
