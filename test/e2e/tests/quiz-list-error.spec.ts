@@ -41,12 +41,11 @@ test('quiz-list 500 on a deep link shows an error + Retry, then Retry recovers',
   // Discover the quiz's /play/{slug-id} deep link from the public list (a
   // server-rendered page that does not depend on /api/quizzes).
   await page.goto('/quizzes');
-  await page.getByRole('link', { name: quizTitle }).click();
-  await expect(page).toHaveURL(/\/play\//);
-  const playUrl = new URL(page.url()).pathname;
+  const quizLink = page.getByRole('link', { name: quizTitle });
+  await expect(quizLink).toHaveAttribute('href', /\/play\//);
+  const playUrl = (await quizLink.getAttribute('href'))!;
 
-  // Fail the first /api/quizzes, then revisit the deep link so the SPA's
-  // init() load is the failing call.
+  // Read the link, not click it: a first visit's /api/quizzes could use up the one failure (#1399).
   await failQuizListOnce(page);
   await page.goto(playUrl);
 
