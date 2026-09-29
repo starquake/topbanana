@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -21,7 +23,57 @@ import (
 func TestAnswer_TappedAtClamp(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegration(t)
+	ctx, g := startSingleQuestionGame(t)
+
+	// One hour past the question window - without the service-side
+	// clamp this would record AnsweredAt > ExpiredAt and CalculateScore
+	// would return 0 even though the option is correct.
+	tappedAt := g.question.StartedAt.Add(1 * time.Hour).Format(time.RFC3339Nano)
+	answerReq := fmt.Sprintf(`{"optionId": %d, "tappedAt": %q}`, g.correctOptionID, tappedAt)
+	answerResp := httpPostJSON(ctx, t, g.client, g.answerURL(), answerReq)
+	defer closeBody(t, answerResp.Body)
+	if got, want := answerResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("answer status = %d, want %d", got, want)
+	}
+
+	var answerRes struct {
+		Correct bool `json:"correct"`
+		Score   int  `json:"score"`
+	}
+	if derr := json.NewDecoder(answerResp.Body).Decode(&answerRes); derr != nil {
+		t.Fatalf("decode answer response: %v", derr)
+	}
+	if got, want := answerRes.Correct, true; got != want {
+		t.Errorf("Correct = %v, want %v", got, want)
+	}
+	// The service-side clamp falls back to serverNow, which is inside
+	// the window, so the correct option earns a non-zero score.
+	if got, want := answerRes.Score, 0; got == want {
+		t.Errorf("Score = %v, want a non-zero score (clamp should have rescued the future tappedAt)", got)
+	}
+}
+
+// singleQuestionGame is a solo game on a one-question quiz whose question has
+// been issued.
+type singleQuestionGame struct {
+	client          *http.Client
+	baseURL         string
+	gameID          string
+	question        nextQuestionRes
+	correctOptionID int64
+}
+
+// answerURL is the answer-post endpoint for the issued question.
+func (g singleQuestionGame) answerURL() string {
+	return fmt.Sprintf("%s/api/games/%s/questions/%d/answers", g.baseURL, g.gameID, g.question.ID)
+}
+
+// startSingleQuestionGame seeds a one-question quiz, starts a solo game on it
+// and issues the question.
+func startSingleQuestionGame(t *testing.T, runOpts ...app.Option) (context.Context, singleQuestionGame) {
+	t.Helper()
+
+	ctx, setup := setupIntegrationWithEnv(t, nil, runOpts...)
 	baseURL := setup.BaseURL
 	stores := setup.Stores
 
@@ -77,31 +129,26 @@ func TestAnswer_TappedAtClamp(t *testing.T) {
 		t.Fatalf("decode next question: %v", derr)
 	}
 
-	// One hour past the question window — without the service-side
-	// clamp this would record AnsweredAt > ExpiredAt and CalculateScore
-	// would return 0 even though the option is correct.
-	tappedAt := nextQ.StartedAt.Add(1 * time.Hour).Format(time.RFC3339Nano)
-	answerReq := fmt.Sprintf(`{"optionId": %d, "tappedAt": %q}`, correctOptionID, tappedAt)
-	answerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, gameID, nextQ.ID)
-	answerResp := httpPostJSON(ctx, t, client, answerURL, answerReq)
-	defer closeBody(t, answerResp.Body)
-	if got, want := answerResp.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("answer status = %d, want %d", got, want)
+	return ctx, singleQuestionGame{
+		client:          client,
+		baseURL:         baseURL,
+		gameID:          gameID,
+		question:        nextQ,
+		correctOptionID: correctOptionID,
 	}
+}
 
-	var answerRes struct {
-		Correct bool `json:"correct"`
-		Score   int  `json:"score"`
-	}
-	if derr := json.NewDecoder(answerResp.Body).Decode(&answerRes); derr != nil {
-		t.Fatalf("decode answer response: %v", derr)
-	}
-	if got, want := answerRes.Correct, true; got != want {
-		t.Errorf("Correct = %v, want %v", got, want)
-	}
-	// The service-side clamp falls back to serverNow, which is inside
-	// the window, so the correct option earns a non-zero score.
-	if got, want := answerRes.Score, 0; got == want {
-		t.Errorf("Score = %v, want a non-zero score (clamp should have rescued the future tappedAt)", got)
+// TestAnswer_RejectedDuringReadBeat pins #1337 end-to-end: an answer posted
+// before the question's startedAt is rejected with 409 instead of scoring.
+func TestAnswer_RejectedDuringReadBeat(t *testing.T) {
+	t.Parallel()
+
+	ctx, g := startSingleQuestionGame(t, app.WithSoloRevealDelay(time.Hour))
+
+	answerReq := fmt.Sprintf(`{"optionId": %d}`, g.correctOptionID)
+	answerResp := httpPostJSON(ctx, t, g.client, g.answerURL(), answerReq)
+	defer closeBody(t, answerResp.Body)
+	if got, want := answerResp.StatusCode, http.StatusConflict; got != want {
+		t.Errorf("answer status = %d, want %d", got, want)
 	}
 }

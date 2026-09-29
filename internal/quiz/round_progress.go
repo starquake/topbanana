@@ -1,5 +1,7 @@
 package quiz
 
+import "slices"
+
 // RoundProgress describes where a question sits among a quiz's rounds: which
 // round it belongs to (1-indexed, out of the quiz's round count) and where it
 // falls within that round (1-indexed, out of the round's question count). It
@@ -12,11 +14,38 @@ type RoundProgress struct {
 	RoundQuestions int
 }
 
+// InPlayOrder returns questions ordered by round (in the given rounds order),
+// then by position within a round (#1338); questions of an unlisted round sort
+// last.
+func InPlayOrder(questions []*Question, rounds []*Round) []*Question {
+	rank := make(map[int64]int, len(rounds))
+	for i, r := range rounds {
+		rank[r.ID] = i
+	}
+	roundRank := func(q *Question) int {
+		if i, ok := rank[q.RoundID]; ok {
+			return i
+		}
+
+		return len(rounds)
+	}
+
+	ordered := slices.Clone(questions)
+	slices.SortStableFunc(ordered, func(a, b *Question) int {
+		if ra, rb := roundRank(a), roundRank(b); ra != rb {
+			return ra - rb
+		}
+
+		return a.Position - b.Position
+	})
+
+	return ordered
+}
+
 // QuestionRoundProgress derives the [RoundProgress] for questionID from the
-// quiz's questions, which carry their round_id and are taken in quiz-wide
-// position order. Rounds are numbered by the order their first question appears
-// in that sequence, so the numbering matches the order the questions are played
-// without needing the separate rounds list loaded. Returns the zero value when
+// quiz's questions, which carry their round_id and are taken in play order
+// (see [InPlayOrder]). Rounds are numbered by the order their first question
+// appears in that sequence. Returns the zero value when
 // questionID is not among questions (a deleted question mid-game), so a surface
 // falls back to its generic copy rather than naming a stale round.
 func QuestionRoundProgress(questions []*Question, questionID int64) RoundProgress {

@@ -3,6 +3,8 @@ package livesession
 import (
 	"context"
 	"time"
+
+	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // ExportNewServiceWithCodeGen re-exports newServiceWithCodeGen so the
@@ -40,4 +42,10 @@ func ExportHubHasVersion(h *Hub, code string) bool {
 // on the beat ticker. Test-only.
 func ExportRunnerTick(ctx context.Context, r *Runner, now time.Time) {
 	r.tick(ctx, now)
+}
+
+// ExportQuestionPlanRounds returns the round play order newQuestionPlan builds
+// for the given quiz and rounds. Test-only.
+func ExportQuestionPlanRounds(qz *quiz.Quiz, rounds []*quiz.Round) []int64 {
+	return newQuestionPlan(qz, rounds).rounds
 }
