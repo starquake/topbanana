@@ -13,7 +13,7 @@ the current branch and report concrete violations with file:line references.
 
 ## How to review
 
-1. Run `git diff main...HEAD` to get the branch diff. If it touches no frontend
+1. Run `git fetch origin && git diff origin/main...HEAD` to get the branch diff. If it touches no frontend
    files (`frontend/`, `internal/*/static/`, `internal/web/tmpl/`,
    `internal/client/`), say so and stop.
 2. Read `.claude/rules/frontend-style.md` so you apply the current rules, not a

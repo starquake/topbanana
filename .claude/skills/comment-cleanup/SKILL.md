@@ -23,7 +23,7 @@ makes it clear, the comment is noise and should be deleted.
 
 ## How to run
 
-1. Get the diff for the branch: `git diff main...HEAD` (or the range under review).
+1. Get the diff for the branch: `git fetch origin && git diff origin/main...HEAD` (or the range under review).
    Only touch comments this branch **added or changed** -- do not sweep the whole
    repo.
 2. For each changed file, read enough surrounding code (Read tool) to judge

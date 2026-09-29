@@ -12,7 +12,7 @@ on the current branch and report concrete violations with file:line references.
 
 ## How to review
 
-1. Run `git diff main...HEAD` to get the full diff for the branch.
+1. Run `git fetch origin && git diff origin/main...HEAD` to get the full diff for the branch.
 2. For each changed file, read it with the Read tool to see full context around flagged lines.
 3. Report findings grouped by category. For each finding include:
    - File and line number
