@@ -120,6 +120,11 @@ guide explicitly calls optional. If the code is fine, say so.
 - Failure messages must identify the function being tested and the inputs:
   `YourFunc(%v) = %v, want %v`.
 - Print actual value before expected: "got X, want Y" — never the reverse.
+- Apply the project's assertion rule in `.claude/rules/go-style.md`: the value
+  under test and the expected value are each written once, as `got` and `want`,
+  and both the condition and the message use those names. Flag any assertion
+  that repeats either, including an expected value hard-coded in the format
+  string. A declaration spanning several lines is fine.
 - Use `t.Error` (not `t.Fatal`) to report failures so all failures in a test
   run are visible, unless further testing would be meaningless after the failure.
 - Never call `t.Fatal` from a goroutine other than the test goroutine — use
