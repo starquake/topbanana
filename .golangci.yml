@@ -127,6 +127,8 @@ linters:
           disabled: true # Already covered by gocyclo
         - name: line-length-limit
           disabled: true
+        - name: multiline-if-init
+          disabled: true # .claude/rules/go-style.md lets a got, want declaration span lines
         - name: add-constant
           exclude: ["**/*_test.go"]
           arguments:
