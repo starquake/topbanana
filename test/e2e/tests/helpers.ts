@@ -489,7 +489,29 @@ const CLOCK_BUFFER_MS = 500;
 // pause without paying wall-clock time. Kept as a thin wrapper rather than
 // a hidden side-effect so the spec's clock contract is visible at its call
 // site.
+//
+// The virtual clock skips the read beat in the browser only; the server still
+// rejects an answer posted before the question's startedAt (#1337). So the
+// helper also holds each answer POST, in real time, until the startedAt the
+// server issued for that question has passed.
 export async function installPlaythroughClock(page: Page): Promise<void> {
+  const startedAt = new Map<number, number>();
+  page.on('response', async (resp) => {
+    const isNext = /\/api\/games\/[^/]+\/questions\/next$/.test(new URL(resp.url()).pathname);
+    if (!isNext || !resp.ok()) return;
+    try {
+      const item = await resp.json();
+      if (item?.type === 'question' && item.startedAt) startedAt.set(item.id, Date.parse(item.startedAt));
+    } catch {
+      // A body the page already discarded (navigation) has no question to track.
+    }
+  });
+  await page.route(/\/api\/games\/[^/]+\/questions\/\d+\/answers$/, async (route) => {
+    const questionID = Number(new URL(route.request().url()).pathname.split('/')[5]);
+    const wait = (startedAt.get(questionID) ?? 0) - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait + 50));
+    await route.continue();
+  });
   await page.clock.install();
 }
 

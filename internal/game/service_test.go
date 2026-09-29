@@ -641,6 +641,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(0)
 
 		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
@@ -695,6 +696,52 @@ func TestService_SubmitAnswer(t *testing.T) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("rejects an answer that arrives during the read beat", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(time.Hour)
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
+
+		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID, gq.StartedAt)
+		if got, want := err, ErrAnswerWindowClosed; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+
+		loaded, err := gameStore.GetGame(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("GetGame err = %v, want nil", err)
+		}
+		if got, want := len(loaded.Questions), 1; got != want {
+			t.Fatalf("len(Questions) = %d, want %d", got, want)
+		}
+		if got, want := len(loaded.Questions[0].Answers), 0; got != want {
+			t.Errorf("len(Answers) = %d, want %d (an early answer must not be recorded)", got, want)
+		}
+	})
 }
 
 func TestService_GetResults(t *testing.T) {
@@ -715,6 +762,7 @@ func TestService_GetResults(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(0)
 
 		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
@@ -776,6 +824,7 @@ func TestService_GetResults(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(0)
 
 		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
@@ -836,6 +885,7 @@ func TestService_GetResults(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(0)
 
 		g, err := svc.CreateGame(ctx, testQuiz.ID, 1, false)
 		if err != nil {
@@ -1504,6 +1554,7 @@ func TestService_GetNext(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
+		svc.SetRevealDelay(0)
 
 		answer := func(item *Item) {
 			t.Helper()

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -730,8 +729,16 @@ func (r *Runner) loadPlan(ctx context.Context, sess *Session) (questionPlan, err
 
 		return questionPlan{}, fmt.Errorf("failed to load quiz for runner: %w", err)
 	}
+	rounds, err := r.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
+	if err != nil {
+		r.logger.WarnContext(
+			ctx, "runner failed to load rounds", slog.String(logSessionKey, sess.ID), slog.Any("err", err),
+		)
 
-	return newQuestionPlan(qz), nil
+		return questionPlan{}, fmt.Errorf("failed to load rounds for runner: %w", err)
+	}
+
+	return newQuestionPlan(qz, rounds), nil
 }
 
 func (r *Runner) publish(code string, phase Phase) {
@@ -789,25 +796,16 @@ type questionPlan struct {
 	questionsByRnd map[int64][]*quiz.Question
 }
 
-// newQuestionPlan projects a loaded quiz into a questionPlan. GetQuiz returns
-// questions in quiz-wide play order already (across rounds), so grouping by
-// round id while preserving that order yields per-round play order, and the
-// first time each round id is seen fixes round play order.
+// newQuestionPlan groups the quiz's questions by round in [quiz.InPlayOrder].
 //
 // The plan is derived from questions, so a round with no questions never
 // appears and its intro is never shown in a live session. This is intentional
 // (#803): a live round with nothing to ask would be a dead beat, unlike the
 // solo path which can show an empty round's intro.
-func newQuestionPlan(qz *quiz.Quiz) questionPlan {
+func newQuestionPlan(qz *quiz.Quiz, rounds []*quiz.Round) questionPlan {
 	plan := questionPlan{questionsByRnd: make(map[int64][]*quiz.Question)}
-	seen := make(map[int64]struct{})
-	questions := append([]*quiz.Question(nil), qz.Questions...)
-	slices.SortStableFunc(questions, func(a, b *quiz.Question) int {
-		return a.Position - b.Position
-	})
-	for _, q := range questions {
-		if _, ok := seen[q.RoundID]; !ok {
-			seen[q.RoundID] = struct{}{}
+	for _, q := range quiz.InPlayOrder(qz.Questions, rounds) {
+		if _, ok := plan.questionsByRnd[q.RoundID]; !ok {
 			plan.rounds = append(plan.rounds, q.RoundID)
 		}
 		plan.questionsByRnd[q.RoundID] = append(plan.questionsByRnd[q.RoundID], q)

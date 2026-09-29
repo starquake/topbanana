@@ -1,6 +1,7 @@
 package quiz_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/quiz"
@@ -72,5 +73,31 @@ func TestQuestionRoundProgressSingleRound(t *testing.T) {
 	if got, want := quiz.QuestionRoundProgress(questions, 2),
 		(quiz.RoundProgress{RoundNumber: 1, RoundTotal: 1, RoundPosition: 2, RoundQuestions: 3}); got != want {
 		t.Errorf("QuestionRoundProgress(2) = %+v, want %+v", got, want)
+	}
+}
+
+func TestInPlayOrder(t *testing.T) {
+	t.Parallel()
+
+	// Round 20 is placed before round 10; round 30 is empty; round 99 is not in
+	// the round list.
+	rounds := []*quiz.Round{{ID: 20}, {ID: 30}, {ID: 10}}
+	questions := []*quiz.Question{
+		{ID: 1, RoundID: 10, Position: 1},
+		{ID: 2, RoundID: 99, Position: 2},
+		{ID: 3, RoundID: 20, Position: 4},
+		{ID: 4, RoundID: 20, Position: 3},
+		{ID: 5, RoundID: 10, Position: 5},
+	}
+
+	got := make([]int64, 0, len(questions))
+	for _, q := range quiz.InPlayOrder(questions, rounds) {
+		got = append(got, q.ID)
+	}
+	if want := []int64{4, 3, 1, 5, 2}; !slices.Equal(got, want) {
+		t.Errorf("InPlayOrder ids = %v, want %v", got, want)
+	}
+	if got, want := questions[0].ID, int64(1); got != want {
+		t.Errorf("questions[0].ID = %d, want %d (input must not be reordered)", got, want)
 	}
 }
