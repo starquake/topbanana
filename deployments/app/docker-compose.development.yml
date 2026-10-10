@@ -1,0 +1,91 @@
+services:
+  topbanana-development:
+    # Pinned to an immutable digest, not a tag: deploy.yml resolves :edge
+    # to its digest, verifies the cosign signature, and writes IMAGE_DIGEST
+    # into .env. The guard fails the boot loudly if it is unset.
+    image: ${IMAGE_NAME}@${IMAGE_DIGEST:?IMAGE_DIGEST must be set in .env or environment}
+    container_name: topbanana-development
+    environment:
+      # Not "development": that is local-machine mode, which drops the Secure
+      # flag on cookies. "dev" keeps cookies secure and tags page titles [dev].
+      - APP_ENV=dev
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Uploaded media (#936) must live on the persistent volume: the
+      # distroless image's app filesystem is ephemeral, so the default
+      # ./media would be lost on every redeploy. Shares the data volume.
+      - MEDIA_DIR=/home/nonroot/data/media
+      # REGISTRATION_ENABLED is env-driven so the operator can flip it
+      # via a GitHub Actions variable (vars.REGISTRATION_ENABLED) without
+      # a redeploy. Defaults false when unset to match the app's
+      # fail-closed default, so opening registration is always explicit.
+      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-false}
+      # ADMIN_EMAILS pre-seeds the admin allowlist. Sourced from a
+      # GitHub Actions variable (vars.ADMIN_EMAILS) so an operator can
+      # rotate it without a redeploy; defaults to admin@example.test
+      # to keep the bootstrap flow working on a fresh development stack.
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-admin@example.test}
+      - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # Google sign-in is part of the standard development deployment.
+      # All three vars are required; missing any one fails compose
+      # boot loudly instead of silently rendering /login without the
+      # button. The redirect URL must exactly match the entry in the
+      # Google Cloud Console OAuth client.
+      #
+      # The values are sourced from GitHub Actions secrets on the
+      # `development` environment and written into the host's .env by
+      # .github/workflows/deploy.yml. Adding a new GOOGLE_* var here
+      # requires three matching edits in deploy.yml's deploy-development
+      # job: the `env:` block, the `envs:` allowlist, and the .env
+      # heredoc. Skip any of those and appleboy/ssh-action silently
+      # forwards an empty value, the heredoc bakes in a blank, and
+      # this `${VAR:?…}` guard refuses the boot.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID must be set in .env or environment}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET must be set in .env or environment}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:?GOOGLE_REDIRECT_URL must be set in .env or environment}
+      # SMTP_* are optional. If the development environment doesn't define
+      # any of them, the app falls back to the no-op mailer and the
+      # /admin/email diagnostics page renders the "disabled (no-op)"
+      # badge - no boot failure. Partial wiring (host without port,
+      # etc.) is rejected by the Go config layer with a clear error.
+      # Same three-place-edit rule as the GOOGLE_* block above applies
+      # in deploy.yml.
+      #
+      # SMTP_PORT and SMTP_TLS must be paired by the operator; nothing
+      # auto-picks the port. The supported pairings:
+      #   - SMTP_PORT=587 + SMTP_TLS=true  -> STARTTLS, the standard
+      #     "TLS on" path (most providers).
+      #   - SMTP_PORT=25  + SMTP_TLS=false -> plain SMTP (usually
+      #     only for internal relays).
+      #   - SMTP_PORT=1025 + SMTP_TLS=false -> local Mailpit dev.
+      # Port 465 (implicit TLS / SMTPS) is NOT supported: go-mail's
+      # TLS path issues STARTTLS, which fails on a port the server
+      # expects to be TLS-wrapped from byte zero.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TLS=${SMTP_TLS:-}
+      # BASE_URL is the absolute URL prefix for verify / invite links
+      # in outbound email. Optional until #111 PR2 ships; the mailer
+      # falls back to an empty prefix when unset.
+      - BASE_URL=${BASE_URL:-}
+      # Runs behind SWAG on the external `web` network; trust that subnet so
+      # the per-IP rate limiters read the real client IP from X-Forwarded-For.
+      # Override via env if `web` uses a different subnet.
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-172.19.0.0/16}
+    volumes:
+      - topbanana_development_data:/home/nonroot/data
+    networks:
+      - web
+    restart: unless-stopped
+    # Above the app's 10s shutdown bound (HTTP and email drain run concurrently).
+    stop_grace_period: 20s
+
+volumes:
+  topbanana_development_data:
+networks:
+  web:
+    external: true

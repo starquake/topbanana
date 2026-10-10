@@ -1,0 +1,56 @@
+services:
+  # Same service and container name as docker-compose.development.yml: a labeled
+  # PR's build takes over the development slot until the next main deploy.
+  topbanana-development:
+    # Pinned to an immutable digest, not a tag: deploy.yml writes the digest
+    # its own build step returned into .env, so a later push to the same PR
+    # cannot swap the running bytes. The guard fails the boot loudly if unset.
+    image: ${IMAGE_NAME}@${IMAGE_DIGEST:?IMAGE_DIGEST must be set in .env or environment}
+    container_name: topbanana-development
+    environment:
+      # Tags page titles [preview], so a PR build is never mistaken for main's.
+      - APP_ENV=preview
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Uploaded media must live on the persistent volume: the
+      # distroless image's app filesystem is ephemeral. Shares the data volume.
+      - MEDIA_DIR=/home/nonroot/data/media
+      - BASE_URL=https://development.topbanana.app
+      # Runs behind SWAG on the external `web` network, so trust that network's
+      # subnet: the per-IP rate limiters then read the real client IP from
+      # X-Forwarded-For instead of SWAG's address. Override via env if `web`
+      # uses a different subnet (docker network inspect web).
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-172.19.0.0/16}
+      # Nobody should be able to sign themselves up on a deployment of
+      # unreviewed code; the bootstrap admin below is the way in.
+      - REGISTRATION_ENABLED=false
+      # Derived per PR by deploy.yml, so cookies from main's build (or another
+      # PR's) never validate against this database.
+      - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # There is no mailer here, so an account can never confirm its own
+      # address. These create a confirmed admin on first boot instead.
+      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL must be set in .env or environment}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD must be set in .env or environment}
+      # No GOOGLE_* or SMTP_* vars: code that has not been reviewed yet gets
+      # neither a Google OAuth client nor a way to reach a real inbox.
+    volumes:
+      # Kept apart from main's topbanana_development_data. deploy.yml removes
+      # this volume when the slot switches to a different PR.
+      - topbanana_development_preview_data:/home/nonroot/data
+    networks:
+      - web
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/home/nonroot/server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  topbanana_development_preview_data:
+networks:
+  web:
+    external: true

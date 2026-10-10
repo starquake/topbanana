@@ -4,7 +4,8 @@ description: >
   Drafts and ships a release-notes entry for Top Banana. Picks the next
   CalVer version, curates the commits since the previous tag into
   user-facing bullets, writes them to RELEASE_NOTES.md, and walks the
-  branch / PR / tag / GitHub-release pipeline. Invoke when the user
+  branch / PR / release-candidate tag (staging) / release tag (production)
+  / GitHub-release pipeline. Invoke when the user
   says "cut a release", "new release", "release notes for vNNN", or
   similar.
 ---
@@ -68,12 +69,14 @@ Single-section releases are fine — drop the section header in that case and ju
 
 Top Banana uses **Calendar Versioning** (`YYYY.MM.MICRO`) from `v2026.5.0` onward. Mechanically:
 
-1. Read the most recent tag with `git tag --sort=-creatordate | head -1`.
+1. Read the most recent release tag, skipping release candidates: `git tag --sort=-creatordate | grep -v -- -rc | head -1`.
 2. If today's month matches the tag's month, bump MICRO (`v2026.5.3` → `v2026.5.4`).
 3. If today's month is later, start MICRO at 0 (`v2026.5.4` on May → `v2026.6.0` on June).
 4. Year rolls the same way.
 
 No need to ask the user for the version — derive it.
+
+A release ships in two tags on the **same commit**: first the release candidate `vYYYY.M.N-rc.K` (K from 1), which deploys to **staging**; once staging checks out, the release tag `vYYYY.M.N`, which deploys to **production** and demo. A fix found on staging lands on `main` first and becomes the next RC (`-rc.2`) on the new commit. RC tags never get a GitHub release or a `RELEASE_NOTES.md` entry of their own.
 
 ## Workflow
 
@@ -108,7 +111,7 @@ No need to ask the user for the version — derive it.
 
 6. **After sign-off**: commit, push, open PR with empty body (no `Closes #N` — there is no ticket), wait for checks, squash-merge, sync local main. Follow the existing project commit/PR conventions.
 
-7. **Wait for `main`'s image build before tagging.** Merging the notes kicks off the post-merge `CI` run on `main`, whose `docker-build` job publishes the `sha-<commit>` (and `edge`) image. The tag's `promote` job does **not** rebuild — it *retags that exact `sha-<commit>` image* to the version. So the image must already exist when you push the tag; tag too soon and `promote` fails with `sha-<commit> not found; tag a commit that was built on main`, the run is marked failed, and the production deploy never fires (the tag + GitHub release still succeed, leaving a half-shipped release). Watch the post-merge run to completion and confirm the image exists before tagging:
+7. **Wait for `main`'s image build before tagging.** Merging the notes kicks off the post-merge `CI` run on `main`, whose `docker-build` job publishes the `sha-<commit>` (and `edge`) image. The tag's `promote` job does **not** rebuild — it *retags that exact `sha-<commit>` image* to the version. So the image must already exist when you push the tag; tag too soon and `promote` fails with `sha-<commit> not found; tag a commit that was built on main`, the run is marked failed, and the deploy never fires. Watch the post-merge run to completion and confirm the image exists before tagging:
 
    ```
    git checkout main && git pull --rebase
@@ -126,10 +129,19 @@ No need to ask the user for the version — derive it.
 
    Also confirm `MAIN_CI` is the run for the notes commit (`gh run view "$MAIN_CI" --json headSha`), not a later push. If `docker-build` did not succeed, do not tag - resolve it first rather than pushing a tag the `promote` step cannot satisfy.
 
-8. **Tag and ship the release** once the image is published:
+8. **Tag the release candidate** once the image is published, and watch it reach staging:
 
    ```
-   git tag -a vYYYY.M.N -m "vYYYY.M.N"
+   git tag -a vYYYY.M.N-rc.1 -m "vYYYY.M.N-rc.1"
+   git push origin vYYYY.M.N-rc.1
+   ```
+
+   The tag's `CI` run (`promote` retags the image to `YYYY.M.N-rc.1`) fires `deploy-staging`. Confirm both go green, then **ask the user to check staging** and wait for their go-ahead. If staging turns up a problem, fix it on `main`, wait for that commit's image (step 7), and tag `-rc.2` on the new commit.
+
+9. **Tag and ship the release** on the commit the final RC points at, after the user signs off on staging:
+
+   ```
+   git tag -a vYYYY.M.N -m "vYYYY.M.N" vYYYY.M.N-rc.K^{}
    git push origin vYYYY.M.N
 
    gh release create vYYYY.M.N \
@@ -141,7 +153,7 @@ No need to ask the user for the version — derive it.
 
    **The GitHub release title is just the bare version (`vYYYY.M.N`)** so the releases list stays clean; the descriptive `<short factual title from the lead sentence>` becomes the **first heading of the body** (`## <title>`, version dropped since the release already carries it), not the release title. The `--notes-file` process substitution therefore prints that heading first, then the awk extract of the new release's section out of `RELEASE_NOTES.md`. `--generate-notes` is **mandatory**: gh prepends the curated `--notes-file` body and appends GitHub's auto-generated "What's Changed" PR list plus the Full Changelog link, so the release body reads `## <title>` then `curated notes` then `## What's Changed`. `--notes-start-tag <previous-tag>` (the same previous tag from step 2) scopes that PR list to this release's range. Every release must carry the PR list — it is the per-PR engineering history `RELEASE_NOTES.md` points readers to; omitting `--generate-notes` is the drift that left several releases without it. Use a process substitution (or a temp file) — `gh release create` reads `--notes-file` from a file path.
 
-9. Confirm the release page renders the notes correctly: `gh release view vYYYY.M.N`. Then confirm the production deploy fired: the tag's `CI` run (its `promote` job) must go green, which is what triggers `deploy-production`. If `promote` failed because the image was not yet published when you tagged, re-run that job once the image exists (`gh run rerun <tag-CI-run-id> --failed`) - do not push a new tag.
+10. Confirm the release page renders the notes correctly: `gh release view vYYYY.M.N`. Then confirm the production deploy fired: the tag's `CI` run (its `promote` job) must go green, which is what triggers `deploy-production`. If `promote` failed because the image was not yet published when you tagged, re-run that job once the image exists (`gh run rerun <tag-CI-run-id> --failed`) - do not push a new tag.
 
 ## What not to do
 
@@ -149,6 +161,7 @@ No need to ask the user for the version — derive it.
 - Do not include unreleased work-in-progress from feature branches.
 - Do not write a body for the PR that updates `RELEASE_NOTES.md` — there is no associated ticket.
 - Do not tag before the release-notes PR has merged. The tag should point at the commit that contains the notes.
-- Do not push the version tag before `main`'s `docker-build` has published the `sha-<commit>` image (step 7). The tag's `promote` retags that image; tagging early fails `promote` and the production deploy never fires.
+- Do not push a version tag before `main`'s `docker-build` has published the `sha-<commit>` image (step 7). The tag's `promote` retags that image; tagging early fails `promote` and the deploy never fires.
+- Do not tag the release before its release candidate has been on staging and the user has signed off. The release tag goes on the same commit as the final RC.
 - Do not bump CalVer to skip a number. Sequential micros within the month.
 - Do not edit a tag once pushed. If the notes are wrong, ship a follow-up release.
