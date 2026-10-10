@@ -7,6 +7,7 @@ name: Deploy
 #   - production and demo: releases, tags vYYYY.M.N.
 # Tags retag the image main already built, tested and signed (ci.yml's
 # promote job), so staging, production and demo run bytes CI verified.
+# The GHCR package is public, so hosts pull anonymously and hold no registry token.
 
 on:
   workflow_run:
@@ -154,8 +155,6 @@ jobs:
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -165,7 +164,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -210,10 +209,8 @@ jobs:
             mv -f docker-compose.development.yml docker-compose.yml
             # Reclaims the slot if a PR preview holds it; that PR's volume stays.
             rm -f .pr
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-            docker logout ghcr.io
 
       - name: Verify development deployment
         run: |
@@ -314,8 +311,6 @@ jobs:
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -325,7 +320,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?...} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD,IMAGE_NAME,IMAGE_DIGEST,PR_NUMBER,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD,IMAGE_NAME,IMAGE_DIGEST,PR_NUMBER
           script: |
             set -e
             for var in SESSION_KEY INITIAL_ADMIN_EMAIL INITIAL_ADMIN_PASSWORD; do
@@ -357,7 +352,6 @@ jobs:
             IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.development-preview.yml docker-compose.yml
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             # A different PR starts from an empty database. Remove only the
             # preview volume, by name: main's development data is never touched.
             if [ "$(cat .pr 2>/dev/null)" != "$PR_NUMBER" ]; then
@@ -368,7 +362,6 @@ jobs:
             echo "$PR_NUMBER" > .pr
             docker compose pull
             docker compose up -d
-            docker logout ghcr.io
 
       - name: Verify development deployment
         env:
@@ -519,8 +512,6 @@ jobs:
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -530,7 +521,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -573,10 +564,8 @@ jobs:
             IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.staging.yml docker-compose.yml
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-            docker logout ghcr.io
 
       - name: Verify staging deployment
         run: |
@@ -727,8 +716,6 @@ jobs:
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -738,7 +725,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -781,10 +768,8 @@ jobs:
             IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.production.yml docker-compose.yml
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-            docker logout ghcr.io
 
       - name: Verify production deployment
         run: |
@@ -917,8 +902,6 @@ jobs:
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -928,7 +911,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?...} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -956,10 +939,8 @@ jobs:
             IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.demo.yml docker-compose.yml
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-            docker logout ghcr.io
 
       - name: Verify demo deployment
         run: |
