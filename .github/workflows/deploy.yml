@@ -29,7 +29,10 @@ on:
         description: 'Version, e.g. 2026.10.0-rc.1 (required for staging) or 2026.10.0 (production and demo; empty means the latest release). Development always deploys the latest main build.'
         required: false
         type: string
-  pull_request:
+  # pull_request_target runs main's copy of this file, so a PR cannot rewrite
+  # the preview job to reach the development secrets or the host.
+  pull_request_target:
+    branches: [main]
     types: [labeled, synchronize]
 
 env:
@@ -49,8 +52,8 @@ jobs:
       vars.DEVELOPMENT_DEPLOY_ENABLED == 'true' &&
       ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'main') ||
        (github.event_name == 'workflow_dispatch' && inputs.environment == 'development'))
-    # Shared with deploy-development-preview: one slot, and queued runs wait
-    # rather than cancel a deploy mid-way.
+    # Its own queue, so a preview run can never replace a pending main deploy;
+    # a lock on the host serializes the two jobs' compose changes.
     concurrency:
       group: deploy-development
       cancel-in-progress: false
@@ -188,6 +191,8 @@ jobs:
             done
             mkdir -p ~/topbanana-development
             cd ~/topbanana-development
+            exec 9>.deploy.lock
+            flock -w 900 9
             umask 077
             cat > .env <<EOF
             SESSION_KEY='${SESSION_KEY}'
@@ -207,7 +212,8 @@ jobs:
             IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.development.yml docker-compose.yml
-            # Reclaims the slot if a PR preview holds it; that PR's volume stays.
+            # Takes the slot back from a PR preview; that PR's next preview starts
+            # from an empty database.
             rm -f .pr
             docker compose pull
             docker compose up -d
@@ -237,23 +243,31 @@ jobs:
       packages: write
     if: >-
       vars.DEVELOPMENT_DEPLOY_ENABLED == 'true' &&
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       contains(github.event.pull_request.labels.*.name, 'deploy:dev') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'deploy:dev') &&
       github.event.pull_request.head.repo.full_name == github.repository
-    # Shared with deploy-development: one slot, and queued runs wait rather
-    # than cancel a deploy mid-way.
+    # A newer preview replaces a pending one; main deploys queue separately.
     concurrency:
-      group: deploy-development
+      group: deploy-development-preview
       cancel-in-progress: false
     environment:
       name: development
       url: "${{ vars.SERVER_URL }}"
 
     steps:
+      # The compose file comes from main; the PR's tree is only the build context.
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Checkout PR head
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
 
       - name: Copy docker-compose file
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
@@ -281,14 +295,18 @@ jobs:
         id: build-and-push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
+          context: pr
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number }}
           build-args: |
             COMMIT=${{ github.event.pull_request.head.sha }}
             DATE=${{ github.event.pull_request.updated_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Writes to its own scope: this runs in main's cache context, and an
+          # unreviewed build must not seed layers main's release build reuses.
+          cache-from: |
+            type=gha
+            type=gha,scope=preview
+          cache-to: type=gha,mode=max,scope=preview
 
       - name: Resolve image digest
         id: digest
@@ -343,6 +361,8 @@ jobs:
             PREVIEW_SESSION_KEY="$(printf '%s\npreview-%s' "$SESSION_KEY" "$PR_NUMBER" | sha256sum | cut -d' ' -f1)"
             mkdir -p ~/topbanana-development
             cd ~/topbanana-development
+            exec 9>.deploy.lock
+            flock -w 900 9
             umask 077
             cat > .env <<EOF
             SESSION_KEY='${PREVIEW_SESSION_KEY}'
