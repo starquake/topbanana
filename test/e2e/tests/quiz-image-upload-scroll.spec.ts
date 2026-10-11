@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // After a host uploads an image on the quiz view, the page should keep them
@@ -35,7 +35,7 @@ test('uploading an image keeps the quiz view scrolled to the library section', a
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(async () => page.evaluate(() => window.scrollY)).toBe(0);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,

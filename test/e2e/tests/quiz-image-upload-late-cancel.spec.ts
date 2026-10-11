@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // A cancelled upload must leave nothing in the host's library (#992). The
@@ -40,7 +40,7 @@ test('a cancelled upload leaves nothing in the library', async ({ page, browserN
   // connection mid-upload.
   await page.route('**/admin/quizzes/*/media', (route) => route.abort());
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'late.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,

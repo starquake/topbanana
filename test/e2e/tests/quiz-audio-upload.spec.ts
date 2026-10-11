@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -42,7 +42,7 @@ test('uploading a sound adds it to the library with a duration and an audio prev
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+  await pickLibraryFiles(page, 'audio', {
     name: 'clip.wav',
     mimeType: 'audio/wav',
     buffer: makeWav(1),
@@ -69,7 +69,7 @@ test('an uploaded sound defaults its description to the filename and can be edit
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+  await pickLibraryFiles(page, 'audio', {
     name: 'Opening Theme.wav',
     mimeType: 'audio/wav',
     buffer: makeWav(1),
@@ -97,7 +97,7 @@ test('an edited sound description shows in the question editor audio picker', as
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+  await pickLibraryFiles(page, 'audio', {
     name: 'jingle.wav',
     mimeType: 'audio/wav',
     buffer: makeWav(2),
@@ -124,7 +124,7 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+  await pickLibraryFiles(page, 'audio', {
     name: 'pick.wav',
     mimeType: 'audio/wav',
     buffer: makeWav(2),

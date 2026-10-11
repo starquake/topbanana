@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -21,7 +21,7 @@ test('uploading multiple images at once adds each to the library and shows a con
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles([
+  await pickLibraryFiles(page, 'images', [
     { name: 'first.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'second.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'third.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
@@ -43,7 +43,7 @@ test('a mix of valid and unsupported uploads partial-succeeds and surfaces the s
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles([
+  await pickLibraryFiles(page, 'images', [
     { name: 'good.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') },
   ]);

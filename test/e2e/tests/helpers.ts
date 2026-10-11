@@ -11,6 +11,18 @@ export { execSqlite };
 
 export const PASSWORD = 'correctbatterystaple';
 
+// pickLibraryFiles sets files on the quiz view's image or audio library input.
+// The upload module binds its change listener on DOMContentLoaded, so a file
+// set before then is silently dropped and no upload starts (#1404).
+export async function pickLibraryFiles(
+  page: Page,
+  field: 'images' | 'audio',
+  files: Parameters<Locator['setInputFiles']>[0],
+): Promise<void> {
+  await page.waitForLoadState('domcontentloaded');
+  await page.locator(`input[type="file"][name="${field}"]`).setInputFiles(files);
+}
+
 export type QuestionSpec = {
   text: string;
   options: [string, string, string, string];

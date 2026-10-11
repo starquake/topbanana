@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -36,7 +36,7 @@ test('an oversized image is skipped client-side with no network upload', async (
     }
   });
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles([
+  await pickLibraryFiles(page, 'images', [
     { name: 'huge.png', mimeType: 'image/png', buffer: OVERSIZE_PNG },
     { name: 'ok.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
   ]);

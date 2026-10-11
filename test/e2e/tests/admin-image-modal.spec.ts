@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // #950 — clicking a library thumbnail on the admin quiz view opens a modal
@@ -25,7 +25,7 @@ test('clicking a library thumbnail opens the full image in a modal', async ({ pa
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
@@ -89,7 +89,7 @@ async function uploadImageAndGetMediaId(
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
