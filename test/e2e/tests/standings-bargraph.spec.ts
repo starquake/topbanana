@@ -58,9 +58,8 @@ type SessionState = {
 // GET /state and POSTs it, so an API-only player can answer a known choice with
 // no UI. It waits for the answer window to open (serverNow at or after
 // startedAt) before posting, since the read beat (#247 parity) holds answers
-// closed for a brief beat after the question is issued. Returns silently when
-// the session is not currently in the question phase (the runner may have
-// advanced past it).
+// closed for a brief beat after the question is issued. Fails when the question
+// is not open, since the caller's assertions depend on the answer (#1403).
 async function answerOverApi(
   request: APIRequestContext,
   code: string,
@@ -69,39 +68,32 @@ async function answerOverApi(
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const resp = await request.get(`/api/sessions/${code}/state`);
-    if (!resp.ok()) return;
+    expect(resp.ok(), `state: ${resp.status()}`).toBe(true);
     const state = (await resp.json()) as SessionState;
-    if (state.phase !== 'question' || !state.question) return;
-    const open = state.question.startedAt
+    expect(state.phase, 'answerOverApi needs an open question').toBe('question');
+    const open = state.question?.startedAt
       ? Date.parse(state.serverNow) >= Date.parse(state.question.startedAt)
       : true;
     if (open) {
-      const option = state.question.options.find((o) => o.text === text);
-      if (!option) return;
-      await request.post(`/api/sessions/${code}/answer`, { data: { optionId: option.id } });
+      const option = state.question?.options.find((o) => o.text === text);
+      expect(option, `no option "${text}"`).toBeTruthy();
+      const answer = await request.post(`/api/sessions/${code}/answer`, { data: { optionId: option!.id } });
+      expect(answer.status(), `answer: ${answer.status()} ${await answer.text()}`).toBe(204);
       return;
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+  throw new Error(`question did not open within 10s for answer "${text}"`);
 }
 
 // answerOnPage clicks the option with the given text on the player surface once
-// the question view is shown. Tolerates the runner having already advanced.
+// the question view is shown. The standings assertions depend on this answer,
+// so a missed question fails here rather than as a wrong score later (#1403).
 async function answerOnPage(page: Page, text: string): Promise<void> {
-  const view = page.getByTestId('question-view');
-  try {
-    await expect(view).toBeVisible({ timeout: 15_000 });
-  } catch {
-    return;
-  }
+  await expect(page.getByTestId('question-view')).toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   const button = page.getByTestId('question-options').getByRole('button', { name: text, exact: true });
-  try {
-    await expect(button).toBeEnabled({ timeout: 5_000 });
-    await button.click();
-  } catch {
-    // The window may have closed (the runner early-closes once everyone is in);
-    // the answer is not required for the standings assertions.
-  }
+  await expect(button).toBeEnabled();
+  await button.click();
 }
 
 // readStandingsRows reads the rendered standings rows in DOM order, returning
@@ -189,6 +181,9 @@ test('the standings bar graph shows final order and totals on the TV and player 
   await importQuiz(host, {
     title: quizTitle,
     description: 'MP-9 standings bar graph spec',
+    // Both players answer, so the runner early-closes each question; the long
+    // window only matters when a slow step would otherwise miss it (#1403).
+    timeLimitSeconds: 120,
     rounds: [
       {
         title: 'Round one',
