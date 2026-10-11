@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 test.use({ storageState: adminStatePath() });
@@ -64,7 +64,7 @@ test('the client caps concurrent media uploads at three', async ({ page, browser
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
   }));
-  await page.locator('input[type="file"][name="images"]').setInputFiles(files);
+  await pickLibraryFiles(page, 'images', files);
 
   // The cap saturates at exactly MAX_CONCURRENT_UPLOADS held requests; the other
   // six picked files wait in the client queue and render no row (a row appears

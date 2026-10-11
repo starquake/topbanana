@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, installPlaythroughClock, publishQuiz, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, installPlaythroughClock, publishQuiz, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // An iPhone SE small viewport: 375 logical px wide, and a height that models the
@@ -36,7 +36,7 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   await createQuizWithQuestions(page, quizTitle, REALISTIC);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,

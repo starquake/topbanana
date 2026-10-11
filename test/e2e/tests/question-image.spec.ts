@@ -1,7 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, endHostedSession, installPlaythroughClock, playerRow, publishQuiz, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, pickLibraryFiles, endHostedSession, installPlaythroughClock, playerRow, publishQuiz, setQuizMode, waitForHostRoom, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -29,7 +29,7 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="images"]').setInputFiles({
+  await pickLibraryFiles(page, 'images', {
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
