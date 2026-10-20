@@ -2,6 +2,50 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.10.0 — 2026-10-20
+
+This release fixes timing, scoring and reconnect problems in solo and live games, and adds access rules and size limits for accounts, quizzes and uploads.
+
+### Players
+- Answers sent before a solo question opens are no longer accepted.
+- The solo question timer no longer drifts after the feedback pause between questions.
+- Tapping Start twice starts one game, not two.
+- In a live game, the player screen shows a connection banner when the connection drops and picks the game back up when it returns.
+- The live question bar no longer restarts partway through the read time.
+- Live games play rounds in the order they are arranged in the editor.
+- An answer that arrives just as a live question closes is either scored or refused, never silently dropped, and a failed score save is retried instead of counting as 0 points.
+- Display names are capped at 50 characters and may not contain invisible or control characters; this applies on every page where a name is set.
+- Escape closes the leave-game dialog.
+- The profile page has a "Sign out other devices" button.
+- Email verification links open a page with a "Confirm email" button instead of verifying on open.
+- Changing a password or email address cancels outstanding reset and email-change links.
+- Signing in with Google onto an address that had an unverified password account removes that password and marks the address verified.
+
+### Hosts
+- A host can have one open live room at a time; opening "Host live" again returns to the existing room.
+- Only the host who opened a room can open its big screen.
+- The host no longer counts as a player in their own room unless they join it through the join link.
+- Draft quizzes and their images are visible only to their creator and admins; unlisted quizzes open only from their full link.
+- Quiz archives with an empty round now import back unchanged.
+- An archive import is refused with a message naming the file when it has more images or sounds than the per-quiz limit or contains a file the uploader would reject.
+- Quiz content has length limits: title 200 characters, description and round summary 5000, question 2000, answer option 500, up to 1000 questions and 100 rounds per quiz.
+- Long titles, including non-Latin ones, are shortened to fit the link instead of failing to save.
+- Reordering questions or starting a game after the sign-in has expired shows a "session has expired" message instead of appearing to succeed.
+- Uploaded photos are turned the right way up using the camera's orientation data.
+- Images that would need too much memory to process, such as very large 16-bit PNGs, are refused with a size error.
+- Sending an invite that fails to email now shows the invite as created with a prompt to resend, instead of an error page.
+
+### Behind the scenes
+- A custom `DB_URI` must now include `_txlock=immediate` and keep foreign keys on; the server refuses to start otherwise. The default value already does.
+- New `GUEST_MINT_BUDGET` and `GUEST_RENAME_BUDGET` settings limit how many guest players and guest renames one IP address can make per minute (default 60 each; 0 turns a limit off).
+- Visiting a page without a session no longer creates a guest player; one is created on the first action such as starting a game or joining a room.
+- With `LOGIN_APPROVAL_REQUIRED` on, accounts that have not been approved are signed out straight away rather than at their next sign-in.
+- The demo seed now applies `MEDIA_QUIZ_IMAGE_LIMIT`, and the server does not start if the demo archive exceeds it.
+- Shutdown waits up to 10 seconds and closes open live and leaderboard streams; the bundled compose files allow 20 seconds before stopping the container.
+- Long media and quiz-export downloads on slow connections no longer time out partway.
+- Form submissions are limited to 1 MB, and the pasted-JSON quiz import to 5 MB.
+- Guests who only play live rooms are no longer removed by the inactive-guest cleanup.
+
 ## v2026.9.1 — 2026-09-08
 
 This release updates internal dependencies and raises the Go version needed to build from source.
