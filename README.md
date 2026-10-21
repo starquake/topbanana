@@ -139,10 +139,14 @@ Outgoing mail (email verification, password reset, invites) is optional. Without
 
 ## Behind a reverse proxy (HTTPS)
 
-To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you. Point a SWAG `proxy-conf` at the `topbanana` container on port 8080. There is a ready-made one at [`deployments/swag/topbanana.subdomain.conf`](deployments/swag/topbanana.subdomain.conf). Two settings pair with a proxy:
+To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you. Point a SWAG `proxy-conf` at the `topbanana` container on port 8080. There is a ready-made one at [`deployments/swag/topbanana.subdomain.conf`](deployments/swag/topbanana.subdomain.conf).
+
+Put the container on a Docker network it shares with the proxy, and drop the `ports:` mapping (or `-p 8080:8080`) from the examples above. The proxy reaches the container over that network. A published port leaves the app reachable over plain HTTP on port 8080, bypassing TLS.
+
+Two settings pair with a proxy:
 
 - **`BASE_URL`**: set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
-- **`TRUSTED_PROXY_IPS`**: set it to the proxy's address or CIDR so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's.
+- **`TRUSTED_PROXY_IPS`**: set it to the subnet of the Docker network the proxy shares with the container, so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's. Look it up with `docker network inspect <network> --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`. If the proxy is on several networks, use the one it shares with Top Banana!; a subnet from another network silently falls back to bucketing every request on the proxy's address.
 
 ## Troubleshooting
 
