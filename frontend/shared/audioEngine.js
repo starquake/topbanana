@@ -23,7 +23,7 @@ export const SFX = {
     answerReveal: 'answer-reveal',
 };
 
-// Placeholder tones; the maintainer swaps real sounds in at the same paths.
+// Kenney CC0 sounds; their sources are listed in NOTICES.md.
 const EFFECT_SRC = {
     [SFX.roundStart]: '/static/audio/sfx/round-start.mp3',
     [SFX.questionShow]: '/static/audio/sfx/question-show.mp3',
