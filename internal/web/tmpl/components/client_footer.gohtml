@@ -47,9 +47,9 @@
             {{end}}
             <a href="/admin" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">{{t "footer.manageQuizzes"}}</a>
             <span class="inline-flex items-center gap-1" aria-label="{{t "lang.switcherLabel"}}" data-testid="lang-switcher">
-                <a href="/lang/en" data-testid="lang-en" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "en"}} text-accent font-semibold{{end}}" {{if eq $loc "en"}}aria-current="true"{{end}}>EN</a>
+                <a href="{{langHref "en"}}" data-testid="lang-en" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "en"}} text-accent font-semibold{{end}}" {{if eq $loc "en"}}aria-current="true"{{end}}>EN</a>
                 <span aria-hidden="true">/</span>
-                <a href="/lang/nl" data-testid="lang-nl" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "nl"}} text-accent font-semibold{{end}}" {{if eq $loc "nl"}}aria-current="true"{{end}}>NL</a>
+                <a href="{{langHref "nl"}}" data-testid="lang-nl" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline{{if eq $loc "nl"}} text-accent font-semibold{{end}}" {{if eq $loc "nl"}}aria-current="true"{{end}}>NL</a>
             </span>
         </div>
 

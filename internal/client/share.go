@@ -141,6 +141,7 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		"envTitleTag": envtag.Get,
 		"t":           func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"lang":        func() string { return loc },
+		"langHref":    func(to string) string { return locale.SwitchHref(r, to) },
 	}
 	// partials/ holds the {{define}} blocks shared between index.gohtml (solo) and
 	// join.gohtml (live): round_intro ("round-intro-card"), standings_bars

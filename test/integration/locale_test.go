@@ -70,17 +70,16 @@ func TestLocale_Integration(t *testing.T) {
 		assertContains(t, body, `<html lang="nl">`)
 	})
 
-	t.Run("GET /lang/nl sets the cookie and redirects to the referer", func(t *testing.T) {
+	t.Run("GET /lang/nl sets the cookie and redirects to next", func(t *testing.T) {
 		t.Parallel()
 
 		client := &http.Client{
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/lang/nl", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/lang/nl?next=%2Fjoin%2FABCD", nil)
 		if err != nil {
 			t.Fatalf("NewRequest err = %v, want nil", err)
 		}
-		req.Header.Set("Referer", baseURL+"/quizzes")
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatalf("client.Do err = %v, want nil", err)
@@ -90,7 +89,7 @@ func TestLocale_Integration(t *testing.T) {
 		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
-		if got, want := resp.Header.Get("Location"), "/quizzes"; got != want {
+		if got, want := resp.Header.Get("Location"), "/join/ABCD"; got != want {
 			t.Errorf("Location = %q, want %q", got, want)
 		}
 		var langCookie *http.Cookie
@@ -107,6 +106,27 @@ func TestLocale_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("live room shell switcher returns to the room", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/join/ABCD", "", nil)
+		assertContains(t, body, `href="/lang/en?next=%2Fjoin%2FABCD"`)
+		assertContains(t, body, `href="/lang/nl?next=%2Fjoin%2FABCD"`)
+	})
+
+	t.Run("solo play shell switcher returns to the game", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/play/some-quiz-1", "", nil)
+		assertContains(t, body, `href="/lang/en?next=%2Fplay%2Fsome-quiz-1"`)
+		assertContains(t, body, `href="/lang/nl?next=%2Fplay%2Fsome-quiz-1"`)
+	})
+
+	t.Run("site footer switcher returns to the page", func(t *testing.T) {
+		t.Parallel()
+		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/login?next=%2Fadmin", "", nil)
+		assertContains(t, body, `href="/lang/en?next=%2Flogin%3Fnext%3D%252Fadmin"`)
+		assertContains(t, body, `href="/lang/nl?next=%2Flogin%3Fnext%3D%252Fadmin"`)
+	})
+
 	t.Run("SPA shell injects the i18n global and html lang", func(t *testing.T) {
 		t.Parallel()
 		body := getBodyWithHeaderCookie(ctx, t, baseURL+"/join", "", &http.Cookie{Name: "lang", Value: "nl"})
@@ -118,7 +138,7 @@ func TestLocale_Integration(t *testing.T) {
 		// footer switcher marks the active locale.
 		assertContains(t, body, `Doe mee met een spel`)
 		assertContains(t, body, `data-testid="lang-switcher"`)
-		assertContains(t, body, `href="/lang/en"`)
+		assertContains(t, body, `href="/lang/en?next=%2Fjoin%2F"`)
 	})
 
 	t.Run("solo SPA shell localizes static text to English by default", func(t *testing.T) {

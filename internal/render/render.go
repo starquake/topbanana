@@ -123,6 +123,7 @@ func (re *Renderer) prepare(w http.ResponseWriter, r *http.Request) (*template.T
 		"t":         func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"tCount":    func(key string, n int) string { return locale.TranslateCount(loc, locale.MessageID(key), n) },
 		"lang":      func() string { return loc },
+		"langHref":  func(to string) string { return locale.SwitchHref(r, to) },
 	}
 	if re.funcs != nil {
 		maps.Copy(funcs, re.funcs(r))
