@@ -172,6 +172,30 @@ func TestSwitchHref(t *testing.T) {
 			target: "/login?next=%2Fadmin",
 			want:   "/lang/nl?next=%2Flogin%3Fnext%3D%252Fadmin",
 		},
+		{
+			name:   "reset token page omits next",
+			method: http.MethodGet,
+			target: "/reset-password?token=secret",
+			want:   "/lang/nl",
+		},
+		{
+			name:   "verify token page omits next",
+			method: http.MethodGet,
+			target: "/verify-email?token=secret",
+			want:   "/lang/nl",
+		},
+		{
+			name:   "OAuth callback omits next",
+			method: http.MethodGet,
+			target: "/login/google/callback?code=c&state=s",
+			want:   "/lang/nl",
+		},
+		{
+			name:   "non-secret state filter keeps next",
+			method: http.MethodGet,
+			target: "/admin/players?state=active",
+			want:   "/lang/nl?next=%2Fadmin%2Fplayers%3Fstate%3Dactive",
+		},
 		{name: "POST omits next", method: http.MethodPost, target: "/register", want: "/lang/nl"},
 		{name: "HEAD omits next", method: http.MethodHead, target: "/join/ABCD", want: "/lang/nl"},
 	}
@@ -182,7 +206,7 @@ func TestSwitchHref(t *testing.T) {
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, tc.target, nil)
 			loc := "nl"
 			if got, want := SwitchHref(r, loc), tc.want; got != want {
-				t.Errorf("SwitchHref(%s %s, %q) = %q, want %q", tc.method, tc.target, loc, got, want)
+				t.Errorf("SwitchHref(%q %q, %q) = %q, want %q", tc.method, tc.target, loc, got, want)
 			}
 		})
 	}

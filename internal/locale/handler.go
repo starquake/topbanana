@@ -3,6 +3,7 @@ package locale
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -33,6 +34,12 @@ func HandleSetLocale() http.Handler {
 func SwitchHref(r *http.Request, loc string) string {
 	href := "/lang/" + url.PathEscape(loc)
 	if r.Method != http.MethodGet {
+		return href
+	}
+	// A one-time credential (reset, verify and invite tokens, the OAuth code)
+	// must not be copied into another URL.
+	q := r.URL.Query()
+	if slices.ContainsFunc([]string{"token", "code"}, q.Has) {
 		return href
 	}
 
