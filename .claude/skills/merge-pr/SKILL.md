@@ -107,9 +107,13 @@ checked. Then:
   does not guarantee a green `main`. If `main` is red, fixing it comes before
   anything else and does not need asking about.
 
+  Filter by the merge commit: right after the merge, the newest `main` run is
+  still the previous commit's, already completed.
+
   ```bash
-  until [ "$(gh run list -R starquake/topbanana --branch main --workflow ci.yml --limit 1 --json status -q '.[0].status')" = "completed" ]; do sleep 30; done
-  gh run list -R starquake/topbanana --branch main --limit 3 --json workflowName,conclusion,headSha
+  sha=$(gh pr view <n> --json mergeCommit -q .mergeCommit.oid)
+  until [ "$(gh run list -R starquake/topbanana --commit "$sha" --workflow ci.yml --limit 1 --json status -q '.[0].status')" = "completed" ]; do sleep 30; done
+  gh run list -R starquake/topbanana --commit "$sha" --json workflowName,conclusion,status
   ```
 
 **Merging several:** one at a time, re-checking the next PR after each merge.
