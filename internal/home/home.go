@@ -274,6 +274,7 @@ func executeTemplate(
 		"demoMode":   func() bool { return rc.demoMode },
 		"t":          func(key string) string { return locale.Translate(loc, locale.MessageID(key)) },
 		"lang":       func() string { return loc },
+		"langHref":   func(to string) string { return locale.SwitchHref(r, to) },
 	}
 	if rc.csrfToken != nil {
 		funcs["csrfToken"] = func() string { return rc.csrfToken(w, r) }
@@ -326,9 +327,10 @@ func parseTemplate(page string) *template.Template {
 		// Rebound per request by executeTemplate from cfg.DemoMode; this
 		// parse-time placeholder keeps the template parseable.
 		"demoMode": func() bool { return false },
-		// Parse-time placeholders; executeTemplate rebinds t/lang per request.
-		"t":    func(string) string { return "" },
-		"lang": func() string { return locale.LocaleEN },
+		// Parse-time placeholders; executeTemplate rebinds t/lang/langHref per request.
+		"t":        func(string) string { return "" },
+		"lang":     func() string { return locale.LocaleEN },
+		"langHref": func(string) string { return "" },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

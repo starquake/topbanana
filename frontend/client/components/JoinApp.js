@@ -18,6 +18,7 @@ import {
     forgetRememberedSession,
 } from '@shared/rememberedSession.js';
 import { t } from '../util/i18n.js';
+import { setReturnPath } from '../util/returnPath.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
@@ -368,6 +369,7 @@ export class JoinApp {
         this.step = 'lobby';
         this.leftSent = false;
         rememberSession(this.code);
+        setReturnPath(`/join/${encodeURIComponent(this.code)}`);
         this.acquireWakeLock();
         await this.refreshState();
         this.subscribe();
@@ -391,7 +393,7 @@ export class JoinApp {
                 }
                 this.error = result.message;
                 this.step = result.kind === 'notFound' ? 'code' : 'name';
-                if (result.kind === 'notFound') this.codeInput = this.code;
+                if (result.kind === 'notFound') this.backToCodeForm();
                 return;
             }
             await this.landInLobby(result);
@@ -437,6 +439,8 @@ export class JoinApp {
         }
         this.error = '';
         this.code = trimmed;
+        // A reload then comes back to this room rather than the empty code form.
+        setReturnPath(`/join/${encodeURIComponent(trimmed)}`);
         if (this.accountName) {
             void this.autoJoin();
             return;
@@ -476,7 +480,7 @@ export class JoinApp {
                     // Send them back to fix the code rather than retyping a
                     // name against a room that doesn't exist.
                     this.step = 'code';
-                    this.codeInput = this.code;
+                    this.backToCodeForm();
                 }
                 return;
             }
@@ -484,6 +488,13 @@ export class JoinApp {
         } finally {
             this.busy = false;
         }
+    }
+
+    // backToCodeForm prefills the code form with the code no room was found
+    // for, and drops it from the URL so a reload does not retry it.
+    backToCodeForm() {
+        this.codeInput = this.code;
+        setReturnPath('/join/');
     }
 
     // enterClosedState routes the player to the terminal "this game is no

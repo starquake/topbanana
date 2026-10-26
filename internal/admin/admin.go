@@ -361,10 +361,11 @@ func parseTemplate(path string) *template.Template {
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 		"add":               func(a, b int) int { return a + b },
-		// Parse-time placeholders for the shared client_footer's t/lang (#1115);
+		// Parse-time placeholders for the shared client_footer's t/lang/langHref (#1115);
 		// render.Renderer rebinds them per request.
-		"t":    func(string) string { return "" },
-		"lang": func() string { return locale.LocaleEN },
+		"t":        func(string) string { return "" },
+		"lang":     func() string { return locale.LocaleEN },
+		"langHref": func(string) string { return "" },
 	}
 	// Partials are parsed alongside layouts so any page (or any HTMX-fragment
 	// handler) can {{template "name" .}} a shared block without re-listing it.

@@ -1042,10 +1042,11 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// Parse-time placeholders; render.Renderer rebinds t/tCount/lang per request.
-		"t":      func(string) string { return "" },
-		"tCount": func(string, int) string { return "" },
-		"lang":   func() string { return locale.LocaleEN },
+		// Parse-time placeholders; render.Renderer rebinds t/tCount/lang/langHref per request.
+		"t":        func(string) string { return "" },
+		"tCount":   func(string, int) string { return "" },
+		"lang":     func() string { return locale.LocaleEN },
+		"langHref": func(string) string { return "" },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
