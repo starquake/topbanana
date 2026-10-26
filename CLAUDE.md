@@ -28,47 +28,39 @@ Start from `main` (`git pull`), then branch with dashes (not slashes), prefixed 
 
 Rebasing/updating a branch: rebase **locally** onto main (`git rebase origin/main`; `git rebase -f origin/main` to re-create commits already on top) and `git push --force-with-lease` — never by merging, never via `gh pr update-branch` or auto-merge's implicit update. `main`'s ruleset requires **signed commits**; local git signs them (SSH key), but a server-side rebase re-creates them **unsigned**, leaving the PR `mergeStateStatus=BLOCKED` with every required check green. Don't `gh pr merge --admin` past it — the Claude Code classifier blocks bypassing the ruleset, and the signed local rebase is the fix.
 
-### Working a ticket the maintainer hands you (one at a time)
+### The board
 
-1. Read the ticket and make a plan. Ask up front only the questions that would change the *approach*.
-2. Do the work on a ticket branch.
-3. Open a **draft PR**. Its description states you opened it, lists the plan, and puts any remaining detail questions inline.
-4. Wait for the maintainer to answer the questions on the PR.
-5. When answered, continue the work.
-6. When done, run **Self-review**.
+**The ticket is canonical.** Every conversation about a piece of work happens in its GitHub issue; an answer given in chat is written back into the issue body before acting on it.
 
-### Working tickets on your own
+The board is the handoff baton: the Status field of the "Top Banana" user Project (https://github.com/users/starquake/projects/7). Read and move it with `.claude/scripts/board.sh`.
 
-When the maintainer points you at several tickets — a milestone, or tickets by name/subject — and asks you to work them **on your own** (and/or to **fan out**, i.e. in parallel):
+```
+Backlog · Your input · Spec · Plan · Your sign-off · Build · Your review · Done
+```
 
-1. For each ticket, write a plan and post it as a **comment on that ticket**.
-2. Bundle similar tickets into one PR where it makes sense.
-3. Put any questions on the ticket as a comment. Because you are on your own, **assume the recommended answer and proceed** — and say so in the comment.
-4. Stop a ticket only if it is genuinely unclear, or a wrong guess would be expensive to undo: comment why, and move to the next ticket.
-5. Make a branch and push commits to a **draft PR**. Multiple small commits are fine — they aid review and let the maintainer revert parts.
-6. When done, run **Self-review**.
+- **If a state says "your", it is the maintainer's gate** and work stops; `Spec`, `Plan` and `Build` are Claude's and proceed without re-asking. `Your input` (questions) can interrupt any stage. `Your sign-off` comes BEFORE a build (approve the spec or plan); `Your review` comes AFTER it (the PR is ready, awaiting `ready to merge`). Cards move both ways and stages can be skipped: a bug or tweak goes straight to `Build`.
+- **A card dragged to `Spec` means "your call"**: first decide whether it needs a spec at all, and say so on the ticket. With no design question left it goes on to `Plan`; a bug or tweak needing no plan goes on to `Build`.
+- **Approval** of a spec or plan is the maintainer dragging the card on, or a `go` / `approved` comment. Never proceed from plan to build without it. **A card dragged to `Build` is the go**, even when its plan is missing: the plan is written into the body before the first commit.
+- **A build** happens on a ticket branch, into a draft PR with `Closes #N`; run **Self-review**, mark it ready, and move the card to `Your review`.
+- **The `Backlog` column's order is the priority.** Nothing leaves `Backlog` without the maintainer; "pick up the next one" means its top card. A new issue goes on the board in `Backlog`.
+- **A position in the flow is a Status; a property of a ticket is a label** (`hold` = skip entirely, `bug`, `security`). Never add a Status option to carry a property.
+- **The body is the living spec; the comments are append-only history.** When a question is answered it moves into _Decisions_ and is deleted from _Open questions_. Every state change gets a NEW `**Next steps**` comment; never edit an old one.
+- **Questions go in a copy-paste answer block**: a fenced block headed `# keep your pick, delete the rest`, one line per question, every line carrying a `(rec)`, ending with `notes =`. Posting one moves the ticket to `Your input` in the same step.
+- **Fanning out**: when the maintainer asks you to work several `Build` tickets in parallel, bundle similar ones into one PR where it makes sense and run each through the same flow.
 
-### Planning labels
-
-These labels track an issue's planning state so the board shows whose court it is in:
-
-- **`needs plan`** — the maintainer wants a plan; read the ticket and post a plan as a comment (per Attribution).
-- **`needs decision`** — a plan is posted with open questions; the maintainer must decide.
-- **`ready to build`** — the maintainer has decided and the ticket is ready to implement. Like `ready to merge`, this is a maintainer go-signal: never add it yourself.
-
-When you post a plan with open questions, swap `needs plan` for `needs decision`; if it has none, just remove `needs plan`. The maintainer applies `ready to build` when the ticket is ready for you to implement.
+The procedure behind each step lives in the skills: `work-the-board` (and its `/board` loop alias), `design-slice`, `merge-pr`, `issue-comment-replies`, `review-diff`.
 
 ### Self-review
 
 1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git fetch origin && git diff origin/main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
 2. Fix every **critical** issue.
-3. Post the **non-critical** issues on the PR. Handed one ticket: ask which to fix. On your own: fix the ones you would recommend that have one right answer and note what you did; anything that changes behaviour or the ticket's decisions goes through step 4 as a judgement call.
+3. Post the **non-critical** issues on the PR. Fix the ones you would recommend that have one right answer and note what you did; anything that changes behaviour or the ticket's decisions goes through step 4 as a judgement call.
 4. **Review the whole diff** against `origin/main` as a reviewer would, per the `review-diff` skill: fix defects in their own commits, post judgement calls as line comments (answered with fix / skip / ticket), and add a "Found in review" section to the PR description.
 5. Mark the PR **ready for review** (clear its draft status) and wait for the maintainer.
 
 ### Merging
 
-A label-driven loop watches your (`starquake`) PRs and acts on a label:
+A board pass (`work-the-board`) watches your (`starquake`) PRs and acts on a label:
 
 - **`ready to merge`** → rebase onto `main` locally (signed) if behind, then squash-merge once required checks are green.
 - **`changes requested`** → read the PR's review comments, make the fixes, then remove `changes requested` and hand it back for re-review. The maintainer adds this when leaving comments (GitHub won't let them formally request changes on their own PR).
