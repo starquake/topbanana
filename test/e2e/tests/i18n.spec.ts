@@ -77,6 +77,42 @@ test.describe('footer language switcher keeps the player in place', () => {
     await expect(page.getByTestId('lang-nl')).toHaveAttribute('aria-current', 'true');
   });
 
+  test('a player who typed a code on bare /join keeps it', async ({ page, hostSessions, browserName }) => {
+    const quizTitle = `Lang Code ${browserName} ${Date.now()}`;
+    await seedQuiz(await hostSessions.adminHost(), quizTitle);
+    setQuizMode(quizTitle, 'live');
+    const { joinCode } = await hostSessions.hostLive(quizTitle);
+
+    await page.goto('/join');
+    await page.getByTestId('join-code-input').fill(joinCode);
+    await page.getByTestId('join-code-submit').click();
+    await expect(page.getByTestId('join-name-input')).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/join/${joinCode}$`));
+
+    await page.getByTestId('lang-nl').click();
+
+    await expect(page).toHaveURL(new RegExp(`/join/${joinCode}$`));
+    await expect(page.getByTestId('lang-nl')).toHaveAttribute('aria-current', 'true');
+    await expect(page.getByTestId('join-name-input')).toBeVisible();
+  });
+
+  test('a mistyped code on bare /join is dropped from the URL', async ({ page }) => {
+    await page.goto('/join');
+    await page.getByTestId('join-code-input').fill('NOPE');
+    await page.getByTestId('join-code-submit').click();
+    await page.getByTestId('join-name-input').fill(`lang-miss-${Date.now()}`);
+    await page.getByTestId('join-name-submit').click();
+
+    await expect(page.getByTestId('join-code-input')).toHaveValue('NOPE');
+    await expect(page).toHaveURL(/\/join\/$/);
+
+    await page.getByTestId('lang-nl').click();
+
+    await expect(page).toHaveURL(/\/join\/$/);
+    await expect(page.getByTestId('lang-nl')).toHaveAttribute('aria-current', 'true');
+    await expect(page.getByTestId('join-code-input')).toBeVisible();
+  });
+
   test('a player on a solo quiz start screen stays on the quiz', async ({ page, hostSessions, browserName }) => {
     const quizTitle = `Lang Solo ${browserName} ${Date.now()}`;
     await seedQuiz(await hostSessions.adminHost(), quizTitle);
