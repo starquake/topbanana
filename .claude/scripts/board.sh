@@ -62,10 +62,23 @@ item_id() {
   printf '%s' "$id"
 }
 
+current_state() {
+  gh api graphql -f query="{ repository(owner:\"$REPO_OWNER\", name:\"$REPO_NAME\"){
+      issue(number: $1){ projectItems(first:10){ nodes{ project{ id }
+        fieldValueByName(name:\"Status\"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } }" \
+    --jq ".data.repository.issue.projectItems.nodes[] | select(.project.id==\"$PROJECT_ID\") | .fieldValueByName.name // \"(unset)\""
+}
+
 case "${1:-}" in
   state)
     issue="$2"; want="$3"
     opt=$(option_id "$want")
+    # A no-op move makes no transition, so its self-set entry would later
+    # swallow a real maintainer move to the same state.
+    if [ "$(current_state "$issue")" = "$want" ]; then
+      echo "#$issue already $want"
+      exit 0
+    fi
     item=$(item_id "$issue")
     gh api graphql -f query="mutation{updateProjectV2ItemFieldValue(input:{
         projectId:\"$PROJECT_ID\", itemId:\"$item\", fieldId:\"$STATUS_FIELD_ID\",
@@ -75,10 +88,7 @@ case "${1:-}" in
     echo "#$issue -> $want"
     ;;
   get)
-    gh api graphql -f query="{ repository(owner:\"$REPO_OWNER\", name:\"$REPO_NAME\"){
-        issue(number: $2){ projectItems(first:10){ nodes{ project{ id }
-          fieldValueByName(name:\"Status\"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } }" \
-      --jq ".data.repository.issue.projectItems.nodes[] | select(.project.id==\"$PROJECT_ID\") | .fieldValueByName.name // \"(unset)\""
+    current_state "$2"
     ;;
   list)
     # Paged: the board can hold more than one page of 100 items.
