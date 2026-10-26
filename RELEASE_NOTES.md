@@ -16,6 +16,7 @@ This release fixes timing, scoring and reconnect problems in solo and live games
 - An answer that arrives just as a live question closes is either scored or refused, never silently dropped, and a failed score save is retried instead of counting as 0 points.
 - Display names are capped at 50 characters and may not contain invisible or control characters; this applies on every page where a name is set.
 - Escape closes the leave-game dialog.
+- The language switcher returns to the page it was used on, such as a live room or a solo game, instead of the home page.
 - The profile page has a "Sign out other devices" button.
 - Email verification links open a page with a "Confirm email" button instead of verifying on open.
 - Changing a password or email address cancels outstanding reset and email-change links.
