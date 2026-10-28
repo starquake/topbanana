@@ -190,6 +190,25 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## Kenney game sounds — Creative Commons Zero (CC0 1.0)
+
+The game sound effects under `internal/assets/static/audio/sfx/` come from
+Kenney's free audio packs (https://kenney.nl), converted from `.ogg` to mono
+128 kbps `.mp3`:
+
+| File | Kenney pack | Source file |
+|---|---|---|
+| `round-start.mp3` | Music Jingles | `jingles_PIZZI00.ogg` |
+| `question-show.mp3` | Interface Sounds | `maximize_006.ogg` |
+| `answers-show.mp3` | Interface Sounds | `drop_002.ogg` |
+| `answer-reveal.mp3` | Interface Sounds | `confirmation_001.ogg` |
+| `answer-correct.mp3` | Digital Audio | `powerUp2.ogg` |
+| `answer-wrong.mp3` | Digital Audio | `lowDown.ogg` |
+
+Kenney publishes them under CC0 1.0
+(http://creativecommons.org/publicdomain/zero/1.0/), which needs no
+attribution; this entry records where they came from.
+
 ## Inter — SIL Open Font License 1.1 (OFL-1.1)
 
 The Inter typeface (body/sans font) is vendored under
