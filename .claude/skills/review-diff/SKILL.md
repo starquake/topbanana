@@ -20,6 +20,7 @@ Before handing a PR over, read the change back as a reviewer would: the whole br
 - States and inputs: what every key, button or call does in every state of the thing built; what crosses between threads or processes; what a held input does when the screen or state changes under it.
 - Tests that assert the decisions, not the current implementation.
 - Anything the project treats as a contract (compatibility, fidelity, public API) that the change could move.
+- Design notes: a decision the change makes that later work in the package must respect, with no note in that package's `CLAUDE.md`; or a package note the change made stale (CLAUDE.md, "Design notes").
 
 Sort each finding into one of two kinds:
 
