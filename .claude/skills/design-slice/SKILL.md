@@ -93,7 +93,8 @@ it. A plan already in the body is checked against the code rather than
 rewritten. Tasks go in landing order, each one a green commit (`make check`);
 name the test layer for each (unit, integration, e2e — CLAUDE.md, "Testing")
 and any migration. The last task updates `README.md` / `CLAUDE.md` if anything
-they say changed.
+they say changed, and adds or updates the package's `CLAUDE.md` for a decision
+that outlives the ticket (CLAUDE.md, "Design notes").
 
 ## Step 4: STOP
 

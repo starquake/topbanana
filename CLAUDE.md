@@ -149,6 +149,15 @@ Treat cross-file rationale by category:
 
 Run `make lint-cross-refs` periodically to surface candidates. The target is advisory — it greps `internal/` for cross-file keywords and prints hits; treat each as a candidate to rewrite, not a hard CI fail.
 
+## Design notes
+
+A decision that outlives its ticket — a constraint every later change in one package has to respect — goes in a `CLAUDE.md` beside that package, added or updated in the PR that makes the decision. Model: `internal/mediahttp/CLAUDE.md`. Claude Code loads it when it works in that directory, so the rule meets the next change there.
+
+- State the rule and its why, and link the ticket (`#988`) for the story. No history, no plan.
+- Plans, specs and open questions stay on the ticket; plan files go stale once the work ships (see `docs/obsolete/`).
+- A rule for the whole repo goes in this file or `.claude/rules/`, not in a package note.
+- A change that moves the decision updates or deletes the note in the same PR.
+
 ## User-facing copy
 
 Anything a player or quiz host will read — release notes, README, UI strings, error messages — is written in plain, factual language. There is nothing to sell.
