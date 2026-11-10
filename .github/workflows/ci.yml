@@ -126,7 +126,7 @@ jobs:
       run: make test-coverage
 
     - name: Check Test Coverage
-      uses: vladopajic/go-test-coverage@239670d50ed072bfce8b9ab1765227a53429d664 # v2.20.1
+      uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
       with:
         config: .testcoverage.yml
 
@@ -194,7 +194,7 @@ jobs:
           -v "$GITHUB_OUTPUT:/github/output" -e GITHUB_OUTPUT=/github/output \
           -e INPUT_CONFIG -e INPUT_GIT_TOKEN -e INPUT_GIT_BRANCH \
           -e INPUT_GIT_REPOSITORY -e INPUT_GIT_FILE_NAME \
-          ghcr.io/vladopajic/go-test-coverage@sha256:78132035d04eaff1478219b3ce722d7c8d67417306279fe2f334d2a24a09bed9 # v2.20.0
+          ghcr.io/vladopajic/go-test-coverage@sha256:a9483b5d4d898bb607a1501781d95de757c663d44f40cfdcb77fa27c6da43016 # v2.23.0
 
   e2e:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
