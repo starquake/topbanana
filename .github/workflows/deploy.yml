@@ -301,12 +301,8 @@ jobs:
           build-args: |
             COMMIT=${{ github.event.pull_request.head.sha }}
             DATE=${{ github.event.pull_request.updated_at }}
-          # Writes to its own scope: this runs in main's cache context, and an
-          # unreviewed build must not seed layers main's release build reuses.
-          cache-from: |
-            type=gha
-            type=gha,scope=preview
-          cache-to: type=gha,mode=max,scope=preview
+          # No cache-to: a run started from a PR only gets a read-only cache token.
+          cache-from: type=gha
 
       - name: Resolve image digest
         id: digest
