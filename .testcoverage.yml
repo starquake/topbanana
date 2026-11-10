@@ -4,13 +4,14 @@
 # action's threshold-total input defaults to -1 and overrides any value
 # set here, so a threshold in this file has no effect. See #667.
 
-# List of packages to exclude from coverage report
+# Regexps over module-relative file paths; mirrors the -coverpkg filter
+# in the Makefile's test-coverage target.
 exclude:
-  packages:
-    - github.com/starquake/topbanana/internal/dbtest
-    - github.com/starquake/topbanana/internal/testutil
-    - github.com/starquake/topbanana/cmd/seed-dev
-    - github.com/starquake/topbanana/internal/db$
+  paths:
+    - ^internal/dbtest/
+    - ^internal/testutil/
+    - ^cmd/seed-dev/
+    - ^internal/db/[^/]+$
 
 # Path to the coverage profile file
 profile: build/coverage/coverage.out
