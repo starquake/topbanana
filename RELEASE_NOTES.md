@@ -2,7 +2,7 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
-## v2026.10.0 — 2026-10-20
+## v2026.10.0 — 2026-11-11
 
 This release fixes timing, scoring and reconnect problems in solo and live games, and adds access rules and size limits for accounts, quizzes and uploads.
 
@@ -18,6 +18,7 @@ This release fixes timing, scoring and reconnect problems in solo and live games
 - Escape closes the leave-game dialog.
 - The language switcher returns to the page it was used on, such as a live room or a solo game, instead of the home page.
 - The profile page has a "Sign out other devices" button.
+- The game sound effects are replaced with new ones, and the wrong-answer sound is easier to hear on phone speakers.
 - Email verification links open a page with a "Confirm email" button instead of verifying on open.
 - Changing a password or email address cancels outstanding reset and email-change links.
 - Signing in with Google onto an address that had an unverified password account removes that password and marks the address verified.
