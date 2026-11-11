@@ -203,7 +203,7 @@ Kenney's free audio packs (https://kenney.nl), converted from `.ogg` to mono
 | `answers-show.mp3` | Interface Sounds | `drop_002.ogg` |
 | `answer-reveal.mp3` | Interface Sounds | `confirmation_001.ogg` |
 | `answer-correct.mp3` | Digital Audio | `powerUp2.ogg` |
-| `answer-wrong.mp3` | Digital Audio | `phaserDown1.ogg` |
+| `answer-wrong.mp3` | Interface Sounds | `error_003.ogg` |
 
 Kenney publishes them under CC0 1.0
 (http://creativecommons.org/publicdomain/zero/1.0/), which needs no
