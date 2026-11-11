@@ -33,12 +33,12 @@ func footerFragment(t *testing.T, body string) string {
 func bodyBeforeFooter(t *testing.T, body string) string {
 	t.Helper()
 
-	idx := strings.LastIndex(body, "<footer")
-	if idx == -1 {
+	before, _, found := strings.CutLast(body, "<footer")
+	if !found {
 		t.Fatalf("page has no <footer> (body excerpt: %.200q)", body)
 	}
 
-	return body[:idx]
+	return before
 }
 
 // TestClientChrome_HomeAnonymous pins the client footer on the anonymous

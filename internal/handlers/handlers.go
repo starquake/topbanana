@@ -48,12 +48,11 @@ func IDFromString(pathValue string) (int64, error) {
 // It splits on the last "-" and parses the suffix as int64.
 // Returns an error if there is no "-" in the string or the suffix is not a valid int64.
 func IDFromSlugID(s string) (int64, error) {
-	i := strings.LastIndex(s, "-")
-	if i < 0 {
+	_, suffix, found := strings.CutLast(s, "-")
+	if !found {
 		return 0, fmt.Errorf("%w: %q", ErrNoSlugSeparator, s)
 	}
 
-	suffix := s[i+1:]
 	id, err := strconv.ParseInt(suffix, base10, int64Size)
 	if err != nil {
 		return 0, fmt.Errorf("error parsing id from slug %q: %w", s, err)
@@ -65,12 +64,12 @@ func IDFromSlugID(s string) (int64, error) {
 // SlugFromSlugID returns the slug part of a slug-id string such as
 // "my-quiz-123" (here "my-quiz"), or "" when the input contains no "-".
 func SlugFromSlugID(s string) string {
-	i := strings.LastIndex(s, "-")
-	if i < 0 {
+	slug, _, found := strings.CutLast(s, "-")
+	if !found {
 		return ""
 	}
 
-	return s[:i]
+	return slug
 }
 
 // ParseIDFromSlugPath parses an int64 ID from a slug-id path parameter.
