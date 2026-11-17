@@ -1,0 +1,41 @@
+# Top Banana! development (topbanana-development.bananajuice.net), as the user
+# topbanana-development: main's latest build. A deploy:dev pull request takes
+# the slot over with development-preview.container (same unit name, port and
+# user; its own data). As production.container otherwise, which explains each
+# setting. The user's slice is capped on the server (it runs pull requests' code).
+[Unit]
+Description=Top Banana! (development)
+
+[Container]
+ContainerName=topbanana
+Image=@IMAGE@
+EnvironmentFile=%h/.config/topbanana/topbanana.env
+# Not "development": that is local-machine mode, which drops the Secure flag
+# on cookies. "dev" keeps cookies secure and tags page titles [dev].
+Environment=APP_ENV=dev
+Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment="DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+Environment=MEDIA_DIR=/home/nonroot/data/media
+PublishPort=127.0.0.1:8102:8080
+Network=pasta:--host-lo-to-ns-lo
+Environment=TRUSTED_PROXY_IPS=127.0.0.1/32
+UserNS=keep-id:uid=65532,gid=65532
+Volume=%h/data/topbanana:/home/nonroot/data:Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+HealthCmd=["/home/nonroot/server","-healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
+HealthOnFailure=kill
+StopTimeout=20
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

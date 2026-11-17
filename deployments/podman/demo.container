@@ -1,0 +1,49 @@
+# The public demo (demo.topbanana.app), as the user topbanana-demo: releases,
+# with the demo accounts and quizzes. demo-seed.container loads those into an
+# empty ~/data/topbanana: the deploy runs it when there is no database yet, and
+# demo-reset.yml empties the folder and runs it every night. As
+# production.container otherwise, which explains each setting.
+[Unit]
+Description=Top Banana! (demo)
+
+[Container]
+ContainerName=topbanana
+Image=@IMAGE@
+# SESSION_KEY and ADMIN_EMAILS. No GOOGLE_*: the login page has no Google
+# button and visitors use the demo accounts' passwords. No SMTP_*: the mailer
+# is the no-op one.
+EnvironmentFile=%h/.config/topbanana/topbanana.env
+Environment=APP_ENV=production
+Environment=DEMO_MODE_ENABLED=true
+Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment="DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+Environment=MEDIA_DIR=/home/nonroot/data/media
+Environment=BASE_URL=https://demo.topbanana.app
+# Visitors use the demo accounts only.
+Environment=REGISTRATION_ENABLED=false
+# The quiz archives -seed-demo restores (every *.zip), copied by the deploy.
+Environment=DEMO_SEED_ARCHIVE_DIR=/seed
+PublishPort=127.0.0.1:8103:8080
+Network=pasta:--host-lo-to-ns-lo
+Environment=TRUSTED_PROXY_IPS=127.0.0.1/32
+UserNS=keep-id:uid=65532,gid=65532
+Volume=%h/data/topbanana:/home/nonroot/data:Z
+Volume=%h/data/seed:/seed:ro,Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+HealthCmd=["/home/nonroot/server","-healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
+HealthOnFailure=kill
+StopTimeout=20
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
