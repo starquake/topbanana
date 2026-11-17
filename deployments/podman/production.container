@@ -1,0 +1,49 @@
+# Top Banana! production (topbanana.app), a rootless Podman container run by
+# systemd (Quadlet) as the user topbanana-production. deploy.sh installs it as
+# ~/.config/containers/systemd/topbanana.container with Image= pinned to the
+# digest the deploy verified (deployments/README.md).
+[Unit]
+Description=Top Banana! (production)
+
+[Container]
+ContainerName=topbanana
+Image=@IMAGE@
+# Written by the deploy from the GitHub environment's secrets and variables.
+EnvironmentFile=%h/.config/topbanana/topbanana.env
+Environment=APP_ENV=production
+Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment="DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+# Uploaded media live next to the database: the image's own filesystem is
+# thrown away with the container.
+Environment=MEDIA_DIR=/home/nonroot/data/media
+# Caddy on the host proxies the site to this port. With --host-lo-to-ns-lo the
+# app sees Caddy as 127.0.0.1, so the per-IP rate limiters trust only that
+# address's X-Forwarded-For.
+PublishPort=127.0.0.1:8100:8080
+Network=pasta:--host-lo-to-ns-lo
+Environment=TRUSTED_PROXY_IPS=127.0.0.1/32
+# The image runs as nonroot (65532): map it to this user, so the files in
+# ~/data/topbanana stay the user's. :Z gives them a label only this container can use.
+UserNS=keep-id:uid=65532,gid=65532
+Volume=%h/data/topbanana:/home/nonroot/data:Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+# JSON, so it runs without a shell: the image has none.
+HealthCmd=["/home/nonroot/server","-healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
+# An unhealthy container is stopped, and Restart=always starts it again.
+HealthOnFailure=kill
+# Above the app's 10s shutdown bound (HTTP and email drain run concurrently).
+StopTimeout=20
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

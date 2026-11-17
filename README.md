@@ -139,14 +139,22 @@ Outgoing mail (email verification, password reset, invites) is optional. Without
 
 ## Behind a reverse proxy (HTTPS)
 
-To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy. [linuxserver.io's SWAG](https://docs.linuxserver.io/general/swag/) bundles nginx, Let's Encrypt, and fail2ban in one container, so it obtains and renews TLS certificates for you. Point a SWAG `proxy-conf` at the `topbanana` container on port 8080. There is a ready-made one at [`deployments/swag/topbanana.subdomain.conf`](deployments/swag/topbanana.subdomain.conf).
+To serve Top Banana! over HTTPS on your own domain, run it behind a reverse proxy that obtains and renews TLS certificates for you, such as [Caddy](https://caddyserver.com/). Publish the container's port on the loopback address only (`-p 127.0.0.1:8080:8080`), so the app is not reachable over plain HTTP from outside, and proxy your name to it. A complete Caddyfile:
 
-Put the container on a Docker network it shares with the proxy, and drop the `ports:` mapping (or `-p 8080:8080`) from the examples above. The proxy reaches the container over that network. A published port leaves the app reachable over plain HTTP on port 8080, bypassing TLS.
+```caddyfile
+quiz.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
+```
+
+`flush_interval -1` sends live updates (server-sent events) out at once. With a containerised proxy such as [SWAG](https://docs.linuxserver.io/general/swag/), put both containers on a Docker network they share and drop the `ports:` mapping, so the proxy reaches the app over that network. The hosted environments' own setup (rootless Podman behind Caddy) is in [`deployments/README.md`](deployments/README.md).
 
 Two settings pair with a proxy:
 
 - **`BASE_URL`**: set it to your public URL (e.g. `https://quiz.example.com`) so links in outgoing emails resolve.
-- **`TRUSTED_PROXY_IPS`**: set it to the subnet of the Docker network the proxy shares with the container, so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's. Look it up with `docker network inspect <network> --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`. If the proxy is on several networks, use the one it shares with Top Banana!; a subnet from another network silently falls back to bucketing every request on the proxy's address.
+- **`TRUSTED_PROXY_IPS`**: set it to the proxy's address as the app sees it, so the per-IP rate limiters read the real client IP from `X-Forwarded-For` instead of the proxy's. With Docker's port publishing, a proxy on the same host usually arrives from the gateway of the container's Docker network. With rootless Podman's `pasta:--host-lo-to-ns-lo` network it arrives from `127.0.0.1/32`. For a proxy on a shared Docker network, use that network's subnet, which you can look up with `docker network inspect <network> --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`. If the proxy is on several networks, use the one it shares with Top Banana!; a subnet from another network silently falls back to bucketing every request on the proxy's address.
 
 ## Troubleshooting
 

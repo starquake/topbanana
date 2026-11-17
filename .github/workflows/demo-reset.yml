@@ -24,16 +24,22 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # No secret goes along: the settings are the ones the last
+          # deploy-demo installed (~/.config/topbanana/topbanana.env), and the
+          # seed unit and quiz archives (~/data/seed) came with it
+          # (deployments/README.md, "The demo").
           script: |
-            set -euo pipefail
-            cd ~/topbanana-demo
-            # DB and media live on the named volume topbanana_demo_data. Wiping
-            # with -v removes the volume; the one-off seed run recreates it and
-            # populates the demo baseline before the server starts. The deploy
-            # step renames the compose file to docker-compose.yml on the host,
-            # so use the default filename (no -f).
-            # The demo quiz archives are supplied via the bind mount written by
-            # the last deploy-demo run (DEMO_SEED_ARCHIVE_DIR in the compose env).
-            docker compose down -v
-            docker compose run --rm topbanana-demo -seed-demo
-            docker compose up -d
+            set -eu
+            : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+            export XDG_RUNTIME_DIR
+            cd "$HOME"
+            # deploy.sh's lock: a wipe never overlaps a deploy.
+            exec 9> .deploy.lock
+            flock -w 900 9
+            # DB and media live in ~/data/topbanana, the image's user mapped
+            # to this one, so emptying it needs no Podman.
+            systemctl --user stop topbanana.service
+            rm -rf "$HOME/data/topbanana"
+            mkdir "$HOME/data/topbanana"
+            systemctl --user start topbanana-seed.service
+            systemctl --user start topbanana.service

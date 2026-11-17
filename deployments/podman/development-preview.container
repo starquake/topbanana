@@ -1,0 +1,49 @@
+# A deploy:dev pull request's build in the development slot, as the user
+# topbanana-development: installed as topbanana.container in place of
+# development.container until the next main deploy takes the slot back. Its
+# data is ~/data/preview, never main's ~/data/topbanana; deploy.sh empties it
+# when the slot switches to another pull request. As production.container
+# otherwise, which explains each setting.
+[Unit]
+Description=Top Banana! (development, pull request preview)
+
+[Container]
+ContainerName=topbanana
+Image=@IMAGE@
+# SESSION_KEY (derived per pull request, so cookies from main's build or
+# another pull request never validate here) and the bootstrap admin
+# (INITIAL_ADMIN_EMAIL, INITIAL_ADMIN_PASSWORD): there is no mailer, so an
+# account could never confirm its own address. No GOOGLE_* or SMTP_*: code
+# nobody reviewed yet gets neither a Google OAuth client nor a real inbox.
+EnvironmentFile=%h/.config/topbanana/topbanana.env
+# Tags page titles [preview], so a pull request's build is never mistaken for main's.
+Environment=APP_ENV=preview
+Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment="DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+Environment=MEDIA_DIR=/home/nonroot/data/media
+Environment=BASE_URL=https://topbanana-development.bananajuice.net
+# Nobody signs themselves up on unreviewed code; the bootstrap admin is the way in.
+Environment=REGISTRATION_ENABLED=false
+PublishPort=127.0.0.1:8102:8080
+Network=pasta:--host-lo-to-ns-lo
+Environment=TRUSTED_PROXY_IPS=127.0.0.1/32
+UserNS=keep-id:uid=65532,gid=65532
+Volume=%h/data/preview:/home/nonroot/data:Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+HealthCmd=["/home/nonroot/server","-healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
+HealthOnFailure=kill
+StopTimeout=20
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

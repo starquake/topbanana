@@ -25,8 +25,8 @@ Consequences for work in flight: "merged to `main`" means live in **development*
 
 ## PR preview (`deploy:dev`)
 
-Adding the `deploy:dev` label to a same-repo PR builds its head as `pr-<n>` and deploys it into the **development slot** (same container name, `docker-compose.development-preview.yml`); each push to the labeled PR redeploys. The next `main` deploy takes the slot back. A preview runs with `APP_ENV=preview`, registration off, no Google or SMTP credentials, a session key derived per PR, and its own volume (wiped when the slot switches to a different PR); `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` create the admin to log in with.
+Adding the `deploy:dev` label to a same-repo PR builds its head as `pr-<n>` and deploys it into the **development slot** (same user, port and unit name, `deployments/podman/development-preview.container`); each push to the labeled PR redeploys. The next `main` deploy takes the slot back. A preview runs with `APP_ENV=preview`, registration off, no Google or SMTP credentials, a session key derived per PR, and its own data folder, `~/data/preview` (wiped when the slot switches to a different PR); `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` create the admin to log in with.
 
-Every job builds a fresh `.env` from GitHub **secrets** (masked in logs: `SESSION_KEY`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`, ...) and **variables** (unmasked: `BASE_URL`, `REGISTRATION_ENABLED`, `ADMIN_EMAILS`). Both are scoped per-environment — a value set on `staging` is not visible to `production` or `development`.
+Each environment is a user of its own on zoot (`topbanana-<env>`, rootless Podman behind Caddy; `deployments/README.md`). Every job builds a fresh env file from GitHub **secrets** (masked in logs: `SESSION_KEY`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`, ...) and **variables** (unmasked: `BASE_URL`, `REGISTRATION_ENABLED`, `ADMIN_EMAILS`). Both are scoped per-environment — a value set on `staging` is not visible to `production` or `development`.
 
 Deployed environments never run with `APP_ENV=development` — that is local-machine mode (cookies lose the `Secure` flag). The development server uses `APP_ENV=dev`.

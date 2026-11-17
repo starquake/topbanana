@@ -1,0 +1,37 @@
+# Top Banana! staging (topbanana-staging.bananajuice.net), as the user
+# topbanana-staging. Release candidates; otherwise as production.container,
+# which explains each setting.
+[Unit]
+Description=Top Banana! (staging)
+
+[Container]
+ContainerName=topbanana
+Image=@IMAGE@
+EnvironmentFile=%h/.config/topbanana/topbanana.env
+Environment=APP_ENV=staging
+Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment="DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+Environment=MEDIA_DIR=/home/nonroot/data/media
+PublishPort=127.0.0.1:8101:8080
+Network=pasta:--host-lo-to-ns-lo
+Environment=TRUSTED_PROXY_IPS=127.0.0.1/32
+UserNS=keep-id:uid=65532,gid=65532
+Volume=%h/data/topbanana:/home/nonroot/data:Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+HealthCmd=["/home/nonroot/server","-healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
+HealthOnFailure=kill
+StopTimeout=20
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
